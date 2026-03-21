@@ -6,7 +6,7 @@ export type OnlineSearchSource =
   | 'youtube'
   | 'unknown'
 
-export type OnlineSearchScope = 'discogs' | 'online'
+export type OnlineSearchScope = 'discogs' | 'online' | 'youtube'
 
 export type OnlineSearchCandidate = {
   artist?: string
@@ -24,6 +24,9 @@ export type OnlineSearchItem = {
   snippet: string
   displayLink: string
   candidates: OnlineSearchCandidate[]
+  label?: string
+  catno?: string
+  format?: string
 }
 
 export type OnlineSearchResponse = {

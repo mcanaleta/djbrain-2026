@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import type { WantListItem } from '../../../shared/api'
 import { ActionButton, DataTable, Notice, Pill, ViewSection, type DataTableColumn } from '../components/view'
-import { fileBasename } from '../lib/music-file'
 import {
   canResetWantListItem,
   formatWantListError,
@@ -21,19 +20,6 @@ function WantListStatusBadge({ status }: { status: WantListPipelineStatus }): Re
       {WANT_LIST_STATUS_LABEL[status]}
     </Pill>
   )
-}
-
-function WantListItemActivity({ item }: { item: WantListItem }): React.JSX.Element {
-  if (item.pipelineStatus === 'error' && item.pipelineError) {
-    return <span title={item.pipelineError}>{item.pipelineError}</span>
-  }
-  if (item.importedFilename) {
-    return <span title={item.importedFilename}>{fileBasename(item.importedFilename)}</span>
-  }
-  if (item.downloadFilename) {
-    return <span title={item.downloadFilename}>{fileBasename(item.downloadFilename)}</span>
-  }
-  return <span className="text-zinc-600">—</span>
 }
 
 export default function WantlistPage(): React.JSX.Element {
@@ -94,94 +80,62 @@ export default function WantlistPage(): React.JSX.Element {
       {
         key: 'artist',
         header: 'Artist',
-        cellClassName: 'max-w-[150px] truncate font-medium text-zinc-100',
+        cellClassName: 'max-w-[160px] truncate font-medium text-zinc-100',
         render: (item) => item.artist
       },
       {
         key: 'title',
         header: 'Title',
-        cellClassName: 'max-w-[220px] truncate',
+        cellClassName: 'max-w-[240px] truncate',
         render: (item) => item.title || '—'
-      },
-      {
-        key: 'version',
-        header: 'Version',
-        cellClassName: 'max-w-[140px] truncate text-zinc-400',
-        render: (item) => item.version ?? '—'
-      },
-      {
-        key: 'album',
-        header: 'Album',
-        headClassName: 'hidden lg:table-cell',
-        cellClassName: 'hidden max-w-[170px] truncate text-zinc-500 lg:table-cell',
-        render: (item) => item.album ?? '—'
       },
       {
         key: 'length',
         header: 'Len',
-        headClassName: 'hidden md:table-cell',
-        cellClassName: 'hidden whitespace-nowrap text-zinc-500 md:table-cell',
+        cellClassName: 'whitespace-nowrap text-zinc-500',
         render: (item) => item.length ?? '—'
       },
       {
-        key: 'hits',
-        header: 'Hits',
-        cellClassName: 'whitespace-nowrap text-zinc-400',
-        render: (item) => (item.searchResultCount > 0 ? item.searchResultCount : '—')
-      },
-      {
-        key: 'activity',
-        header: 'Activity',
-        headClassName: 'hidden xl:table-cell',
-        cellClassName: 'hidden max-w-[180px] truncate text-[10px] text-zinc-400 xl:table-cell',
-        render: (item) => <WantListItemActivity item={item} />
-      },
-      {
         key: 'actions',
-        header: 'Actions',
-        headClassName: 'text-right',
+        header: '',
         cellClassName: 'w-[1%]',
         render: (item) => {
           const isBusy = isWantListItemBusy(item)
           const canReset = canResetWantListItem(item)
-
           return (
             <div className="flex items-center justify-end gap-1">
-              <ActionButton
-                size="xs"
-                disabled={isBusy}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  void window.api.wantList.search(item.id).then((updated) => {
-                    if (updated) handleUpdated(updated)
-                  })
-                }}
-              >
+              {item.discogsReleaseId != null ? (
+                <Link
+                  to={`/discogs/${item.discogsEntityType ?? 'release'}/${item.discogsReleaseId}`}
+                  onClick={(event) => event.stopPropagation()}
+                  className="rounded border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-400 transition hover:border-amber-700/60 hover:text-amber-200"
+                  title="View on Discogs"
+                >
+                  ↗
+                </Link>
+              ) : null}
+              <ActionButton size="xs" disabled={isBusy} onClick={(event) => {
+                event.stopPropagation()
+                void window.api.wantList.search(item.id).then((updated) => {
+                  if (updated) handleUpdated(updated)
+                })
+              }}>
                 {item.searchResultCount > 0 ? 'Re' : 'Go'}
               </ActionButton>
               {canReset ? (
-                <ActionButton
-                  size="xs"
-                  disabled={isBusy}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    void window.api.wantList.resetPipeline(item.id).then((updated) => {
-                      if (updated) handleUpdated(updated)
-                    })
-                  }}
-                >
+                <ActionButton size="xs" disabled={isBusy} onClick={(event) => {
+                  event.stopPropagation()
+                  void window.api.wantList.resetPipeline(item.id).then((updated) => {
+                    if (updated) handleUpdated(updated)
+                  })
+                }}>
                   ↺
                 </ActionButton>
               ) : null}
-              <ActionButton
-                size="xs"
-                tone="danger"
-                disabled={isBusy}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  handleRemoved(item.id)
-                }}
-              >
+              <ActionButton size="xs" tone="danger" disabled={isBusy} onClick={(event) => {
+                event.stopPropagation()
+                handleRemoved(item.id)
+              }}>
                 ×
               </ActionButton>
             </div>
@@ -216,7 +170,7 @@ export default function WantlistPage(): React.JSX.Element {
           rows={items}
           getRowKey={(item) => String(item.id)}
           onRowClick={(item) => navigate(`/wantlist/${item.id}`)}
-          tableClassName="min-w-[860px]"
+          tableClassName="min-w-[480px]"
         />
       )}
     </div>

@@ -11,6 +11,7 @@ type AppSettings = {
   discogsUserToken: string
   grokApiKey: string
   serperApiKey: string
+  youtubeApiKey: string
 }
 
 type AppPaths = {
@@ -30,7 +31,8 @@ const EMPTY_SETTINGS: AppSettings = {
   slskdApiKey: '',
   discogsUserToken: '',
   grokApiKey: '',
-  serperApiKey: ''
+  serperApiKey: '',
+  youtubeApiKey: ''
 }
 
 type SlskdConnectionTestResult = {
@@ -148,6 +150,7 @@ export default function SettingsPage(): React.JSX.Element {
   const serperDocsURL = 'https://serper.dev/'
   const discogsDocsURL = 'https://www.discogs.com/settings/developers'
   const grokDocsURL = 'https://docs.x.ai'
+  const youtubeDocsURL = 'https://developers.google.com/youtube/v3/getting-started'
 
   const setSnapshot = (snapshot: { settings: AppSettings; appPaths: AppPaths }): void => {
     setSettings(snapshot.settings)
@@ -463,6 +466,42 @@ export default function SettingsPage(): React.JSX.Element {
           <div className="text-xs text-zinc-500">
             Generate the API key in Serper and paste it here. No project ID, location, or engine ID
             is needed.
+          </div>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        title="YouTube Data API"
+        subtitle="Official YouTube Data API v3 key for direct YouTube search."
+      >
+        <div className="mt-4 space-y-3">
+          <LabeledTextInput
+            label="YouTube API Key"
+            type="password"
+            autoComplete="off"
+            value={settings.youtubeApiKey}
+            placeholder="your-youtube-api-key"
+            onChange={(value) => {
+              setSettings((prev) => ({ ...prev, youtubeApiKey: value }))
+            }}
+            onBlur={() => void updateSettings({ youtubeApiKey: settings.youtubeApiKey })}
+          />
+
+          <div className="text-xs text-zinc-500">
+            Enable YouTube Data API v3 in a Google Cloud project, create an API key, and paste it
+            here. This is set up as a separate API path and is not wired into the current search UI
+            yet.
+          </div>
+
+          <div className="flex flex-wrap gap-2 pt-1">
+            <a
+              href={youtubeDocsURL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-9 items-center rounded-md border border-zinc-800 bg-zinc-900/40 px-3 text-sm text-zinc-100 hover:bg-zinc-900/60"
+            >
+              Open YouTube Docs
+            </a>
           </div>
         </div>
       </SettingsSection>

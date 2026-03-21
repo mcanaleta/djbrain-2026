@@ -11,6 +11,7 @@ export type AppSettings = {
   discogsUserToken: string
   grokApiKey: string
   serperApiKey: string
+  youtubeApiKey: string
 }
 
 export type AppPaths = {
@@ -35,7 +36,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   slskdApiKey: '',
   discogsUserToken: '',
   grokApiKey: '',
-  serperApiKey: ''
+  serperApiKey: '',
+  youtubeApiKey: ''
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -116,6 +118,7 @@ function normalizeSettings(value: unknown): AppSettings {
   const discogsUserToken = normalizeString(source.discogsUserToken)
   const grokApiKey = normalizeString(source.grokApiKey)
   const serperApiKey = normalizeString(source.serperApiKey)
+  const youtubeApiKey = normalizeString(source.youtubeApiKey)
   const musicFolderPath = normalizePath(source.musicFolderPath)
   const songsFolderPath =
     normalizeRelativePathToMusic(source.songsFolderPath, musicFolderPath) ?? ''
@@ -128,7 +131,8 @@ function normalizeSettings(value: unknown): AppSettings {
     slskdApiKey,
     discogsUserToken,
     grokApiKey,
-    serperApiKey
+    serperApiKey,
+    youtubeApiKey
   }
 }
 
@@ -159,6 +163,9 @@ function pickKnownSettingsPatch(value: unknown): Partial<AppSettings> {
   }
   if ('serperApiKey' in value) {
     patch.serperApiKey = normalizeString(value.serperApiKey)
+  }
+  if ('youtubeApiKey' in value) {
+    patch.youtubeApiKey = normalizeString(value.youtubeApiKey)
   }
 
   return patch
@@ -209,7 +216,8 @@ export class SettingsStore {
         slskdApiKey: this.settings.slskdApiKey,
         discogsUserToken: this.settings.discogsUserToken,
         grokApiKey: this.settings.grokApiKey,
-        serperApiKey: this.settings.serperApiKey
+        serperApiKey: this.settings.serperApiKey,
+        youtubeApiKey: this.settings.youtubeApiKey
       },
       appPaths: { ...this.appPaths }
     }

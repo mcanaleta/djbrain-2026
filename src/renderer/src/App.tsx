@@ -9,7 +9,10 @@ import AppShell from './layout/AppShell'
 import CollectionPage from './pages/CollectionPage'
 import WantlistPage from './pages/WantlistPage'
 import WantlistItemPage from './pages/WantlistItemPage'
-import DiscogsEntityPage from './pages/DiscogsEntityPage'
+import DiscogsReleasePage from './pages/DiscogsReleasePage'
+import DiscogsMasterPage from './pages/DiscogsMasterPage'
+import DiscogsArtistPage from './pages/DiscogsArtistPage'
+import DiscogsLabelPage from './pages/DiscogsLabelPage'
 import DropboxPage from './pages/DropboxPage'
 import GrokSearchPage from './pages/GrokSearchPage'
 import ImportPage from './pages/ImportPage'
@@ -25,11 +28,11 @@ const router = createBrowserRouter(
       <Route path="/collection" element={<CollectionPage />} />
       <Route path="/wantlist" element={<WantlistPage />} />
       <Route path="/wantlist/:wantId" element={<WantlistItemPage />} />
-      <Route path="/discogs/release/:discogsId" element={<DiscogsEntityPage entityType="release" />} />
-      <Route path="/discogs/artist/:discogsId" element={<DiscogsEntityPage entityType="artist" />} />
-      <Route path="/discogs/label/:discogsId" element={<DiscogsEntityPage entityType="label" />} />
-      <Route path="/discogs/master/:discogsId" element={<DiscogsEntityPage entityType="master" />} />
-      <Route path="/search-online" element={<SearchOnlinePage />} />
+      <Route path="/discogs/release/:discogsId" element={<DiscogsReleasePage />} />
+      <Route path="/discogs/artist/:discogsId" element={<DiscogsArtistPage />} />
+      <Route path="/discogs/label/:discogsId" element={<DiscogsLabelPage />} />
+      <Route path="/discogs/master/:discogsId" element={<DiscogsMasterPage />} />
+      <Route path="/discogs-search" element={<SearchOnlinePage />} />
       <Route path="/grok-search" element={<GrokSearchPage />} />
       <Route path="/soulseek" element={<SoulseekPage />} />
       <Route path="/spotify" element={<SpotifyPage />} />

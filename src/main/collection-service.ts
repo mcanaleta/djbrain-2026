@@ -42,7 +42,8 @@ const EMPTY_SETTINGS: AppSettings = {
   slskdApiKey: '',
   discogsUserToken: '',
   grokApiKey: '',
-  serperApiKey: ''
+  serperApiKey: '',
+  youtubeApiKey: ''
 }
 
 export type CollectionItem = {
@@ -62,6 +63,7 @@ export type WantListItem = {
   title: string
   version: string | null
   length: string | null
+  year: string | null
   album: string | null
   label: string | null
   addedAt: string
@@ -74,6 +76,7 @@ export type WantListItem = {
   pipelineError: string | null
   discogsReleaseId: number | null
   discogsTrackPosition: string | null
+  discogsEntityType: string | null
   importedFilename: string | null
 }
 
@@ -82,8 +85,12 @@ export type WantListAddInput = {
   title: string
   version?: string | null
   length?: string | null
+  year?: string | null
   album?: string | null
   label?: string | null
+  discogsReleaseId?: number | null
+  discogsTrackPosition?: string | null
+  discogsEntityType?: string | null
 }
 
 export type WantListPipelinePatch = {
@@ -238,7 +245,8 @@ export class CollectionService {
       slskdApiKey: settings.slskdApiKey,
       discogsUserToken: settings.discogsUserToken,
       grokApiKey: settings.grokApiKey,
-      serperApiKey: settings.serperApiKey
+      serperApiKey: settings.serperApiKey,
+      youtubeApiKey: settings.youtubeApiKey
     }
     await this.restartWatchers()
   }
@@ -410,6 +418,8 @@ export class CollectionService {
       ['pipeline_error', 'TEXT'],
       ['discogs_release_id', 'INTEGER'],
       ['discogs_track_position', 'TEXT'],
+      ['discogs_entity_type', 'TEXT'],
+      ['year', 'TEXT'],
       ['imported_filename', 'TEXT']
     ]
     for (const [col, def] of pipelineCols) {
@@ -863,6 +873,7 @@ export class CollectionService {
       title: row['title'] as string,
       version: (row['version'] as string | null) ?? null,
       length: (row['length'] as string | null) ?? null,
+      year: (row['year'] as string | null) ?? null,
       album: (row['album'] as string | null) ?? null,
       label: (row['label'] as string | null) ?? null,
       addedAt: row['added_at'] as string,
@@ -876,23 +887,24 @@ export class CollectionService {
       discogsReleaseId:
         row['discogs_release_id'] != null ? toNumber(row['discogs_release_id']) : null,
       discogsTrackPosition: (row['discogs_track_position'] as string | null) ?? null,
+      discogsEntityType: (row['discogs_entity_type'] as string | null) ?? null,
       importedFilename: (row['imported_filename'] as string | null) ?? null
     }
   }
 
   private readonly WANT_LIST_COLUMNS = `
-    id, artist, title, version, length, album, label, added_at,
+    id, artist, title, version, length, year, album, label, added_at,
     pipeline_status, search_id, search_result_count, best_candidates_json,
     download_username, download_filename, pipeline_error,
-    discogs_release_id, discogs_track_position, imported_filename
+    discogs_release_id, discogs_track_position, discogs_entity_type, imported_filename
   `
 
   public wantListAdd(input: WantListAddInput): WantListItem {
     const normalized = normalizeWantListInput(input)
     const row = this.db
       .prepare(
-        `INSERT INTO want_list (artist, title, version, length, album, label)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO want_list (artist, title, version, length, year, album, label, discogs_release_id, discogs_track_position, discogs_entity_type)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          RETURNING ${this.WANT_LIST_COLUMNS}`
       )
       .get(
@@ -900,8 +912,12 @@ export class CollectionService {
         normalized.title,
         normalized.version ?? null,
         normalized.length ?? null,
+        input.year ?? null,
         normalized.album ?? null,
-        normalized.label ?? null
+        normalized.label ?? null,
+        input.discogsReleaseId ?? null,
+        input.discogsTrackPosition ?? null,
+        input.discogsEntityType ?? null
       ) as Record<string, unknown>
     return this.rowToWantListItem(row)
   }
@@ -918,7 +934,7 @@ export class CollectionService {
     const row = this.db
       .prepare(
         `UPDATE want_list
-         SET artist = ?, title = ?, version = ?, length = ?, album = ?, label = ?
+         SET artist = ?, title = ?, version = ?, length = ?, year = ?, album = ?, label = ?
          WHERE id = ?
          RETURNING ${this.WANT_LIST_COLUMNS}`
       )
@@ -927,6 +943,7 @@ export class CollectionService {
         normalized.title,
         normalized.version ?? null,
         normalized.length ?? null,
+        input.year ?? null,
         normalized.album ?? null,
         normalized.label ?? null,
         id

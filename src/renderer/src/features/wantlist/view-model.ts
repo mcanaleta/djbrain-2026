@@ -11,6 +11,7 @@ export type WantListEditState = {
   title: string
   version: string
   length: string
+  year: string
   album: string
   label: string
 }
@@ -64,6 +65,7 @@ export function toWantListEditState(item: WantListItem): WantListEditState {
     title: item.title,
     version: item.version ?? '',
     length: item.length ?? '',
+    year: item.year ?? '',
     album: item.album ?? '',
     label: item.label ?? ''
   }
@@ -75,6 +77,7 @@ export function toWantListAddInput(state: WantListEditState): WantListAddInput {
     title: state.title,
     version: state.version.trim() || null,
     length: state.length.trim() || null,
+    year: state.year.trim() || null,
     album: state.album.trim() || null,
     label: state.label.trim() || null
   }

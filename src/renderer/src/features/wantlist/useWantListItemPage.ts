@@ -139,7 +139,7 @@ export function useWantListItemPage(wantId: string | undefined) {
     setSectionErrors((current) => ({ ...current, youtube: null }))
 
     try {
-      const response = await window.api.onlineSearch.search(effectiveQuery, 'online')
+      const response = await window.api.youtube.search(effectiveQuery)
       if (youtubeRequestRef.current !== requestId) {
         return
       }

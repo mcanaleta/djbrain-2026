@@ -1,4 +1,4 @@
-import type { DiscogsEntityDetail, DiscogsEntityType } from './discogs'
+import type { DiscogsArtist, DiscogsLabel, DiscogsMaster, DiscogsRelease } from './discogs'
 import type { GrokSearchResponse } from './grok-search'
 import type { OnlineSearchResponse, OnlineSearchScope } from './online-search'
 
@@ -11,6 +11,7 @@ export type AppSettings = {
   discogsUserToken: string
   grokApiKey: string
   serperApiKey: string
+  youtubeApiKey: string
 }
 
 export type AppPaths = {
@@ -73,6 +74,7 @@ export type WantListItem = {
   title: string
   version: string | null
   length: string | null
+  year: string | null
   album: string | null
   label: string | null
   addedAt: string
@@ -85,6 +87,7 @@ export type WantListItem = {
   pipelineError: string | null
   discogsReleaseId: number | null
   discogsTrackPosition: string | null
+  discogsEntityType: string | null
   importedFilename: string | null
 }
 
@@ -93,8 +96,12 @@ export type WantListAddInput = {
   title: string
   version?: string | null
   length?: string | null
+  year?: string | null
   album?: string | null
   label?: string | null
+  discogsReleaseId?: number | null
+  discogsTrackPosition?: string | null
+  discogsEntityType?: string | null
 }
 
 export type SlskdCandidate = {
@@ -153,10 +160,18 @@ export type DJBrainApi = {
   }
   onlineSearch: {
     search: (query: string, scope?: OnlineSearchScope) => Promise<OnlineSearchResponse>
-    getDiscogsEntity: (
-      type: DiscogsEntityType,
-      id: number | string
-    ) => Promise<DiscogsEntityDetail>
+    getDiscogsEntity: {
+      (type: 'release', id: number | string): Promise<DiscogsRelease>
+      (type: 'artist', id: number | string): Promise<DiscogsArtist>
+      (type: 'label', id: number | string): Promise<DiscogsLabel>
+      (type: 'master', id: number | string): Promise<DiscogsMaster>
+    }
+  }
+  youtube: {
+    search: (query: string) => Promise<OnlineSearchResponse>
+  }
+  youtubeApi: {
+    search: (query: string) => Promise<OnlineSearchResponse>
   }
   grokSearch: {
     search: (query: string) => Promise<GrokSearchResponse>

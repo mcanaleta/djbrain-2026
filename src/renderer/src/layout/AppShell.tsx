@@ -4,6 +4,7 @@ import NowPlayingBar from '../components/NowPlayingBar'
 import Sidebar from '../components/Sidebar'
 import TopBar from '../components/TopBar'
 import { PlayerProvider } from '../context/PlayerContext'
+import { FloatingYoutubePlayer, YoutubePlayerProvider } from '../context/YoutubePlayerContext'
 
 export type SearchScope = 'collection' | 'discogs' | 'online'
 
@@ -39,25 +40,28 @@ export default function AppShell(): React.JSX.Element {
       return
     }
 
-    navigate('/search-online')
+    navigate('/discogs-search')
   }
 
   return (
     <PlayerProvider>
-      <div className="flex h-full w-full bg-zinc-950">
-        <Sidebar />
-        <div className="flex min-w-0 flex-1 flex-col">
-          <TopBar
-            searchQuery={searchQuery}
-            onSearchQueryChange={setSearchQuery}
-            onSearchSubmit={handleSearchSubmit}
-          />
-          <main className="min-h-0 flex-1 overflow-auto p-6">
-            <Outlet context={{ submittedSearch }} />
-          </main>
-          <NowPlayingBar />
+      <YoutubePlayerProvider>
+        <div className="flex h-full w-full bg-zinc-950">
+          <Sidebar />
+          <div className="flex min-w-0 flex-1 flex-col">
+            <TopBar
+              searchQuery={searchQuery}
+              onSearchQueryChange={setSearchQuery}
+              onSearchSubmit={handleSearchSubmit}
+            />
+            <main className="min-h-0 flex-1 overflow-auto p-6">
+              <Outlet context={{ submittedSearch }} />
+            </main>
+            <NowPlayingBar />
+          </div>
         </div>
-      </div>
+        <FloatingYoutubePlayer />
+      </YoutubePlayerProvider>
     </PlayerProvider>
   )
 }

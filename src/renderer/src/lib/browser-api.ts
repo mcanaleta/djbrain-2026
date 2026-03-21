@@ -210,6 +210,12 @@ const browserApi: DJBrainApi = {
     getDiscogsEntity: (type: DiscogsEntityType, id: number | string) =>
       request(`/api/discogs/${type}/${id}`)
   },
+  youtube: {
+    search: (query: string) => request(`/api/youtube-search?query=${encodeURIComponent(query)}`)
+  },
+  youtubeApi: {
+    search: (query: string) => request(`/api/youtube-api/search?query=${encodeURIComponent(query)}`)
+  },
   grokSearch: {
     search: (query: string) => request(`/api/grok-search?query=${encodeURIComponent(query)}`)
   },

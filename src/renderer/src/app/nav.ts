@@ -21,9 +21,9 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'collection', label: 'Collection', path: '/collection', icon: RowsIcon },
   { key: 'wantlist', label: 'Want List', path: '/wantlist', icon: BookmarkIcon },
   {
-    key: 'search-online',
-    label: 'Search Online',
-    path: '/search-online',
+    key: 'discogs-search',
+    label: 'Discogs',
+    path: '/discogs-search',
     icon: MagnifyingGlassIcon
   },
   {

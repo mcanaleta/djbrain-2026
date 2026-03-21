@@ -6,12 +6,13 @@ import type {
   OnlineSearchSource
 } from '../shared/online-search'
 import type {
-  DiscogsEntityDetail,
+  DiscogsArtist,
   DiscogsEntityReference,
   DiscogsEntityType,
-  DiscogsFact,
+  DiscogsLabel,
+  DiscogsMaster,
+  DiscogsRelease,
   DiscogsTrack,
-  DiscogsRelatedSection,
   DiscogsVideo
 } from '../shared/discogs'
 import type { AppSettings } from './settings-store'
@@ -416,12 +417,21 @@ function ensureDiscogsConfigured(settings: AppSettings): string {
 }
 
 function normalizeScope(value: unknown): OnlineSearchScope {
-  return value === 'discogs' ? 'discogs' : 'online'
+  if (value === 'discogs') {
+    return 'discogs'
+  }
+  if (value === 'youtube') {
+    return 'youtube'
+  }
+  return 'online'
 }
 
 function buildSerperQuery(query: string, scope: OnlineSearchScope): string {
   if (scope === 'discogs') {
     return `site:discogs.com ${query}`
+  }
+  if (scope === 'youtube') {
+    return `site:youtube.com OR site:youtu.be ${query}`
   }
   return query
 }
@@ -528,21 +538,6 @@ function normalizeDiscogsEntityType(value: unknown): DiscogsEntityType | null {
   return route === 'master' ? 'master' : (route as DiscogsEntityType)
 }
 
-function createFact(label: string, value: string | undefined): DiscogsFact | null {
-  return value ? { label, value } : null
-}
-
-function compactFacts(facts: Array<DiscogsFact | null>): DiscogsFact[] {
-  return facts.filter((fact): fact is DiscogsFact => fact !== null)
-}
-
-function createRelatedSection(
-  title: string,
-  items: DiscogsEntityReference[]
-): DiscogsRelatedSection | null {
-  return items.length > 0 ? { title, items } : null
-}
-
 function createReference(
   idValue: unknown,
   nameValue: unknown,
@@ -638,9 +633,6 @@ function buildDiscogsExternalUrl(type: DiscogsEntityType, id: number): string {
   return `${DISCOGS_WEB_BASE_URL}/${DISCOGS_ROUTE_BY_TYPE[type]}/${id}`
 }
 
-function normalizeDiscogsUrls(value: unknown): string[] {
-  return normalizeStringArray(value)
-}
 
 function normalizeReleaseFormats(value: unknown): string[] {
   if (!Array.isArray(value)) {
@@ -719,143 +711,87 @@ function normalizeVideos(value: unknown): DiscogsVideo[] {
     const uri = normalizeOptionalText(item.uri)
     const title = normalizeOptionalText(item.title) ?? ''
     if (uri && /youtube\.com|youtu\.be/i.test(uri)) {
-      acc.push({ uri, title })
+      const duration = typeof item.duration === 'number' && item.duration > 0 ? item.duration : undefined
+      acc.push({ uri, title, duration })
     }
     return acc
   }, [])
 }
 
-function parseReleaseDetail(payload: JsonObject, id: number): DiscogsEntityDetail {
+function parseReleaseDetail(payload: JsonObject, id: number): DiscogsRelease {
   const artists = normalizeReferences(payload.artists, 'artist')
   const labels = normalizeReferences(payload.labels, 'label')
-  const year = normalizeDiscogsYear(payload.year)
-  const country = normalizeOptionalText(payload.country)
-  const formats = normalizeReleaseFormats(payload.formats)
-  const catalogNumbers = normalizeCatalogNumbers(payload.labels)
-
   return {
     id,
     type: 'release',
     title: normalizeOptionalText(payload.title) ?? `Release ${id}`,
-    subtitle: artists.map((artist) => artist.name).join(', ') || undefined,
-    summary: undefined,
-    notes: normalizeOptionalText(payload.notes),
-    externalUrl: normalizeOptionalText(payload.uri) ?? buildDiscogsExternalUrl('release', id),
-    heroImageUrl: normalizeImageUrl(payload.images),
-    year,
-    country,
+    artists: artists.map((a) => a.name),
+    year: normalizeDiscogsYear(payload.year),
+    country: normalizeOptionalText(payload.country),
+    labels: labels.map((l) => l.name),
+    catalogNumbers: normalizeCatalogNumbers(payload.labels),
+    formats: normalizeReleaseFormats(payload.formats),
     genres: normalizeStringArray(payload.genres),
     styles: normalizeStringArray(payload.styles),
-    urls: normalizeDiscogsUrls(payload.urls),
-    facts: compactFacts([
-      createFact('Year', year),
-      createFact('Country', country),
-      createFact('Formats', formats.join(', ')),
-      createFact('Labels', labels.map((label) => label.name).join(', ')),
-      createFact('Catalog No', catalogNumbers.join(', '))
-    ]),
-    relatedSections: [
-      createRelatedSection('Artists', artists),
-      createRelatedSection('Labels', labels)
-    ].filter((section): section is DiscogsRelatedSection => section !== null),
+    externalUrl: normalizeOptionalText(payload.uri) ?? buildDiscogsExternalUrl('release', id),
+    heroImageUrl: normalizeImageUrl(payload.images),
     tracklist: normalizeTracklist(payload.tracklist),
-    videos: normalizeVideos(payload.videos)
+    videos: normalizeVideos(payload.videos),
+    relatedArtists: artists,
+    relatedLabels: labels
   }
 }
 
-function parseArtistDetail(payload: JsonObject, id: number): DiscogsEntityDetail {
-  const aliases = normalizeReferences(payload.aliases, 'artist')
-  const groups = normalizeReferences(payload.groups, 'artist')
-  const members = normalizeReferences(payload.members, 'artist')
-  const realName = normalizeOptionalText(payload.realname)
-  const nameVariations = normalizeStringArray(payload.namevariations)
-
+function parseArtistDetail(payload: JsonObject, id: number): DiscogsArtist {
   return {
     id,
     type: 'artist',
-    title: normalizeOptionalText(payload.name) ?? `Artist ${id}`,
-    subtitle: realName ? `Real name: ${realName}` : undefined,
-    summary: normalizeOptionalText(payload.profile),
-    notes: undefined,
+    name: normalizeOptionalText(payload.name) ?? `Artist ${id}`,
+    realName: normalizeOptionalText(payload.realname),
+    nameVariations: normalizeStringArray(payload.namevariations),
+    profile: normalizeOptionalText(payload.profile),
     externalUrl: normalizeOptionalText(payload.uri) ?? buildDiscogsExternalUrl('artist', id),
     heroImageUrl: normalizeImageUrl(payload.images),
-    year: undefined,
-    country: undefined,
-    genres: [],
-    styles: [],
-    urls: normalizeDiscogsUrls(payload.urls),
-    facts: compactFacts([
-      createFact('Real Name', realName),
-      createFact('Name Variations', nameVariations.join(', '))
-    ]),
-    relatedSections: [
-      createRelatedSection('Aliases', aliases),
-      createRelatedSection('Members', members),
-      createRelatedSection('Groups', groups)
-    ].filter((section): section is DiscogsRelatedSection => section !== null),
-    tracklist: [],
-    videos: []
+    aliases: normalizeReferences(payload.aliases, 'artist'),
+    members: normalizeReferences(payload.members, 'artist'),
+    groups: normalizeReferences(payload.groups, 'artist')
   }
 }
 
-function parseLabelDetail(payload: JsonObject, id: number): DiscogsEntityDetail {
+function parseLabelDetail(payload: JsonObject, id: number): DiscogsLabel {
   const parentLabel = createReferenceFromRecord(payload.parent_label, 'label')
-  const sublabels = normalizeReferences(payload.sublabels, 'label')
-  const contactInfo = normalizeOptionalText(payload.contact_info)
-
   return {
     id,
     type: 'label',
-    title: normalizeOptionalText(payload.name) ?? `Label ${id}`,
-    subtitle: undefined,
-    summary: normalizeOptionalText(payload.profile),
-    notes: contactInfo,
+    name: normalizeOptionalText(payload.name) ?? `Label ${id}`,
+    profile: normalizeOptionalText(payload.profile),
+    contactInfo: normalizeOptionalText(payload.contact_info),
     externalUrl: normalizeOptionalText(payload.uri) ?? buildDiscogsExternalUrl('label', id),
     heroImageUrl: normalizeImageUrl(payload.images),
-    year: undefined,
-    country: undefined,
-    genres: [],
-    styles: [],
-    urls: normalizeDiscogsUrls(payload.urls),
-    facts: compactFacts([createFact('Contact', contactInfo)]),
-    relatedSections: [
-      createRelatedSection('Parent Label', parentLabel ? [parentLabel] : []),
-      createRelatedSection('Sublabels', sublabels)
-    ].filter((section): section is DiscogsRelatedSection => section !== null),
-    tracklist: [],
-    videos: []
+    parentLabel: parentLabel ?? undefined,
+    sublabels: normalizeReferences(payload.sublabels, 'label')
   }
 }
 
-function parseMasterDetail(payload: JsonObject, id: number): DiscogsEntityDetail {
+function parseMasterDetail(payload: JsonObject, id: number): DiscogsMaster {
   const artists = normalizeReferences(payload.artists, 'artist')
-  const year = normalizeDiscogsYear(payload.year)
   const mainReleaseId = normalizePositiveInteger(payload.main_release)
-  const mainRelease = mainReleaseId
-    ? [{ id: mainReleaseId, type: 'release' as const, name: `Release ${mainReleaseId}` }]
-    : []
-
   return {
     id,
     type: 'master',
     title: normalizeOptionalText(payload.title) ?? `Master Release ${id}`,
-    subtitle: artists.map((artist) => artist.name).join(', ') || undefined,
-    summary: undefined,
-    notes: undefined,
-    externalUrl: normalizeOptionalText(payload.uri) ?? buildDiscogsExternalUrl('master', id),
-    heroImageUrl: normalizeImageUrl(payload.images),
-    year,
-    country: undefined,
+    artists: artists.map((a) => a.name),
+    year: normalizeDiscogsYear(payload.year),
     genres: normalizeStringArray(payload.genres),
     styles: normalizeStringArray(payload.styles),
-    urls: [],
-    facts: compactFacts([createFact('Year', year)]),
-    relatedSections: [
-      createRelatedSection('Artists', artists),
-      createRelatedSection('Main Release', mainRelease)
-    ].filter((section): section is DiscogsRelatedSection => section !== null),
+    externalUrl: normalizeOptionalText(payload.uri) ?? buildDiscogsExternalUrl('master', id),
+    heroImageUrl: normalizeImageUrl(payload.images),
     tracklist: normalizeTracklist(payload.tracklist),
-    videos: normalizeVideos(payload.videos)
+    videos: normalizeVideos(payload.videos),
+    relatedArtists: artists,
+    mainRelease: mainReleaseId
+      ? { id: mainReleaseId, type: 'release', name: `Release ${mainReleaseId}` }
+      : undefined
   }
 }
 
@@ -980,6 +916,7 @@ export class OnlineSearchService {
           )
             .map((result) => this.toOnlineSearchItem(result))
             .filter((item): item is OnlineSearchItem => item !== null)
+            .filter((item) => (scope === 'youtube' ? item.source === 'youtube' : true))
 
     const sourceCounts = items.reduce<Partial<Record<OnlineSearchSource, number>>>(
       (counts, item) => {
@@ -1008,7 +945,7 @@ export class OnlineSearchService {
     settings: AppSettings,
     typeValue: unknown,
     idValue: unknown
-  ): Promise<DiscogsEntityDetail> {
+  ): Promise<DiscogsRelease | DiscogsArtist | DiscogsLabel | DiscogsMaster> {
     const type = normalizeDiscogsEntityType(typeValue)
     if (!type) {
       throw new Error('Discogs entity type is invalid.')
@@ -1077,7 +1014,10 @@ export class OnlineSearchService {
       link,
       snippet: buildDiscogsSnippet(result),
       displayLink: deriveDisplayLink(link),
-      candidates: buildDiscogsCandidates(result)
+      candidates: buildDiscogsCandidates(result),
+      label: normalizeDiscogsArray(result.label)[0],
+      catno: typeof result.catno === 'string' && result.catno.trim() ? normalizeText(result.catno) : undefined,
+      format: normalizeDiscogsArray(result.format)[0]
     }
   }
 }

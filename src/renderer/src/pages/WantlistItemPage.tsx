@@ -7,7 +7,6 @@ import {
   DataTable,
   EmptyState,
   IconButton,
-  ItemRow,
   LabeledInput,
   Notice,
   Pill,
@@ -68,63 +67,40 @@ function LocalResultRow({
   const isCurrent = player.track?.filename === item.filename
 
   return (
-    <ItemRow
-      title={`${summary.artist} - ${summary.title}`}
-      subtitle={
-        <div className="flex flex-wrap gap-x-2 gap-y-0.5">
-          <span>{formatFileSize(item.filesize)}</span>
-          <span>{formatCompactDuration(item.duration)}</span>
-          <span className="truncate">{item.filename}</span>
-        </div>
-      }
-      detail={
-        item.source === 'download' && importedFilename === item.filename
-          ? 'Already imported from this file.'
-          : undefined
-      }
-      prefix={
-        <ActionButton
-          type="button"
-          size="xs"
-          onClick={() => {
-            if (isCurrent) {
-              player.toggle()
-              return
-            }
-            player.play({
-              url: localFileUrl('', item.filename),
-              filename: item.filename,
-              title: summary.title,
-              artist: summary.artist
-            })
-          }}
-        >
-          {isCurrent && player.isPlaying ? 'Pause' : 'Play'}
-        </ActionButton>
-      }
-      badges={<Pill>{item.source === 'download' ? 'Download' : 'Song'}</Pill>}
-      actions={
-        <>
+    <tr className="border-t border-zinc-800 text-[11px] text-zinc-200">
+      <td className="px-2 py-1.5 whitespace-nowrap">
+        <Pill tone={item.source === 'download' ? 'muted' : 'default'}>
+          {item.source === 'download' ? 'Download' : 'Song'}
+        </Pill>
+      </td>
+      <td className="px-2 py-1.5 max-w-[260px] truncate font-medium" title={item.filename}>
+        {summary.artist} – {summary.title}
+      </td>
+      <td className="px-2 py-1.5 whitespace-nowrap text-zinc-500">{formatCompactDuration(item.duration)}</td>
+      <td className="px-2 py-1.5 whitespace-nowrap text-zinc-500">{formatFileSize(item.filesize)}</td>
+      <td className="px-2 py-1.5 w-[1%]">
+        <div className="flex items-center gap-1">
+          <ActionButton type="button" size="xs" onClick={() => {
+            if (isCurrent) { player.toggle(); return }
+            player.play({ url: localFileUrl('', item.filename), filename: item.filename, title: summary.title, artist: summary.artist })
+          }}>
+            {isCurrent && player.isPlaying ? 'Pause' : 'Play'}
+          </ActionButton>
           {item.source === 'download' ? (
-            <ActionButton
-              type="button"
-              size="xs"
-              tone="success"
+            <ActionButton type="button" size="xs" tone="success"
               disabled={busyAction === `import:${item.filename}`}
-              onClick={() => onImport(item.filename)}
-            >
+              onClick={() => onImport(item.filename)}>
               {busyAction === `import:${item.filename}` ? 'Importing…' : 'Import'}
             </ActionButton>
           ) : null}
-          <ActionButton type="button" size="xs" onClick={() => onShowInFinder(item.filename)}>
-            Reveal
-          </ActionButton>
-          <ActionButton type="button" size="xs" onClick={() => onOpenInPlayer(item.filename)}>
-            Open
-          </ActionButton>
-        </>
-      }
-    />
+          {importedFilename === item.filename ? (
+            <span className="text-[10px] text-emerald-500">Imported</span>
+          ) : null}
+          <ActionButton type="button" size="xs" onClick={() => onShowInFinder(item.filename)}>Reveal</ActionButton>
+          <ActionButton type="button" size="xs" onClick={() => onOpenInPlayer(item.filename)}>Open</ActionButton>
+        </div>
+      </td>
+    </tr>
   )
 }
 
@@ -182,6 +158,7 @@ export default function WantlistItemPage(): React.JSX.Element {
     { key: 'title', label: 'Title' },
     { key: 'version', label: 'Version' },
     { key: 'length', label: 'Length' },
+    { key: 'year', label: 'Year' },
     { key: 'album', label: 'Album' },
     { key: 'label', label: 'Label' }
   ]
@@ -335,6 +312,14 @@ export default function WantlistItemPage(): React.JSX.Element {
             {item.artist} / {item.title}
           </h1>
           <WantListStatusBadge status={item.pipelineStatus} />
+          {item.discogsReleaseId != null ? (
+            <Link
+              to={`/discogs/${item.discogsEntityType ?? 'release'}/${item.discogsReleaseId}`}
+              className="text-xs text-zinc-500 hover:text-zinc-200"
+            >
+              ↗ Discogs {item.discogsTrackPosition ? `(${item.discogsTrackPosition})` : ''}
+            </Link>
+          ) : null}
         </div>
       </div>
 
@@ -379,27 +364,38 @@ export default function WantlistItemPage(): React.JSX.Element {
 
         {sectionErrors.collection ? <Notice tone="error" className="mt-3">{sectionErrors.collection}</Notice> : null}
 
-        <div className="mt-3 space-y-2">
+        <div className="mt-3">
           {collectionResults.length === 0 ? (
             <EmptyState
-              message={
-                isLoadingCollection
-                  ? 'Searching collection…'
-                  : 'No songs or downloads found.'
-              }
+              message={isLoadingCollection ? 'Searching collection…' : 'No songs or downloads found.'}
             />
           ) : (
-            collectionResults.map((result) => (
-              <LocalResultRow
-                key={`${result.source}:${result.filename}`}
-                item={result}
-                importedFilename={item.importedFilename}
-                busyAction={busyAction}
-                onImport={(filename) => void actions.importFile(filename)}
-                onShowInFinder={actions.showInFinder}
-                onOpenInPlayer={actions.openInPlayer}
-              />
-            ))
+            <div className="overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-900/30">
+              <table className="w-full border-collapse text-left">
+                <thead>
+                  <tr className="bg-zinc-950/50 text-[10px] uppercase tracking-wide text-zinc-500">
+                    <th className="px-2 py-1.5 font-medium">Source</th>
+                    <th className="px-2 py-1.5 font-medium">File</th>
+                    <th className="px-2 py-1.5 font-medium">Dur</th>
+                    <th className="px-2 py-1.5 font-medium">Size</th>
+                    <th className="px-2 py-1.5 font-medium"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {collectionResults.map((result) => (
+                    <LocalResultRow
+                      key={`${result.source}:${result.filename}`}
+                      item={result}
+                      importedFilename={item.importedFilename}
+                      busyAction={busyAction}
+                      onImport={(filename) => void actions.importFile(filename)}
+                      onShowInFinder={actions.showInFinder}
+                      onOpenInPlayer={actions.openInPlayer}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       </ViewSection>

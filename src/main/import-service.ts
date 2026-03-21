@@ -220,6 +220,66 @@ export class ImportService {
   }
 
   /**
+   * Import a file when the track metadata is already known (e.g. from the want list).
+   * Skips Discogs lookup entirely and uses the provided match directly.
+   */
+  async importFileWithKnownMatch(
+    settings: AppSettings,
+    match: DiscogsTrackMatch,
+    localFilePath: string,
+    bitrateHintKbps: number | null = null
+  ): Promise<ImportResult> {
+    if (!(await fileExists(localFilePath))) {
+      return { status: 'error', message: `File not found: ${localFilePath}` }
+    }
+
+    console.log('[import] importing with known match:', match.artist, '-', match.title, match.version ?? '')
+
+    const year = match.year ?? 'unknown'
+    const ext = extname(localFilePath).toLowerCase()
+    const destFilename = buildDestFilename(match.artist, match.title, match.version, ext)
+    const destDir = join(settings.musicFolderPath, settings.songsFolderPath, year)
+    const destAbsPath = join(destDir, destFilename)
+    const destRelativePath = join(settings.songsFolderPath, year, destFilename)
+
+    await mkdir(destDir, { recursive: true })
+
+    const tags = {
+      artist: match.artist,
+      title: match.title,
+      album: match.releaseTitle,
+      year: match.year,
+      label: match.label,
+      catalogNumber: match.catalogNumber,
+      trackPosition: match.trackPosition,
+      discogsReleaseId: match.releaseId,
+      discogsTrackPosition: match.trackPosition
+    }
+
+    if (await fileExists(destAbsPath)) {
+      const newQuality = await readQuality(localFilePath, bitrateHintKbps)
+      const existingQuality = await readQuality(destAbsPath)
+      const comparison = compareQuality(newQuality, existingQuality)
+
+      if (comparison !== 'better') {
+        return { status: 'skipped_existing', existingRelativePath: destRelativePath, match, existingQuality, newQuality }
+      }
+
+      const upgradePath = await findAvailablePath(destAbsPath)
+      const upgradeRelativePath = join(settings.songsFolderPath, year, basename(upgradePath))
+      await this.tagger.writeTags(localFilePath, tags)
+      await copyFile(localFilePath, upgradePath)
+      await unlink(localFilePath)
+      return { status: 'imported_upgrade', destRelativePath: upgradeRelativePath, existingRelativePath: destRelativePath, match }
+    }
+
+    await this.tagger.writeTags(localFilePath, tags)
+    await copyFile(localFilePath, destAbsPath)
+    await unlink(localFilePath)
+    return { status: 'imported', destRelativePath, match }
+  }
+
+  /**
    * Try to find the local file for a completed slskd download.
    * Searches all configured download folders by the file's basename.
    */

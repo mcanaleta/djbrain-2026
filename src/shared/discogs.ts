@@ -1,10 +1,5 @@
 export type DiscogsEntityType = 'release' | 'artist' | 'label' | 'master'
 
-export type DiscogsFact = {
-  label: string
-  value: string
-}
-
 export type DiscogsTrack = {
   position?: string
   title: string
@@ -17,49 +12,76 @@ export type DiscogsEntityReference = {
   name: string
 }
 
-export type DiscogsRelatedSection = {
-  title: string
-  items: DiscogsEntityReference[]
-}
-
 export type DiscogsVideo = {
   uri: string
   title: string
+  duration?: number
 }
 
-export type DiscogsEntityDetail = {
+export type DiscogsRelease = {
   id: number
-  type: DiscogsEntityType
+  type: 'release'
   title: string
-  subtitle?: string
-  summary?: string
-  notes?: string
-  externalUrl: string
-  heroImageUrl?: string
+  artists: string[]
   year?: string
   country?: string
+  labels: string[]
+  catalogNumbers: string[]
+  formats: string[]
   genres: string[]
   styles: string[]
-  urls: string[]
-  facts: DiscogsFact[]
-  relatedSections: DiscogsRelatedSection[]
+  externalUrl: string
+  heroImageUrl?: string
   tracklist: DiscogsTrack[]
   videos: DiscogsVideo[]
+  relatedArtists: DiscogsEntityReference[]
+  relatedLabels: DiscogsEntityReference[]
 }
+
+export type DiscogsArtist = {
+  id: number
+  type: 'artist'
+  name: string
+  realName?: string
+  nameVariations: string[]
+  profile?: string
+  externalUrl: string
+  heroImageUrl?: string
+  aliases: DiscogsEntityReference[]
+  members: DiscogsEntityReference[]
+  groups: DiscogsEntityReference[]
+}
+
+export type DiscogsLabel = {
+  id: number
+  type: 'label'
+  name: string
+  profile?: string
+  contactInfo?: string
+  externalUrl: string
+  heroImageUrl?: string
+  parentLabel?: DiscogsEntityReference
+  sublabels: DiscogsEntityReference[]
+}
+
+export type DiscogsMaster = {
+  id: number
+  type: 'master'
+  title: string
+  artists: string[]
+  year?: string
+  genres: string[]
+  styles: string[]
+  externalUrl: string
+  heroImageUrl?: string
+  tracklist: DiscogsTrack[]
+  videos: DiscogsVideo[]
+  relatedArtists: DiscogsEntityReference[]
+  mainRelease?: DiscogsEntityReference
+}
+
+export type DiscogsEntity = DiscogsRelease | DiscogsArtist | DiscogsLabel | DiscogsMaster
 
 export function buildDiscogsEntityPath(type: DiscogsEntityType, id: number | string): string {
   return `/discogs/${type}/${id}`
-}
-
-export function formatDiscogsEntityType(type: DiscogsEntityType): string {
-  switch (type) {
-    case 'release':
-      return 'Release'
-    case 'artist':
-      return 'Artist'
-    case 'label':
-      return 'Label'
-    case 'master':
-      return 'Master Release'
-  }
 }
