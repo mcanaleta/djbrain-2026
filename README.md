@@ -1,6 +1,6 @@
 # DJBrain 2026
 
-A desktop app for DJ music management: discover, collect, download, tag, and organise your music library.
+A local web app for DJ music management: discover, collect, download, tag, and organise your music library.
 
 ---
 
@@ -10,7 +10,7 @@ A desktop app for DJ music management: discover, collect, download, tag, and org
 2. [Tech Stack](#tech-stack)
 3. [Architecture](#architecture)
 4. [Project Structure](#project-structure)
-5. [IPC Bridge Pattern](#ipc-bridge-pattern)
+5. [API Client Pattern](#api-client-pattern)
 6. [Database Schema](#database-schema)
 7. [Settings](#settings)
 8. [Navigation & Routing](#navigation--routing)
@@ -42,18 +42,17 @@ Every step allows manual intervention. You can inspect results, pick the best fi
 
 | Layer | Technology |
 |-------|-----------|
-| Desktop shell | Electron 39 |
+| App shell | Browser + local Node server |
 | Frontend | React 19 + TypeScript |
-| Routing | React Router v7 (HashRouter) |
+| Routing | React Router v7 |
 | Styling | Tailwind CSS 3 (dark zinc palette) |
 | Icons | Radix UI Icons |
 | UI primitives | Radix UI (Switch, Separator, Dropdown) |
-| Build | electron-vite + Vite 7 |
+| Build | Vite 7 |
 | Database | SQLite via Node.js built-in `node:sqlite` (`DatabaseSync`) |
 | Music search | slskd REST API (Soulseek daemon) |
 | Metadata | Discogs API, Serper (Google), Grok AI (xAI) |
 | Testing | Node.js built-in `node:test` + `node:assert/strict` |
-| Packaging | electron-builder |
 
 Node.js 24+, npm 11+.
 
@@ -63,30 +62,24 @@ Node.js 24+, npm 11+.
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│  Renderer Process (React)                                   │
+│  Browser App (React Router + Vite)                          │
 │  src/renderer/src/                                          │
-│  Pages → window.api.* calls                                │
+│  Pages → window.api.* → fetch('/api/...')                  │
 └──────────────────────┬─────────────────────────────────────┘
-                       │ contextBridge (window.api)
+                       │ HTTP / JSON
 ┌──────────────────────▼─────────────────────────────────────┐
-│  Preload Script                                             │
-│  src/preload/index.ts                                       │
-│  ipcRenderer.invoke / ipcRenderer.on                       │
-└──────────────────────┬─────────────────────────────────────┘
-                       │ ipcMain.handle / webContents.send
-┌──────────────────────▼─────────────────────────────────────┐
-│  Main Process (Node.js)                                     │
-│  src/main/index.ts  – IPC handler registry                 │
-│  src/main/*-service.ts  – Business logic                   │
-│  node:sqlite  – SQLite (synchronous API)                   │
+│  Local API Server (Express)                                 │
+│  src/server/index.ts   – route registry + media streaming   │
+│  src/main/*-service.ts – business logic + SQLite            │
+│  node:sqlite          – SQLite (synchronous API)            │
 └────────────────────────────────────────────────────────────┘
 ```
 
 **Rules:**
-- The renderer **never** accesses Node.js APIs directly — only via `window.api`.
-- All `window.api` types live in `src/preload/index.ts` (both implementation and types).
-- Heavy I/O and database work happens in main-process services.
-- Push updates (pipeline progress, collection sync) go via `webContents.send()` and are subscribed to with `ipcRenderer.on()`.
+- The renderer never accesses the filesystem directly.
+- `window.api` is the browser-side client contract and lives in `src/shared/api.ts`.
+- Heavy I/O and database work happens in the local server/services layer.
+- Collection and want-list updates are polled from the browser client.
 
 ---
 
@@ -95,14 +88,13 @@ Node.js 24+, npm 11+.
 ```
 src/
 ├── main/
-│   ├── index.ts                 # App init + all IPC handler registrations
 │   ├── collection-service.ts    # SQLite DB, file scanning, FTS, want list CRUD
 │   ├── slskd-service.ts         # Soulseek search & download via slskd REST API
 │   ├── online-search-service.ts # Discogs + Serper search, entity detail fetching
 │   ├── grok-search-service.ts   # Grok AI LLM music search
-│   └── settings-store.ts        # settings.json + window-state.json persistence
-├── preload/
-│   └── index.ts                 # contextBridge: exposes window.api, all types
+│   └── settings-store.ts        # settings.json persistence
+├── server/
+│   └── index.ts                 # Express routes + media streaming + startup
 ├── renderer/
 │   ├── index.html               # Entry HTML (CSP meta tag lives here)
 │   └── src/
@@ -113,6 +105,7 @@ src/
 │       ├── pages/               # One file per route (see routing table)
 │       └── styles/globals.css   # Tailwind base styles
 └── shared/
+    ├── api.ts                   # Shared API contract types
     ├── discogs.ts               # Discogs type definitions
     ├── grok-search.ts           # Grok result types
     ├── online-search.ts         # OnlineSearch result types
@@ -122,60 +115,38 @@ src/
 
 ---
 
-## IPC Bridge Pattern
+## API Client Pattern
 
-### Adding a new IPC call
+### Adding a new API call
 
-**1. Main process — register handler** (`src/main/index.ts`):
+**1. Server — add route** (`src/server/index.ts`):
 ```typescript
-ipcMain.handle('my-feature:do-thing', async (_event, arg: string) => {
-  return myService.doThing(arg)
+app.post('/api/my-feature/do-thing', async (request, response) => {
+  response.json(await myService.doThing(request.body.arg))
 })
 ```
 
-**2. Preload — expose via contextBridge** (`src/preload/index.ts`):
-
-Add to the `api` object inside `contextBridge.exposeInMainWorld`:
+**2. Shared contract — update types** (`src/shared/api.ts`):
 ```typescript
 myFeature: {
-  doThing: (arg: string): Promise<MyResult> =>
-    ipcRenderer.invoke('my-feature:do-thing', arg),
-},
+  doThing: (arg: string) => Promise<MyResult>
+}
 ```
 
-Also add the TypeScript type to the `DJBrainApi` interface in the same file.
+**3. Browser client — implement the fetch wrapper** (`src/renderer/src/lib/browser-api.ts`):
+```typescript
+doThing: (arg) =>
+  request('/api/my-feature/do-thing', {
+    method: 'POST',
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ arg })
+  })
+```
 
-**3. Renderer — call it**:
+**4. Renderer — call it**:
 ```typescript
 const result = await window.api.myFeature.doThing('hello')
 ```
-
-### Push events (main → renderer)
-
-**Main** (emit):
-```typescript
-mainWindow.webContents.send('my-feature:updated', payload)
-```
-
-**Preload** (subscribe):
-```typescript
-onUpdated: (listener: (payload: MyPayload) => void): (() => void) => {
-  const handler = (_: unknown, p: MyPayload) => listener(p)
-  ipcRenderer.on('my-feature:updated', handler)
-  return () => ipcRenderer.removeListener('my-feature:updated', handler)
-},
-```
-
-**Renderer** (React hook pattern):
-```typescript
-useEffect(() => {
-  return window.api.myFeature.onUpdated((payload) => {
-    setState(payload)
-  })
-}, [])
-```
-
-The returned cleanup function is called when the component unmounts. Always return it from `useEffect`.
 
 ---
 
@@ -256,7 +227,7 @@ interface AppSettings {
 }
 ```
 
-`SettingsStore` in `src/main/settings-store.ts` handles reads, writes, path derivation, and window-state (`{userData}/window-state.json`).
+`SettingsStore` in `src/main/settings-store.ts` handles reads, writes, and path derivation.
 
 ---
 
@@ -334,9 +305,8 @@ Uses Grok AI with web search tools to find tracks. Returns structured `GrokTrack
 
 ### SettingsStore (`src/main/settings-store.ts`)
 
-- Reads/writes `settings.json` and `window-state.json`
+- Reads/writes `settings.json`
 - Exposes `snapshot()` and `update(patch)` — patch is merged, not replaced
-- Saves/restores window size and position; validates the window is on-screen
 
 ---
 
@@ -421,6 +391,10 @@ Used in `DiscogsEntityPage` before adding a track to the want list.
 ## Styling Guidelines
 
 - **Dark theme only** — Tailwind `zinc` palette, no light mode
+- **Density first** — views should default to compact layouts; more useful information in the same viewport is better than oversized cards and whitespace
+- **Thin rows over tall cards** — row-based data should prefer single-line or near-single-line layouts with tight vertical padding
+- **Small table typography** — use `text-xs` or `text-[11px]` for dense tables/lists unless readability clearly suffers
+- **Compact section chrome** — prefer `p-3` / `p-4`, tight gaps, and restrained headings so content density stays high
 - **Background layers**: `zinc-900` (app bg) → `zinc-800` (cards/panels) → `zinc-700` (inputs/hover)
 - **Text**: `zinc-100` (primary), `zinc-400` (secondary/muted)
 - **Accent / interactive**: `indigo-500` (active nav, primary buttons), `indigo-400` (hover)
@@ -430,7 +404,7 @@ Used in `DiscogsEntityPage` before adding a track to the want list.
   - Red: `red-400` — error, low score (<30)
   - Blue: `blue-400` — searching, in-progress states
 - **Pulsing dot** (`animate-pulse`) on active pipeline states (searching, downloading)
-- **Buttons**: `px-3 py-1.5 rounded text-sm` base; colour variant classes on top
+- **Buttons**: default to compact controls (`px-2.5 py-1` to `px-3 py-1.5`, `text-xs`) and only scale up when the action is primary and sparse
 - **No inline styles** — use Tailwind classes only
 - **Icon size**: `w-4 h-4` (small), `w-5 h-5` (normal), consistent with Radix UI icons
 
@@ -438,12 +412,22 @@ Used in `DiscogsEntityPage` before adding a track to the want list.
 
 ## How to Add a New Feature
 
+### View composition
+
+- Keep route files high-level and readable: route params, hook wiring, major sections, and navigation decisions should be obvious in the page file.
+- Default to the shared view primitives in `src/renderer/src/components/view.tsx` for page chrome: sections, hero blocks, notices, compact buttons, labeled inputs, stat cards, and dense tables.
+- Do not leave raw panel/table Tailwind strings in route files when the intent is generic UI structure; hide that in shared view components first.
+- Move generic formatting, parsing, and error helpers into `src/renderer/src/lib/`.
+- Move feature-specific reusable UI and view-model logic into a small feature folder instead of leaving it inline in the route.
+- Move async loading / action orchestration into hooks when a page starts mixing data fetching with lots of JSX.
+- Do not split every section into its own file by default; extract shared or low-signal code, not the main page narrative.
+
 ### New page with data from main process
 
-1. Define the data type in `src/preload/index.ts` (add to `DJBrainApi` interface)
+1. Define the data type in `src/shared/api.ts` (add to `DJBrainApi`)
 2. Add the service method in the appropriate `src/main/*-service.ts`
-3. Register an IPC handler in `src/main/index.ts`
-4. Expose it in the preload bridge
+3. Register an Express route in `src/server/index.ts`
+4. Add the browser client wrapper in `src/renderer/src/lib/browser-api.ts`
 5. Create the page in `src/renderer/src/pages/`
 6. Add nav item in `nav.ts` + route in `App.tsx`
 
@@ -451,17 +435,12 @@ Used in `DiscogsEntityPage` before adding a track to the want list.
 
 Use the idempotent migration pattern (see [Migrations](#migrations) above). Place it in the service constructor.
 
-### New real-time push event
-
-See [Push events](#push-events-main--renderer) above. Main emits with `webContents.send`, preload subscribes with `ipcRenderer.on`, renderer uses `useEffect` returning the unsubscribe function.
-
 ### New external API integration
 
 - Add API key to `AppSettings` in `settings-store.ts` and to `SettingsPage`
 - Create `src/main/my-api-service.ts`
-- Instantiate in `src/main/index.ts`
-- Register IPC handler
-- Expose in preload
+- Register route in `src/server/index.ts`
+- Add client call in `src/renderer/src/lib/browser-api.ts`
 
 ---
 
@@ -476,7 +455,7 @@ npm test
 
 Test file conventions:
 - Co-located next to the file under test: `foo.ts` → `foo.test.ts`
-- Currently only `src/shared/` is tested (main-process services depend on Electron APIs)
+- Currently only `src/shared/` is tested
 - Import the `.ts` extension explicitly — required by `--experimental-strip-types`:
   ```typescript
   import { myFn } from './my-module.ts'   // required

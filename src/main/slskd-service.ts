@@ -10,12 +10,18 @@ type SlskdFileAttribute = {
 type SlskdFile = {
   filename: string
   size: number
+  bitRate?: number
+  isLocked?: boolean
   attributes?: SlskdFileAttribute[]
 }
 
 type SlskdSearchResponse = {
   username: string
+  queueLength?: number
+  hasFreeUploadSlot?: boolean
+  uploadSpeed?: number
   files: SlskdFile[]
+  lockedFiles?: SlskdFile[]
 }
 
 type SlskdSearch = {
@@ -43,6 +49,17 @@ type SlskdUserDownloads = {
   }>
 }
 
+type SlskdDownloadRecord = {
+  id: string | null
+  username: string | null
+  filename: string
+  size: number | null
+  bytesTransferred: number | null
+  percentComplete: number | null
+  state: string | null
+  exception: string | null
+}
+
 // ─── Public types ─────────────────────────────────────────────────────────────
 
 export type SlskdCandidate = {
@@ -51,6 +68,10 @@ export type SlskdCandidate = {
   size: number
   score: number
   bitrate: number | null
+  queueLength: number | null
+  hasFreeUploadSlot: boolean | null
+  uploadSpeed: number | null
+  isLocked: boolean
   extension: string
 }
 
@@ -70,6 +91,119 @@ function norm(s: string): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function normalizeTransferPath(value: string): string {
+  return value.replace(/\\/g, '/').trim()
+}
+
+function basenameOfPath(value: string): string {
+  const normalized = normalizeTransferPath(value)
+  const parts = normalized.split('/').filter(Boolean)
+  return parts[parts.length - 1] ?? normalized
+}
+
+function asObject(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+  return value as Record<string, unknown>
+}
+
+function asNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null
+}
+
+function toDownloadRecord(
+  value: Record<string, unknown>,
+  fallbackUsername: string | null
+): SlskdDownloadRecord | null {
+  const filename = asString(value['filename'])
+  if (!filename) {
+    return null
+  }
+
+  return {
+    id: asString(value['id']),
+    username: asString(value['username']) ?? fallbackUsername,
+    filename,
+    size: asNumber(value['size']),
+    bytesTransferred: asNumber(value['bytesTransferred']),
+    percentComplete: asNumber(value['percentComplete']),
+    state: asString(value['state']),
+    exception: asString(value['exception'])
+  }
+}
+
+function collectDownloadRecords(
+  value: unknown,
+  fallbackUsername: string | null = null
+): SlskdDownloadRecord[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => collectDownloadRecords(entry, fallbackUsername))
+  }
+
+  const object = asObject(value)
+  if (!object) {
+    return []
+  }
+
+  const directRecord = toDownloadRecord(object, fallbackUsername)
+  if (directRecord) {
+    return [directRecord]
+  }
+
+  const nestedUsername = asString(object['username']) ?? fallbackUsername
+  const results: SlskdDownloadRecord[] = []
+
+  for (const nestedValue of Object.values(object)) {
+    results.push(...collectDownloadRecords(nestedValue, nestedUsername))
+  }
+
+  return results
+}
+
+function findMatchingDownloadRecord(
+  records: SlskdDownloadRecord[],
+  username: string,
+  filename: string
+): SlskdDownloadRecord | null {
+  const normalizedTargetUsername = username.trim().toLowerCase()
+  const normalizedTargetFilename = normalizeTransferPath(filename)
+  const targetBasename = basenameOfPath(filename)
+
+  for (const record of records) {
+    const recordUsername = record.username?.trim().toLowerCase() ?? ''
+    if (recordUsername && recordUsername !== normalizedTargetUsername) {
+      continue
+    }
+    if (normalizeTransferPath(record.filename) === normalizedTargetFilename) {
+      return record
+    }
+  }
+
+  for (const record of records) {
+    const recordUsername = record.username?.trim().toLowerCase() ?? ''
+    if (recordUsername && recordUsername !== normalizedTargetUsername) {
+      continue
+    }
+    if (basenameOfPath(record.filename) === targetBasename) {
+      return record
+    }
+  }
+
+  return null
 }
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -113,8 +247,11 @@ export class SlskdService {
   }
 
   buildSearchQuery(artist: string, title: string, version: string | null): string {
-    const parts = [artist, title].filter((p) => p.trim())
-    if (version?.trim()) parts.push(version.trim())
+    const parts = [artist, title]
+      .map((part) => part.trim().replace(/\s+/g, ' '))
+      .filter(Boolean)
+    const normalizedVersion = version?.trim().replace(/\s+/g, ' ')
+    if (normalizedVersion) parts.push(normalizedVersion)
     return parts.join(' ')
   }
 
@@ -125,10 +262,6 @@ export class SlskdService {
     })
     console.log('[slskd] search started, id:', result.id)
     return result.id
-  }
-
-  private async getSearch(settings: AppSettings, searchId: string): Promise<SlskdSearch> {
-    return this.fetch<SlskdSearch>(settings, 'GET', `/api/v0/searches/${searchId}`)
   }
 
   async deleteSearch(settings: AppSettings, searchId: string): Promise<void> {
@@ -142,11 +275,11 @@ export class SlskdService {
   ): Promise<SlskdSearch> {
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
-      const raw = await this.fetch<Record<string, unknown>>(
+      const raw = (await this.fetch<SlskdSearch>(
         settings,
         'GET',
-        `/api/v0/searches/${searchId}`
-      )
+        `/api/v0/searches/${searchId}?includeResponses=true`
+      )) as unknown as Record<string, unknown>
       const responseCount = Array.isArray(raw['responses']) ? raw['responses'].length : 0
       const fileCount = Array.isArray(raw['responses'])
         ? (raw['responses'] as SlskdSearchResponse[]).reduce(
@@ -164,11 +297,11 @@ export class SlskdService {
       await sleep(2_500)
     }
     console.log(`[slskd] search ${searchId} timed out, returning partial results`)
-    const raw = await this.fetch<Record<string, unknown>>(
+    const raw = (await this.fetch<SlskdSearch>(
       settings,
       'GET',
-      `/api/v0/searches/${searchId}`
-    )
+      `/api/v0/searches/${searchId}?includeResponses=true`
+    )) as unknown as Record<string, unknown>
     console.log('[slskd] timeout final raw snippet:', JSON.stringify(raw).slice(0, 800))
     return raw as unknown as SlskdSearch
   }
@@ -178,7 +311,7 @@ export class SlskdService {
     title: string,
     version: string | null,
     file: SlskdFile,
-    username: string
+    response: SlskdSearchResponse
   ): SlskdCandidate {
     const parts = file.filename.replace(/\\/g, '/').split('/')
     const basename = parts[parts.length - 1] ?? file.filename
@@ -214,17 +347,28 @@ export class SlskdService {
     if (file.size >= 2_000_000 && file.size <= 500_000_000) score += 5
 
     const bitrateAttr = file.attributes?.find((a) => a.attribute === 'BitRate')
-    const bitrate = bitrateAttr ? bitrateAttr.value : null
+    const bitrate = file.bitRate ?? (bitrateAttr ? bitrateAttr.value : null)
 
     // High bitrate bonus
     if (bitrate && bitrate >= 320) score += 5
 
+    if (file.isLocked) score -= 25
+    if (response.hasFreeUploadSlot === false) score -= 5
+    if (typeof response.queueLength === 'number' && response.queueLength > 0) {
+      score -= Math.min(8, response.queueLength)
+    }
+
     return {
-      username,
+      username: response.username,
       filename: file.filename,
       size: file.size,
       score: Math.max(0, score),
       bitrate,
+      queueLength: typeof response.queueLength === 'number' ? response.queueLength : null,
+      hasFreeUploadSlot:
+        typeof response.hasFreeUploadSlot === 'boolean' ? response.hasFreeUploadSlot : null,
+      uploadSpeed: typeof response.uploadSpeed === 'number' ? response.uploadSpeed : null,
+      isLocked: Boolean(file.isLocked),
       extension: ext
     }
   }
@@ -238,7 +382,10 @@ export class SlskdService {
     const candidates: SlskdCandidate[] = []
     for (const response of search.responses ?? []) {
       for (const file of response.files ?? []) {
-        candidates.push(this.scoreFile(artist, title, version, file, response.username))
+        candidates.push(this.scoreFile(artist, title, version, file, response))
+      }
+      for (const file of response.lockedFiles ?? []) {
+        candidates.push(this.scoreFile(artist, title, version, { ...file, isLocked: true }, response))
       }
     }
     candidates.sort((a, b) => b.score - a.score)
@@ -272,17 +419,31 @@ export class SlskdService {
     filename: string
   ): Promise<string | null> {
     try {
-      const result = await this.fetch<SlskdUserDownloads>(
+      const userResult = await this.fetch<unknown>(
         settings,
         'GET',
         `/api/v0/transfers/downloads/${encodeURIComponent(username)}`
       )
-      for (const dir of result.directories ?? []) {
-        for (const file of dir.files ?? []) {
-          if (file.filename === filename) return file.state
-        }
+      const userRecord = findMatchingDownloadRecord(
+        collectDownloadRecords(userResult, username),
+        username,
+        filename
+      )
+      if (userRecord?.state) {
+        return userRecord.state
       }
-      return null
+
+      const allResult = await this.fetch<unknown>(
+        settings,
+        'GET',
+        '/api/v0/transfers/downloads?includeRemoved=true'
+      )
+      const allRecord = findMatchingDownloadRecord(
+        collectDownloadRecords(allResult, username),
+        username,
+        filename
+      )
+      return allRecord?.state ?? null
     } catch {
       return null
     }
@@ -295,12 +456,31 @@ export class SlskdService {
     timeoutMs = 600_000 // 10 minutes
   ): Promise<'Completed' | 'Failed' | 'Timeout'> {
     const deadline = Date.now() + timeoutMs
+    let sawTransfer = false
+    let missingSince: number | null = null
+
     while (Date.now() < deadline) {
       await sleep(5_000)
       const state = await this.getDownloadState(settings, username, filename)
-      if (state === 'Completed') return 'Completed'
-      if (state === null || ['Cancelled', 'TimedOut', 'Errored', 'Rejected'].includes(state ?? ''))
+      if (state) {
+        sawTransfer = true
+        missingSince = null
+      } else if (sawTransfer) {
+        missingSince ??= Date.now()
+      }
+
+      if (state?.startsWith('Completed')) return 'Completed'
+      if (
+        state?.startsWith('Cancelled') ||
+        state?.startsWith('TimedOut') ||
+        state?.startsWith('Errored') ||
+        state?.startsWith('Rejected')
+      )
         return 'Failed'
+
+      if (sawTransfer && missingSince && Date.now() - missingSince > 20_000) {
+        return 'Failed'
+      }
     }
     return 'Timeout'
   }

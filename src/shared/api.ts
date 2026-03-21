@@ -1,8 +1,6 @@
-import { contextBridge, ipcRenderer } from 'electron'
-import { electronAPI } from '@electron-toolkit/preload'
-import type { DiscogsEntityDetail, DiscogsEntityType } from '../shared/discogs'
-import type { GrokSearchResponse } from '../shared/grok-search'
-import type { OnlineSearchResponse, OnlineSearchScope } from '../shared/online-search'
+import type { DiscogsEntityDetail, DiscogsEntityType } from './discogs'
+import type { GrokSearchResponse } from './grok-search'
+import type { OnlineSearchResponse, OnlineSearchScope } from './online-search'
 
 export type AppSettings = {
   musicFolderPath: string
@@ -31,7 +29,7 @@ export type SettingsSnapshot = {
 
 export type SettingsPatch = Partial<AppSettings>
 
-type PickDirectoryOptions = {
+export type PickDirectoryOptions = {
   title?: string
   defaultPath?: string
 }
@@ -39,6 +37,8 @@ type PickDirectoryOptions = {
 export type CollectionItem = {
   filename: string
   filesize: number
+  duration: number | null
+  score: number | null
 }
 
 export type CollectionSyncStatus = {
@@ -60,6 +60,11 @@ export type WantListPipelineStatus =
   | 'no_results'
   | 'downloading'
   | 'downloaded'
+  | 'identifying'
+  | 'needs_review'
+  | 'importing'
+  | 'imported'
+  | 'import_error'
   | 'error'
 
 export type WantListItem = {
@@ -78,6 +83,9 @@ export type WantListItem = {
   downloadUsername: string | null
   downloadFilename: string | null
   pipelineError: string | null
+  discogsReleaseId: number | null
+  discogsTrackPosition: string | null
+  importedFilename: string | null
 }
 
 export type WantListAddInput = {
@@ -95,6 +103,10 @@ export type SlskdCandidate = {
   size: number
   score: number
   bitrate: number | null
+  queueLength: number | null
+  hasFreeUploadSlot: boolean | null
+  uploadSpeed: number | null
+  isLocked: boolean
   extension: string
 }
 
@@ -110,15 +122,24 @@ export type SlskdConnectionTestResult = {
   message: string
 }
 
+export type ImportFileResult =
+  | { status: 'imported'; destRelativePath: string }
+  | { status: 'imported_upgrade'; destRelativePath: string; existingRelativePath: string }
+  | { status: 'skipped_existing'; existingRelativePath: string }
+  | { status: 'needs_review' }
+  | { status: 'error'; message: string }
+
 export type DJBrainApi = {
   wantList: {
     list: () => Promise<WantListItem[]>
+    get: (id: number) => Promise<WantListItem | null>
     add: (input: WantListAddInput) => Promise<WantListItem>
     update: (id: number, input: WantListAddInput) => Promise<WantListItem | null>
     remove: (id: number) => Promise<void>
-    search: (id: number) => Promise<WantListItem | null>
+    search: (id: number, query?: string) => Promise<WantListItem | null>
     getCandidates: (id: number) => Promise<SlskdCandidate[]>
     download: (id: number, username: string, filename: string, size: number) => Promise<void>
+    import: (id: number, localFilePath: string) => Promise<void>
     resetPipeline: (id: number) => Promise<WantListItem | null>
     onItemUpdated: (listener: (item: WantListItem) => void) => () => void
   }
@@ -146,76 +167,10 @@ export type DJBrainApi = {
     syncNow: () => Promise<CollectionSyncStatus>
     getStatus: () => Promise<CollectionSyncStatus>
     onUpdated: (listener: (status: CollectionSyncStatus) => void) => () => void
+    importFile: (filename: string) => Promise<ImportFileResult>
+    deleteFile: (filename: string) => Promise<void>
+    clearEmptyFolders: () => Promise<number>
+    showInFinder: (filename: string) => Promise<void>
+    openInPlayer: (filename: string) => Promise<void>
   }
-}
-
-const api: DJBrainApi = {
-  wantList: {
-    list: () => ipcRenderer.invoke('want-list:list'),
-    add: (input) => ipcRenderer.invoke('want-list:add', input),
-    update: (id, input) => ipcRenderer.invoke('want-list:update', id, input),
-    remove: (id) => ipcRenderer.invoke('want-list:remove', id),
-    search: (id) => ipcRenderer.invoke('want-list:search', id),
-    getCandidates: (id) => ipcRenderer.invoke('want-list:get-candidates', id),
-    download: (id, username, filename, size) =>
-      ipcRenderer.invoke('want-list:download', id, username, filename, size),
-    resetPipeline: (id) => ipcRenderer.invoke('want-list:reset-pipeline', id),
-    onItemUpdated: (listener) => {
-      const wrapped = (_event: Electron.IpcRendererEvent, item: WantListItem): void => {
-        listener(item)
-      }
-      ipcRenderer.on('want-list:item-updated', wrapped)
-      return () => {
-        ipcRenderer.off('want-list:item-updated', wrapped)
-      }
-    }
-  },
-  settings: {
-    get: () => ipcRenderer.invoke('settings:get'),
-    update: (patch) => ipcRenderer.invoke('settings:update', patch),
-    pickDirectory: (options) => ipcRenderer.invoke('settings:pick-directory', options ?? {})
-  },
-  slskd: {
-    testConnection: (input) => ipcRenderer.invoke('slskd:test-connection', input)
-  },
-  onlineSearch: {
-    search: (query, scope) => ipcRenderer.invoke('online-search:search', query, scope ?? 'online'),
-    getDiscogsEntity: (type, id) =>
-      ipcRenderer.invoke('online-search:get-discogs-entity', type, id)
-  },
-  grokSearch: {
-    search: (query) => ipcRenderer.invoke('grok-search:search', query)
-  },
-  collection: {
-    list: (query) => ipcRenderer.invoke('collection:list', query ?? ''),
-    listDownloads: (query) => ipcRenderer.invoke('collection:list-downloads', query ?? ''),
-    syncNow: () => ipcRenderer.invoke('collection:sync-now'),
-    getStatus: () => ipcRenderer.invoke('collection:get-status'),
-    onUpdated: (listener) => {
-      const wrapped = (_event: Electron.IpcRendererEvent, status: CollectionSyncStatus): void => {
-        listener(status)
-      }
-      ipcRenderer.on('collection:updated', wrapped)
-      return () => {
-        ipcRenderer.off('collection:updated', wrapped)
-      }
-    }
-  }
-}
-
-// Use `contextBridge` APIs to expose Electron APIs to
-// renderer only if context isolation is enabled, otherwise
-// just add to the DOM global.
-if (process.contextIsolated) {
-  try {
-    contextBridge.exposeInMainWorld('electron', electronAPI)
-    contextBridge.exposeInMainWorld('api', api)
-  } catch (error) {
-    console.error(error)
-  }
-} else {
-  // @ts-ignore (define in dts)
-  window.electron = electronAPI
-  // @ts-ignore (define in dts)
-  window.api = api
 }

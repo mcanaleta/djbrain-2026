@@ -16,7 +16,6 @@ export type AppSettings = {
 export type AppPaths = {
   userDataPath: string
   settingsFilePath: string
-  windowStateFilePath: string
   dataDirPath: string
   databaseFilePath: string
   cacheDirPath: string
@@ -28,14 +27,6 @@ export type SettingsSnapshot = {
   appPaths: AppPaths
 }
 
-export type WindowState = {
-  width: number
-  height: number
-  x?: number
-  y?: number
-  isMaximized: boolean
-}
-
 const DEFAULT_SETTINGS: AppSettings = {
   musicFolderPath: '',
   songsFolderPath: '',
@@ -45,12 +36,6 @@ const DEFAULT_SETTINGS: AppSettings = {
   discogsUserToken: '',
   grokApiKey: '',
   serperApiKey: ''
-}
-
-const DEFAULT_WINDOW_STATE: WindowState = {
-  width: 900,
-  height: 670,
-  isMaximized: false
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -147,27 +132,6 @@ function normalizeSettings(value: unknown): AppSettings {
   }
 }
 
-function toFiniteNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
-}
-
-function normalizeWindowState(value: unknown): WindowState {
-  const source = isRecord(value) ? value : {}
-  const width = Math.max(toFiniteNumber(source.width) ?? DEFAULT_WINDOW_STATE.width, 640)
-  const height = Math.max(toFiniteNumber(source.height) ?? DEFAULT_WINDOW_STATE.height, 480)
-  const x = toFiniteNumber(source.x) ?? undefined
-  const y = toFiniteNumber(source.y) ?? undefined
-  const isMaximized = source.isMaximized === true
-
-  return {
-    width,
-    height,
-    x,
-    y,
-    isMaximized
-  }
-}
-
 function pickKnownSettingsPatch(value: unknown): Partial<AppSettings> {
   if (!isRecord(value)) {
     return {}
@@ -203,8 +167,6 @@ function pickKnownSettingsPatch(value: unknown): Partial<AppSettings> {
 export class SettingsStore {
   private settings: AppSettings = { ...DEFAULT_SETTINGS }
 
-  private windowState: WindowState = { ...DEFAULT_WINDOW_STATE }
-
   private readonly appPaths: AppPaths
 
   constructor(userDataPath: string) {
@@ -212,7 +174,6 @@ export class SettingsStore {
     this.appPaths = {
       userDataPath,
       settingsFilePath: join(userDataPath, 'settings.json'),
-      windowStateFilePath: join(userDataPath, 'window-state.json'),
       dataDirPath,
       databaseFilePath: join(dataDirPath, 'djbrain.sqlite'),
       cacheDirPath: join(userDataPath, 'cache'),
@@ -235,16 +196,7 @@ export class SettingsStore {
       this.settings = { ...DEFAULT_SETTINGS }
       await this.persist()
     }
-
-    try {
-      const fileContent = await readFile(this.appPaths.windowStateFilePath, 'utf-8')
-      this.windowState = normalizeWindowState(JSON.parse(fileContent))
-    } catch {
-      this.windowState = { ...DEFAULT_WINDOW_STATE }
-      await this.persistWindowState()
-    }
-
-    await Promise.all([this.persist(), this.persistWindowState()])
+    await this.persist()
   }
 
   public snapshot(): SettingsSnapshot {
@@ -270,27 +222,10 @@ export class SettingsStore {
     return this.snapshot()
   }
 
-  public getWindowState(): WindowState {
-    return { ...this.windowState }
-  }
-
-  public async saveWindowState(value: unknown): Promise<void> {
-    this.windowState = normalizeWindowState(value)
-    await this.persistWindowState()
-  }
-
   private async persist(): Promise<void> {
     await writeFile(
       this.appPaths.settingsFilePath,
       JSON.stringify(this.settings, null, 2) + '\n',
-      'utf-8'
-    )
-  }
-
-  private async persistWindowState(): Promise<void> {
-    await writeFile(
-      this.appPaths.windowStateFilePath,
-      JSON.stringify(this.windowState, null, 2) + '\n',
       'utf-8'
     )
   }

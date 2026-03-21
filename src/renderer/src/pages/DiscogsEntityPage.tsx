@@ -11,24 +11,34 @@ import {
 } from '../../../shared/discogs'
 import { parseTrackTitle } from '../../../shared/track-title-parser'
 import type { DiscogsVideo } from '../../../shared/discogs'
+import { ActionButton, EmptyState, Notice, ViewPanel, ViewSection } from '../components/view'
+import { getErrorMessage } from '../lib/error-utils'
+import { extractYouTubeId } from '../lib/youtube'
 
 function formatError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message
-  }
-  return 'Unexpected Discogs error'
+  return getErrorMessage(error, 'Unexpected Discogs error')
 }
 
-function extractYouTubeId(uri: string): string | null {
-  try {
-    const url = new URL(uri)
-    if (url.hostname.includes('youtu.be')) {
-      return url.pathname.slice(1) || null
-    }
-    return url.searchParams.get('v')
-  } catch {
-    return null
+function resolveWantListArtist(entity: DiscogsEntityDetail): string | null {
+  if (entity.type === 'artist') {
+    return entity.title.trim() || null
   }
+
+  const artistSection = entity.relatedSections.find((section) => section.title === 'Artists')
+  const artistNames = artistSection?.items
+    .map((item) => item.name.trim())
+    .filter(Boolean)
+    .join(', ')
+  if (artistNames) {
+    return artistNames
+  }
+
+  const subtitle = entity.subtitle?.trim()
+  if (subtitle && !subtitle.toLowerCase().startsWith('real name:')) {
+    return subtitle
+  }
+
+  return null
 }
 
 function VideoSection({ videos }: { videos: DiscogsVideo[] }): React.JSX.Element | null {
@@ -41,11 +51,10 @@ function VideoSection({ videos }: { videos: DiscogsVideo[] }): React.JSX.Element
   const activeId = activeVideo ? extractYouTubeId(activeVideo.uri) : null
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4">
-      <div className="text-sm font-semibold text-zinc-100">Videos</div>
+    <ViewSection title="Videos" className="bg-zinc-900/30">
       {activeId ? (
         <div className="mt-3">
-          <div className="overflow-hidden rounded-lg border border-zinc-800">
+          <ViewPanel tone="muted" padding="sm" className="overflow-hidden p-0">
             <iframe
               src={`https://www.youtube.com/embed/${activeId}?autoplay=1`}
               title={activeVideo?.title ?? 'YouTube video'}
@@ -53,7 +62,7 @@ function VideoSection({ videos }: { videos: DiscogsVideo[] }): React.JSX.Element
               allowFullScreen
               className="aspect-video w-full"
             />
-          </div>
+          </ViewPanel>
           {activeVideo?.title ? (
             <div className="mt-2 text-xs text-zinc-400">{activeVideo.title}</div>
           ) : null}
@@ -78,7 +87,7 @@ function VideoSection({ videos }: { videos: DiscogsVideo[] }): React.JSX.Element
           )
         })}
       </div>
-    </div>
+    </ViewSection>
   )
 }
 
@@ -94,8 +103,7 @@ function RelatedLinks({
   }
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4">
-      <div className="text-sm font-semibold text-zinc-100">{title}</div>
+    <ViewSection title={title} className="bg-zinc-900/30">
       <div className="mt-3 flex flex-wrap gap-2">
         {items.map((item, index) =>
           item.id ? (
@@ -116,7 +124,7 @@ function RelatedLinks({
           )
         )}
       </div>
-    </div>
+    </ViewSection>
   )
 }
 
@@ -136,11 +144,16 @@ export default function DiscogsEntityPage({
       if (!entity) return
       const track = entity.tracklist[trackIndex]
       if (!track) return
+      const artist = resolveWantListArtist(entity)
+      if (!artist) {
+        setErrorMessage('Could not determine the artist for this track.')
+        return
+      }
       const labelFact = entity.facts.find((f) => f.label === 'Labels')
       const parsed = parseTrackTitle(track.title)
       void window.api.wantList
         .add({
-          artist: entity.subtitle ?? entity.title,
+          artist,
           title: parsed.title,
           version: parsed.version,
           length: track.duration ?? null,
@@ -149,6 +162,10 @@ export default function DiscogsEntityPage({
         })
         .then(() => {
           setAddedTrackIndices((prev) => new Set(prev).add(trackIndex))
+          setErrorMessage(null)
+        })
+        .catch((error) => {
+          setErrorMessage(formatError(error))
         })
     },
     [entity]
@@ -196,7 +213,7 @@ export default function DiscogsEntityPage({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-5">
+      <ViewSection className="p-5" bodyClassName="mt-0">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0 flex-1">
             <div className="text-xs font-medium uppercase tracking-[0.2em] text-amber-300/80">
@@ -229,50 +246,46 @@ export default function DiscogsEntityPage({
             className="mt-4 max-h-72 w-full rounded-lg border border-zinc-800 object-cover"
           />
         ) : null}
-      </div>
+      </ViewSection>
 
-      {errorMessage ? (
-        <div className="rounded-lg border border-red-800/70 bg-red-950/30 p-4 text-sm text-red-200">
-          {errorMessage}
-        </div>
-      ) : null}
+      {errorMessage ? <Notice tone="error" className="p-4 text-sm">{errorMessage}</Notice> : null}
 
       {isLoading ? (
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 text-sm text-zinc-400">
-          Loading Discogs…
-        </div>
+        <Notice className="p-4 text-sm">Loading Discogs…</Notice>
       ) : null}
 
       {entity ? (
         <>
           {entity.summary ? (
-            <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4 text-sm leading-7 text-zinc-300">
+            <ViewPanel tone="muted" padding="sm" className="bg-zinc-900/30 text-sm leading-7 text-zinc-300">
               {entity.summary}
-            </div>
+            </ViewPanel>
           ) : null}
 
           {entity.notes ? (
-            <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4 text-sm leading-7 text-zinc-400">
+            <ViewPanel tone="muted" padding="sm" className="bg-zinc-900/30 text-sm leading-7 text-zinc-400">
               {entity.notes}
-            </div>
+            </ViewPanel>
           ) : null}
 
           {entity.facts.length > 0 ? (
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {entity.facts.map((fact) => (
-                <div
+                <ViewPanel
                   key={`${fact.label}-${fact.value}`}
-                  className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4"
+                  tone="muted"
+                  padding="sm"
+                  className="bg-zinc-900/30"
                 >
                   <div className="text-xs uppercase tracking-wide text-zinc-500">{fact.label}</div>
                   <div className="mt-2 text-sm text-zinc-100">{fact.value}</div>
-                </div>
+                </ViewPanel>
               ))}
             </div>
           ) : null}
 
           {(entity.genres.length > 0 || entity.styles.length > 0) && (
-            <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4">
+            <ViewPanel tone="muted" padding="sm" className="bg-zinc-900/30">
               <div className="flex flex-wrap gap-2">
                 {entity.genres.map((genre) => (
                   <div
@@ -291,12 +304,11 @@ export default function DiscogsEntityPage({
                   </div>
                 ))}
               </div>
-            </div>
+            </ViewPanel>
           )}
 
           {entity.tracklist.length > 0 ? (
-            <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4">
-              <div className="text-sm font-semibold text-zinc-100">Tracklist</div>
+            <ViewSection title="Tracklist" className="bg-zinc-900/30">
               <div className="mt-3 divide-y divide-zinc-800">
                 {entity.tracklist.map((track, index) => (
                   <div
@@ -307,18 +319,19 @@ export default function DiscogsEntityPage({
                     <div className="text-zinc-100">{track.title}</div>
                     <div className="text-right text-zinc-500">{track.duration || '—'}</div>
                     <div>
-                      <button
+                      <ActionButton
                         onClick={() => handleAddToWantList(index)}
                         disabled={addedTrackIndices.has(index)}
-                        className="rounded border border-zinc-700 bg-zinc-950/40 px-2 py-1 text-xs text-zinc-400 hover:border-amber-600/60 hover:text-amber-300 disabled:cursor-default disabled:border-emerald-800/50 disabled:text-emerald-400"
+                        size="xs"
+                        className="rounded px-2 py-1 text-zinc-400 disabled:border-emerald-800/50 disabled:text-emerald-400"
                       >
                         {addedTrackIndices.has(index) ? 'Added' : '+ Want List'}
-                      </button>
+                      </ActionButton>
                     </div>
                   </div>
                 ))}
               </div>
-            </div>
+            </ViewSection>
           ) : null}
 
           <VideoSection videos={entity.videos} />
@@ -328,8 +341,7 @@ export default function DiscogsEntityPage({
           ))}
 
           {entity.urls.length > 0 ? (
-            <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4">
-              <div className="text-sm font-semibold text-zinc-100">Links</div>
+            <ViewSection title="Links" className="bg-zinc-900/30">
               <div className="mt-3 space-y-2">
                 {entity.urls.map((url) => (
                   <a
@@ -343,7 +355,7 @@ export default function DiscogsEntityPage({
                   </a>
                 ))}
               </div>
-            </div>
+            </ViewSection>
           ) : null}
         </>
       ) : null}

@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { GrokSearchResponse, GrokTrackResult } from '../../../shared/grok-search'
+import {
+  ActionButton,
+  DataTable,
+  LabeledInput,
+  Notice,
+  ViewSection,
+  type DataTableColumn
+} from '../components/view'
 
 type AppSettings = {
   grokApiKey: string
@@ -8,6 +16,33 @@ type AppSettings = {
 const EMPTY_SETTINGS: AppSettings = {
   grokApiKey: ''
 }
+
+const GROK_COLUMNS: DataTableColumn<GrokTrackResult>[] = [
+  {
+    key: 'artist',
+    header: 'Artist',
+    cellClassName: 'text-zinc-200',
+    render: (track) => track.artist
+  },
+  {
+    key: 'title',
+    header: 'Title',
+    cellClassName: 'text-zinc-100',
+    render: (track) => track.title
+  },
+  {
+    key: 'version',
+    header: 'Version',
+    cellClassName: 'text-zinc-300',
+    render: (track) => track.version || '—'
+  },
+  {
+    key: 'year',
+    header: 'Year',
+    cellClassName: 'text-zinc-300',
+    render: (track) => track.year || '—'
+  }
+]
 
 function formatError(error: unknown): string {
   if (error instanceof Error) {
@@ -71,14 +106,10 @@ export default function GrokSearchPage(): React.JSX.Element {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
-        <div className="text-sm font-semibold text-zinc-100">Grok Music Search</div>
-        <div className="mt-1 text-sm text-zinc-400">
-          Search online music with Grok and extract structured track rows.
-        </div>
-
-        <div className="mt-4 flex items-center gap-2">
-          <input
+      <ViewSection title="Grok Music Search" subtitle="Search online music with Grok and extract structured track rows.">
+        <div className="flex items-end gap-2">
+          <LabeledInput
+            label="Search"
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -90,69 +121,46 @@ export default function GrokSearchPage(): React.JSX.Element {
               void submitSearch()
             }}
             placeholder="Search tracks (artist, label, genre, era)..."
-            className="h-9 w-full rounded-md border border-zinc-800 bg-zinc-950/30 px-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-700"
+            className="flex-1"
+            inputClassName="h-9 rounded-md border-zinc-800 bg-zinc-950/30"
           />
-          <button
+          <ActionButton
             type="button"
             onClick={() => {
               void submitSearch()
             }}
             disabled={isSearching || isLoadingSettings || !query.trim()}
-            className="inline-flex h-9 shrink-0 items-center rounded-md border border-zinc-800 bg-zinc-900/40 px-3 text-sm text-zinc-100 hover:bg-zinc-900/60 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isSearching ? 'Searching…' : 'Search'}
-          </button>
+          </ActionButton>
         </div>
 
         {!hasConfig && !isLoadingSettings ? (
-          <div className="mt-3 rounded-md border border-amber-800/70 bg-amber-950/30 px-3 py-2 text-sm text-amber-200">
+          <Notice tone="warning" className="mt-3 text-sm">
             Configure Grok API key in Settings before searching.
-          </div>
+          </Notice>
         ) : null}
-      </div>
+      </ViewSection>
 
-      {errorMessage ? (
-        <div className="rounded-lg border border-red-800/70 bg-red-950/30 p-3 text-sm text-red-200">
-          {errorMessage}
-        </div>
-      ) : null}
+      {errorMessage ? <Notice tone="error" className="text-sm">{errorMessage}</Notice> : null}
 
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
-        <div className="mb-3 text-sm text-zinc-400">
-          {results ? `Results for "${results.query}" · ${results.total} tracks` : 'No results yet.'}
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[680px] border-collapse text-left text-sm">
-            <thead>
-              <tr className="border-b border-zinc-800 text-zinc-400">
-                <th className="px-3 py-2 font-medium">Artist</th>
-                <th className="px-3 py-2 font-medium">Title</th>
-                <th className="px-3 py-2 font-medium">Version</th>
-                <th className="px-3 py-2 font-medium">Year</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="px-3 py-4 text-zinc-500">
-                    {isSearching ? 'Searching…' : 'No tracks found.'}
-                  </td>
-                </tr>
-              ) : (
-                rows.map((track: GrokTrackResult, index) => (
-                  <tr key={`${track.artist}-${track.title}-${index}`} className="border-b border-zinc-900">
-                    <td className="px-3 py-2 text-zinc-200">{track.artist}</td>
-                    <td className="px-3 py-2 text-zinc-100">{track.title}</td>
-                    <td className="px-3 py-2 text-zinc-300">{track.version || '—'}</td>
-                    <td className="px-3 py-2 text-zinc-300">{track.year || '—'}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <ViewSection
+        title="Results"
+        subtitle={results ? `Results for "${results.query}" · ${results.total} tracks` : 'No results yet.'}
+        className="p-0"
+        bodyClassName="mt-0"
+      >
+        <DataTable
+          columns={GROK_COLUMNS}
+          rows={rows}
+          getRowKey={(track, index) => `${track.artist}-${track.title}-${index}`}
+          loading={isSearching}
+          loadingMessage="Searching…"
+          emptyMessage="No tracks found."
+          tableClassName="min-w-[680px]"
+          className="rounded-none border-0"
+        />
+      </ViewSection>
     </div>
   )
 }

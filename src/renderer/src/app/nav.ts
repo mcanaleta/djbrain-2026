@@ -46,5 +46,9 @@ export function resolveNavTitle(pathname: string): string {
     return 'Discogs'
   }
 
+  if (/^\/wantlist\/\d+$/u.test(pathname)) {
+    return 'Wanted Item'
+  }
+
   return NAV_TITLE_BY_PATH.get(pathname as `/${string}`) ?? 'DJBrain'
 }

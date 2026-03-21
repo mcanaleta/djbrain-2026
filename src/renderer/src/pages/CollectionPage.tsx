@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import type { AppShellOutletContext } from '../layout/AppShell'
+import { ActionButton, DataTable, Notice, ViewSection, type DataTableColumn } from '../components/view'
+import { getErrorMessage } from '../lib/error-utils'
+import { deriveTrackSummaryFromFilename, formatFileSize } from '../lib/music-file'
+import { usePlayer } from '../context/PlayerContext'
 
 type CollectionItem = {
   filename: string
@@ -19,12 +23,6 @@ type CollectionListResult = {
   total: number
 }
 
-type DerivedTrack = {
-  artist: string
-  title: string
-  year: string
-}
-
 const EMPTY_STATUS: CollectionSyncStatus = {
   isSyncing: false,
   lastSyncedAt: null,
@@ -32,71 +30,85 @@ const EMPTY_STATUS: CollectionSyncStatus = {
   lastError: null
 }
 
-function Card({ children }: { children: React.ReactNode }): React.JSX.Element {
-  return <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">{children}</div>
+type CollectionRow = CollectionItem & {
+  artist: string
+  title: string
+  year: string
+}
+
+function makeColumns(onPlay: (row: CollectionRow) => void): DataTableColumn<CollectionRow>[] {
+  return [
+    {
+      key: 'play',
+      header: '',
+      cellClassName: 'w-8',
+      render: (row) => (
+        <button
+          title="Play"
+          onClick={(e) => {
+            e.stopPropagation()
+            onPlay(row)
+          }}
+          className="flex h-6 w-6 items-center justify-center rounded-full border border-zinc-600 text-xs text-zinc-300 hover:border-zinc-400 hover:text-white"
+        >
+          ▶
+        </button>
+      )
+    },
+    {
+      key: 'title',
+      header: 'Title',
+      cellClassName: 'max-w-[220px] truncate',
+      render: (row) => row.title
+    },
+    {
+      key: 'artist',
+      header: 'Artist',
+      cellClassName: 'max-w-[180px] truncate text-zinc-300',
+      render: (row) => row.artist
+    },
+    {
+      key: 'year',
+      header: 'Year',
+      cellClassName: 'text-zinc-300',
+      render: (row) => row.year
+    },
+    {
+      key: 'size',
+      header: 'Size',
+      cellClassName: 'text-zinc-300',
+      render: (row) => formatFileSize(row.filesize)
+    },
+    {
+      key: 'filename',
+      header: 'Filename',
+      cellClassName: 'max-w-[420px] truncate text-zinc-400',
+      render: (row) => <span title={row.filename}>{row.filename}</span>
+    }
+  ]
 }
 
 function formatError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message
-  }
-  return 'Unexpected collection error'
-}
-
-function normalizeTrackPart(rawValue: string): string {
-  return rawValue.replace(/[_.]+/g, ' ').replace(/\s+/g, ' ').trim()
-}
-
-function deriveTrackFromFilename(filename: string): DerivedTrack {
-  const basename = filename.split('/').pop() ?? filename
-  const withoutExtension = basename.replace(/\.[^.]+$/, '')
-  const yearMatch = withoutExtension.match(/(?<!\d)(19\d{2}|20\d{2})(?!\d)/)
-  const year = yearMatch?.[1] ?? '—'
-
-  const withoutYear = yearMatch
-    ? withoutExtension.replace(new RegExp(`[\\[\\(\\{]?${year}[\\]\\)\\}]?`, 'g'), ' ')
-    : withoutExtension
-
-  const normalized = normalizeTrackPart(withoutYear)
-  const separatorIndex = normalized.indexOf(' - ')
-
-  if (separatorIndex > 0) {
-    const artist = normalizeTrackPart(normalized.slice(0, separatorIndex)) || 'Unknown'
-    const title = normalizeTrackPart(normalized.slice(separatorIndex + 3)) || 'Unknown title'
-    return {
-      artist,
-      title,
-      year
-    }
-  }
-
-  return {
-    artist: 'Unknown',
-    title: normalized || 'Unknown title',
-    year
-  }
-}
-
-function formatFileSize(bytes: number): string {
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let value = bytes
-  let unitIndex = 0
-
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024
-    unitIndex += 1
-  }
-
-  if (unitIndex === 0) {
-    return `${Math.round(value)} ${units[unitIndex]}`
-  }
-
-  const fractionDigits = value >= 10 ? 1 : 2
-  return `${value.toFixed(fractionDigits)} ${units[unitIndex]}`
+  return getErrorMessage(error, 'Unexpected collection error')
 }
 
 export default function CollectionPage(): React.JSX.Element {
   const { submittedSearch } = useOutletContext<AppShellOutletContext>()
+  const player = usePlayer()
+
+  const handlePlay = useCallback(
+    (row: CollectionRow) => {
+      player.play({
+        url: `/api/media?filename=${encodeURIComponent(row.filename)}`,
+        filename: row.filename,
+        title: row.title,
+        artist: row.artist !== 'Unknown artist' ? row.artist : ''
+      })
+    },
+    [player]
+  )
+
+  const columns = useMemo(() => makeColumns(handlePlay), [handlePlay])
   const [items, setItems] = useState<CollectionItem[]>([])
   const [filteredTotal, setFilteredTotal] = useState(0)
   const [status, setStatus] = useState<CollectionSyncStatus>(EMPTY_STATUS)
@@ -186,7 +198,7 @@ export default function CollectionPage(): React.JSX.Element {
     () =>
       items.map((item) => ({
         ...item,
-        ...deriveTrackFromFilename(item.filename)
+        ...deriveTrackSummaryFromFilename(item.filename)
       })),
     [items]
   )
@@ -197,69 +209,49 @@ export default function CollectionPage(): React.JSX.Element {
 
   return (
     <div className="space-y-4">
-      <Card>
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-sm font-semibold text-zinc-100">Collection</div>
-            <div className="text-xs text-zinc-400">Local tracks indexed in SQLite</div>
-          </div>
-          <button
+      <ViewSection
+        title="Collection"
+        subtitle="Local tracks indexed in SQLite."
+        aside={
+          <ActionButton
             type="button"
+            disabled={status.isSyncing}
             onClick={() => {
               void handleSyncNow()
             }}
-            disabled={status.isSyncing}
-            className="inline-flex h-8 items-center rounded-md border border-zinc-800 bg-zinc-950/40 px-3 text-sm text-zinc-100 hover:bg-zinc-950/60 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {status.isSyncing ? 'Syncing…' : 'Sync Now'}
-          </button>
-        </div>
-        <div className="mt-2 text-xs text-zinc-500">
+          </ActionButton>
+        }
+      >
+        <div className="text-xs text-zinc-500">
           {statusText} · {status.itemCount} indexed · {filteredTotal} shown
         </div>
-      </Card>
+      </ViewSection>
 
-      <Card>
-        <div className="grid grid-cols-5 gap-4 border-b border-zinc-800 pb-2 text-xs font-medium uppercase tracking-wider text-zinc-400">
-          <div>Title</div>
-          <div>Artist</div>
-          <div>Year</div>
-          <div>Size</div>
-          <div>Filename</div>
-        </div>
+      <ViewSection
+        title="Tracks"
+        subtitle="Search matches against filename text via SQLite FTS."
+        className="p-0"
+        bodyClassName="mt-0"
+      >
+        <DataTable
+          columns={columns}
+          rows={derivedRows}
+          getRowKey={(row) => row.filename}
+          loading={isLoading}
+          loadingMessage="Loading collection…"
+          emptyMessage="No tracks found. Use Sync Now after configuring folders."
+          tableClassName="min-w-[820px]"
+          className="rounded-none border-0"
+        />
+      </ViewSection>
 
-        <div className="divide-y divide-zinc-800">
-          {isLoading ? (
-            <div className="py-4 text-sm text-zinc-400">Loading collection…</div>
-          ) : derivedRows.length === 0 ? (
-            <div className="py-4 text-sm text-zinc-400">
-              No tracks found. Use Sync Now after configuring folders.
-            </div>
-          ) : (
-            derivedRows.map((row) => (
-              <div key={row.filename} className="grid grid-cols-5 gap-4 py-3 text-sm text-zinc-200">
-                <div className="truncate">{row.title}</div>
-                <div className="truncate text-zinc-300">{row.artist}</div>
-                <div className="text-zinc-300">{row.year}</div>
-                <div className="text-zinc-300">{formatFileSize(row.filesize)}</div>
-                <div className="truncate text-zinc-400" title={row.filename}>
-                  {row.filename}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-
-        <div className="mt-3 text-xs text-zinc-500">
-          Search matches against filename text via SQLite FTS.
-        </div>
-      </Card>
-
-      {(errorMessage || status.lastError) && (
-        <div className="rounded-lg border border-red-800/70 bg-red-950/30 p-3 text-sm text-red-200">
+      {errorMessage || status.lastError ? (
+        <Notice tone="error" className="text-sm">
           {errorMessage ?? status.lastError}
-        </div>
-      )}
+        </Notice>
+      ) : null}
     </div>
   )
 }

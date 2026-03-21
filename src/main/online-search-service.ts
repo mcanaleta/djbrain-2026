@@ -32,7 +32,7 @@ type SerperResponse = {
   message?: string
 }
 
-type DiscogsSearchResult = {
+export type DiscogsSearchResult = {
   id?: number
   type?: string
   title?: string
@@ -162,7 +162,7 @@ function createCandidate(
 ): OnlineSearchCandidate {
   return {
     artist: candidate.artist ? normalizeText(candidate.artist) : undefined,
-    artists: candidate.artists?.map((item) => normalizeText(item)).filter(Boolean),
+    artists: candidate.artists?.map((item: string) => normalizeText(item)).filter(Boolean),
     title: normalizeText(candidate.title),
     version: candidate.version ? normalizeText(candidate.version) : undefined,
     year: candidate.year ? normalizeText(candidate.year) : undefined
@@ -995,6 +995,13 @@ export class OnlineSearchService {
       items,
       sourceCounts
     }
+  }
+
+  public async searchDiscogsReleases(
+    settings: AppSettings,
+    query: string
+  ): Promise<DiscogsSearchResult[]> {
+    return requestDiscogsResults(ensureDiscogsConfigured(settings), query)
   }
 
   public async getDiscogsEntity(

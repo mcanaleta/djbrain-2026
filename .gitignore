@@ -7,5 +7,6 @@ release/
 .eslintcache
 *.log*
 *.tsbuildinfo
+.djbrain-data/
 
 .claude/

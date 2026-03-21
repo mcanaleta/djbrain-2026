@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import Versions from '../components/Versions'
+import { ActionButton, LabeledInput, Notice, ViewPanel, ViewSection } from '../components/view'
 
 type AppSettings = {
   musicFolderPath: string
@@ -75,29 +76,44 @@ function LabeledTextInput({
   onPick?: () => void
 }): React.JSX.Element {
   return (
-    <label className="block space-y-2">
-      <span className="text-xs font-medium uppercase tracking-wide text-zinc-400">{label}</span>
+    <div className="space-y-2">
       <div className="flex gap-2">
-        <input
+        <LabeledInput
+          label={label}
           type={type}
           value={value}
           onChange={(event) => onChange(event.target.value)}
           onBlur={onBlur}
           autoComplete={autoComplete}
           placeholder={placeholder}
-          className="h-9 w-full rounded-md border border-zinc-800 bg-zinc-950/30 px-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-700"
+          className="block flex-1"
+          inputClassName="h-9 rounded-md border-zinc-800 bg-zinc-950/30"
         />
         {onPick ? (
-          <button
-            type="button"
-            onClick={onPick}
-            className="inline-flex h-9 shrink-0 items-center rounded-md border border-zinc-800 bg-zinc-900/40 px-3 text-sm text-zinc-100 hover:bg-zinc-900/60"
-          >
-            Browse
-          </button>
+          <div className="pt-[18px]">
+            <ActionButton type="button" onClick={onPick}>
+              Browse
+            </ActionButton>
+          </div>
         ) : null}
       </div>
-    </label>
+    </div>
+  )
+}
+
+function SettingsSection({
+  title,
+  subtitle,
+  children
+}: {
+  title: string
+  subtitle: string
+  children: React.ReactNode
+}): React.JSX.Element {
+  return (
+    <ViewSection title={title} subtitle={subtitle} className="p-4">
+      {children}
+    </ViewSection>
   )
 }
 
@@ -203,20 +219,15 @@ export default function SettingsPage(): React.JSX.Element {
 
   if (isLoading) {
     return (
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 text-sm text-zinc-300">
+      <Notice className="p-4 text-sm text-zinc-300">
         Loading settings…
-      </div>
+      </Notice>
     )
   }
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
-        <div className="text-sm font-semibold text-zinc-100">Library Paths</div>
-        <div className="mt-1 text-sm text-zinc-400">
-          Local folders used by DJBrain (no Dropbox).
-        </div>
-
+      <SettingsSection title="Library Paths" subtitle="Local folders used by DJBrain (no Dropbox).">
         <div className="mt-4 space-y-3">
           <LabeledTextInput
             label="Music Root Folder"
@@ -334,14 +345,9 @@ export default function SettingsPage(): React.JSX.Element {
             </div>
           </div>
         </div>
-      </div>
+      </SettingsSection>
 
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
-        <div className="text-sm font-semibold text-zinc-100">Soulseek (slskd)</div>
-        <div className="mt-1 text-sm text-zinc-400">
-          Connection settings for your `slskd` server.
-        </div>
-
+      <SettingsSection title="Soulseek (slskd)" subtitle="Connection settings for your `slskd` server.">
         <div className="mt-4">
           <LabeledTextInput
             label="slskd Base URL"
@@ -368,16 +374,15 @@ export default function SettingsPage(): React.JSX.Element {
             />
           </div>
           <div className="mt-3 flex items-center gap-3">
-            <button
+            <ActionButton
               type="button"
               onClick={() => {
                 void testSlskdConnection()
               }}
               disabled={isTestingSlskd}
-              className="inline-flex h-9 items-center rounded-md border border-zinc-800 bg-zinc-900/40 px-3 text-sm text-zinc-100 hover:bg-zinc-900/60 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isTestingSlskd ? 'Testing…' : 'Test Connection'}
-            </button>
+            </ActionButton>
             {slskdTestResult ? (
               <div
                 className={`text-xs ${slskdTestResult.ok ? 'text-emerald-300' : 'text-red-300'}`}
@@ -392,14 +397,9 @@ export default function SettingsPage(): React.JSX.Element {
             )}
           </div>
         </div>
-      </div>
+      </SettingsSection>
 
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
-        <div className="text-sm font-semibold text-zinc-100">Discogs</div>
-        <div className="mt-1 text-sm text-zinc-400">
-          User token for direct Discogs API search.
-        </div>
-
+      <SettingsSection title="Discogs" subtitle="User token for direct Discogs API search.">
         <div className="mt-4 space-y-3">
           <LabeledTextInput
             label="Discogs User Token"
@@ -429,14 +429,9 @@ export default function SettingsPage(): React.JSX.Element {
             </a>
           </div>
         </div>
-      </div>
+      </SettingsSection>
 
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
-        <div className="text-sm font-semibold text-zinc-100">Serper</div>
-        <div className="mt-1 text-sm text-zinc-400">
-          API key for Serper web search.
-        </div>
-
+      <SettingsSection title="Serper" subtitle="API key for Serper web search.">
         <div className="mt-4 space-y-3">
           <LabeledTextInput
             label="Serper API Key"
@@ -470,14 +465,9 @@ export default function SettingsPage(): React.JSX.Element {
             is needed.
           </div>
         </div>
-      </div>
+      </SettingsSection>
 
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
-        <div className="text-sm font-semibold text-zinc-100">Grok (xAI)</div>
-        <div className="mt-1 text-sm text-zinc-400">
-          API key for Grok-powered online music search.
-        </div>
-
+      <SettingsSection title="Grok (xAI)" subtitle="API key for Grok-powered online music search.">
         <div className="mt-4 space-y-3">
           <LabeledTextInput
             label="Grok API Key"
@@ -507,35 +497,30 @@ export default function SettingsPage(): React.JSX.Element {
             </a>
           </div>
         </div>
-      </div>
+      </SettingsSection>
 
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
-        <div className="text-sm font-semibold text-zinc-100">Local Storage Paths</div>
-        <div className="mt-1 text-sm text-zinc-400">
-          Managed in app support. SQLite + cache + logs stay local.
-        </div>
-
+      <SettingsSection title="Local Storage Paths" subtitle="Managed in app support. SQLite + cache + logs stay local.">
         <div className="mt-4 space-y-2 text-xs text-zinc-300">
-          <div className="rounded-md border border-zinc-800 bg-zinc-950/30 px-3 py-2">
+          <ViewPanel tone="muted" padding="sm" className="rounded-md px-3 py-2">
             <div className="text-zinc-400">User data</div>
             <div className="mt-1 break-all font-mono">{appPaths.userDataPath || '—'}</div>
-          </div>
-          <div className="rounded-md border border-zinc-800 bg-zinc-950/30 px-3 py-2">
+          </ViewPanel>
+          <ViewPanel tone="muted" padding="sm" className="rounded-md px-3 py-2">
             <div className="text-zinc-400">Settings file</div>
             <div className="mt-1 break-all font-mono">{appPaths.settingsFilePath || '—'}</div>
-          </div>
-          <div className="rounded-md border border-zinc-800 bg-zinc-950/30 px-3 py-2">
+          </ViewPanel>
+          <ViewPanel tone="muted" padding="sm" className="rounded-md px-3 py-2">
             <div className="text-zinc-400">SQLite database</div>
             <div className="mt-1 break-all font-mono">{appPaths.databaseFilePath || '—'}</div>
-          </div>
-          <div className="rounded-md border border-zinc-800 bg-zinc-950/30 px-3 py-2">
+          </ViewPanel>
+          <ViewPanel tone="muted" padding="sm" className="rounded-md px-3 py-2">
             <div className="text-zinc-400">Cache directory</div>
             <div className="mt-1 break-all font-mono">{appPaths.cacheDirPath || '—'}</div>
-          </div>
-          <div className="rounded-md border border-zinc-800 bg-zinc-950/30 px-3 py-2">
+          </ViewPanel>
+          <ViewPanel tone="muted" padding="sm" className="rounded-md px-3 py-2">
             <div className="text-zinc-400">Logs directory</div>
             <div className="mt-1 break-all font-mono">{appPaths.logsDirPath || '—'}</div>
-          </div>
+          </ViewPanel>
         </div>
 
         <div className="mt-3 text-xs text-zinc-500">
@@ -543,21 +528,16 @@ export default function SettingsPage(): React.JSX.Element {
             ? 'At least one library path is configured.'
             : 'No library paths configured yet. Choose folders above.'}
         </div>
-      </div>
+      </SettingsSection>
 
-      {errorMessage ? (
-        <div className="rounded-lg border border-red-800/70 bg-red-950/30 p-3 text-sm text-red-200">
-          {errorMessage}
-        </div>
-      ) : null}
+      {errorMessage ? <Notice tone="error" className="text-sm">{errorMessage}</Notice> : null}
       {isSaving ? <div className="text-xs text-zinc-400">Saving settings…</div> : null}
 
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
-        <div className="text-sm font-semibold text-zinc-100">About</div>
+      <SettingsSection title="About" subtitle="Version and runtime info.">
         <div className="mt-3">
           <Versions />
         </div>
-      </div>
+      </SettingsSection>
     </div>
   )
 }

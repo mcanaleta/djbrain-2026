@@ -1,7 +1,7 @@
 import { watch, type Dirent, type FSWatcher } from 'node:fs'
 import { readdir, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve, sep, extname } from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
 import type { AppSettings } from './settings-store'
 
 const AUDIO_EXTENSIONS = new Set([
@@ -20,6 +20,7 @@ const AUDIO_EXTENSIONS = new Set([
 type ScanContext = {
   musicRootPath: string | null
   scanRoots: string[]
+  warning: string | null
 }
 
 type SyncChange = {
@@ -47,6 +48,7 @@ const EMPTY_SETTINGS: AppSettings = {
 export type CollectionItem = {
   filename: string
   filesize: number
+  score: number | null
 }
 
 export type CollectionListResult = {
@@ -70,6 +72,9 @@ export type WantListItem = {
   downloadUsername: string | null
   downloadFilename: string | null
   pipelineError: string | null
+  discogsReleaseId: number | null
+  discogsTrackPosition: string | null
+  importedFilename: string | null
 }
 
 export type WantListAddInput = {
@@ -89,6 +94,9 @@ export type WantListPipelinePatch = {
   downloadUsername?: string | null
   downloadFilename?: string | null
   pipelineError?: string | null
+  discogsReleaseId?: number | null
+  discogsTrackPosition?: string | null
+  importedFilename?: string | null
 }
 
 export type CollectionSyncStatus = {
@@ -119,8 +127,62 @@ function normalizeFilename(value: string): string {
   return value.replace(/[\\/]+/g, '/')
 }
 
+function normalizeSearchText(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/\p{M}+/gu, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+    .replace(/\s+/g, ' ')
+}
+
+function tokenizeSearchText(value: string): string[] {
+  const tokens = normalizeSearchText(value).match(/[\p{L}\p{N}]+/gu) ?? []
+  return [...new Set(tokens)]
+}
+
+function basenameOfFilename(filename: string): string {
+  const normalized = normalizeFilename(filename)
+  const lastSlashIndex = normalized.lastIndexOf('/')
+  return lastSlashIndex >= 0 ? normalized.slice(lastSlashIndex + 1) : normalized
+}
+
 function normalizeRelativeFolderPath(value: string): string {
   return normalizeFilename(value).replace(/^\/+/, '').replace(/\/+$/, '')
+}
+
+function normalizeWantListText(value: string): string {
+  return value.trim().replace(/\s+/g, ' ')
+}
+
+function normalizeWantListOptionalText(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+  const normalized = normalizeWantListText(value)
+  return normalized || null
+}
+
+function normalizeWantListInput(input: WantListAddInput): WantListAddInput {
+  const artist = normalizeWantListText(input.artist)
+  if (!artist) {
+    throw new Error('Want list artist is required.')
+  }
+
+  const title = normalizeWantListText(input.title)
+  if (!title) {
+    throw new Error('Want list title is required.')
+  }
+
+  return {
+    artist,
+    title,
+    version: normalizeWantListOptionalText(input.version),
+    length: normalizeWantListOptionalText(input.length),
+    album: normalizeWantListOptionalText(input.album),
+    label: normalizeWantListOptionalText(input.label)
+  }
 }
 
 function escapeLikePattern(value: string): string {
@@ -186,24 +248,6 @@ export class CollectionService {
   }
 
   public list(query: string = ''): CollectionListResult {
-    const ftsQuery = this.buildFtsQuery(query)
-    if (ftsQuery) {
-      const rows = this.db
-        .prepare(
-          `
-            SELECT
-              collection_files.filename AS filename,
-              collection_files.filesize AS filesize
-            FROM collection_files_fts
-            JOIN collection_files ON collection_files.rowid = collection_files_fts.rowid
-            WHERE collection_files_fts MATCH ?
-            ORDER BY bm25(collection_files_fts), collection_files.filename COLLATE NOCASE
-          `
-        )
-        .all(ftsQuery) as Array<{ filename: string; filesize: number | bigint }>
-      return this.toListResult(rows)
-    }
-
     const rows = this.db
       .prepare(
         `
@@ -214,7 +258,7 @@ export class CollectionService {
       )
       .all() as Array<{ filename: string; filesize: number | bigint }>
 
-    return this.toListResult(rows)
+    return this.toListResult(this.filterAndRankRows(rows, query))
   }
 
   public listDownloads(query: string = ''): CollectionListResult {
@@ -227,26 +271,6 @@ export class CollectionService {
     }
 
     const { clause, params } = this.buildPrefixWhereClause('collection_files.filename', prefixes)
-    const ftsQuery = this.buildFtsQuery(query)
-
-    if (ftsQuery) {
-      const rows = this.db
-        .prepare(
-          `
-            SELECT
-              collection_files.filename AS filename,
-              collection_files.filesize AS filesize
-            FROM collection_files_fts
-            JOIN collection_files ON collection_files.rowid = collection_files_fts.rowid
-            WHERE collection_files_fts MATCH ? AND (${clause})
-            ORDER BY bm25(collection_files_fts), collection_files.filename COLLATE NOCASE
-          `
-        )
-        .all(ftsQuery, ...params) as Array<{ filename: string; filesize: number | bigint }>
-
-      return this.toListResult(rows)
-    }
-
     const rows = this.db
       .prepare(
         `
@@ -260,7 +284,7 @@ export class CollectionService {
       )
       .all(...params) as Array<{ filename: string; filesize: number | bigint }>
 
-    return this.toListResult(rows)
+    return this.toListResult(this.filterAndRankRows(rows, query))
   }
 
   public async syncNow(): Promise<CollectionSyncStatus> {
@@ -279,9 +303,11 @@ export class CollectionService {
     try {
       do {
         this.pendingSync = false
-        await this.runSyncPass()
-        this.status.lastError = null
-        this.status.lastSyncedAt = new Date().toISOString()
+        const warning = await this.runSyncPass()
+        this.status.lastError = warning
+        if (!warning) {
+          this.status.lastSyncedAt = new Date().toISOString()
+        }
       } while (this.pendingSync && !this.disposed)
     } catch (error) {
       this.status.lastError = formatError(error)
@@ -381,7 +407,10 @@ export class CollectionService {
       ['best_candidates_json', 'TEXT'],
       ['download_username', 'TEXT'],
       ['download_filename', 'TEXT'],
-      ['pipeline_error', 'TEXT']
+      ['pipeline_error', 'TEXT'],
+      ['discogs_release_id', 'INTEGER'],
+      ['discogs_track_position', 'TEXT'],
+      ['imported_filename', 'TEXT']
     ]
     for (const [col, def] of pipelineCols) {
       if (!existingColumns.has(col)) {
@@ -390,27 +419,40 @@ export class CollectionService {
     }
   }
 
-  private async runSyncPass(): Promise<void> {
+  private async runSyncPass(): Promise<string | null> {
     const context = await this.resolveScanContext()
+    if (!context.musicRootPath || context.scanRoots.length === 0) {
+      return context.warning
+    }
+
     const knownState = this.readKnownState()
     const seen = new Set<string>()
     const changed = new Map<string, SyncChange>()
+    let hadReadError = false
 
     if (context.musicRootPath && context.scanRoots.length > 0) {
       for (const rootPath of context.scanRoots) {
-        await this.scanDirectory(rootPath, context.musicRootPath, knownState, seen, changed)
+        hadReadError =
+          (await this.scanDirectory(rootPath, context.musicRootPath, knownState, seen, changed)) ||
+          hadReadError
       }
     }
 
     const removed: string[] = []
-    for (const filename of knownState.keys()) {
-      if (!seen.has(filename)) {
-        removed.push(filename)
+    if (!hadReadError) {
+      for (const filename of knownState.keys()) {
+        if (!seen.has(filename)) {
+          removed.push(filename)
+        }
       }
     }
 
     this.applyChanges(changed, removed)
     this.status.itemCount = this.readItemCount()
+    if (hadReadError) {
+      return 'One or more scan folders could not be read. Existing collection entries were preserved.'
+    }
+    return context.warning
   }
 
   private readKnownState(): Map<string, number> {
@@ -475,8 +517,9 @@ export class CollectionService {
     knownState: Map<string, number>,
     seen: Set<string>,
     changed: Map<string, SyncChange>
-  ): Promise<void> {
+  ): Promise<boolean> {
     const pendingDirectories: string[] = [rootPath]
+    let hadReadError = false
 
     while (pendingDirectories.length > 0) {
       const currentDirectory = pendingDirectories.pop()
@@ -488,6 +531,7 @@ export class CollectionService {
       try {
         entries = await readdir(currentDirectory, { withFileTypes: true, encoding: 'utf8' })
       } catch {
+        hadReadError = true
         continue
       }
 
@@ -531,6 +575,8 @@ export class CollectionService {
         })
       }
     }
+
+    return hadReadError
   }
 
   private toRelativeFilename(absolutePath: string, musicRootPath: string): string | null {
@@ -602,11 +648,12 @@ export class CollectionService {
   }
 
   private toListResult(
-    rows: Array<{ filename: string; filesize: number | bigint }>
+    rows: Array<{ filename: string; filesize: number | bigint; score?: number | null }>
   ): CollectionListResult {
     const items = rows.map((row) => ({
       filename: row.filename,
-      filesize: toNumber(row.filesize)
+      filesize: toNumber(row.filesize),
+      score: typeof row.score === 'number' ? row.score : null
     }))
 
     return {
@@ -615,12 +662,130 @@ export class CollectionService {
     }
   }
 
-  private buildFtsQuery(query: string): string | null {
-    const terms = query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []
+  private filterAndRankRows(
+    rows: Array<{ filename: string; filesize: number | bigint; score?: number | null }>,
+    query: string
+  ): Array<{ filename: string; filesize: number | bigint; score: number | null }> {
+    const terms = tokenizeSearchText(query)
     if (terms.length === 0) {
-      return null
+      return rows.map((row) => ({ ...row, score: null }))
     }
-    return terms.map((term) => `"${term}"*`).join(' AND ')
+
+    const rankedRows = rows
+      .map((row) => ({
+        row,
+        score: this.scoreCollectionMatch(row.filename, terms)
+      }))
+      .filter((entry) => entry.score > 0)
+      .sort(
+        (left, right) =>
+          right.score - left.score ||
+          left.row.filename.localeCompare(right.row.filename, undefined, { sensitivity: 'base' })
+      )
+
+    return rankedRows.map((entry) => ({ ...entry.row, score: entry.score }))
+  }
+
+  private scoreCollectionMatch(filename: string, terms: string[]): number {
+    const basename = basenameOfFilename(filename)
+    const normalizedBasename = normalizeSearchText(basename)
+    const normalizedFilename = normalizeSearchText(filename)
+    const basenameTerms = tokenizeSearchText(basename)
+    const fullTerms = new Set(tokenizeSearchText(filename))
+    const queryText = terms.join(' ')
+
+    let score = 0
+    let matchedTerms = 0
+    let strongMatches = 0
+
+    for (const term of terms) {
+      const weight = this.getSearchTermWeight(term)
+
+      if (basenameTerms.includes(term)) {
+        score += weight * 10
+        matchedTerms += 1
+        strongMatches += 1
+        continue
+      }
+
+      if (basenameTerms.some((basenameTerm) => basenameTerm.startsWith(term) || term.startsWith(basenameTerm))) {
+        score += weight * 7
+        matchedTerms += 1
+        strongMatches += 1
+        continue
+      }
+
+      if (fullTerms.has(term)) {
+        score += weight * 4
+        matchedTerms += 1
+        continue
+      }
+
+      if (normalizedFilename.includes(term)) {
+        score += weight * 2
+        matchedTerms += 1
+      }
+    }
+
+    if (matchedTerms === 0) {
+      return 0
+    }
+
+    if (normalizedBasename.includes(queryText)) {
+      score += 220
+    } else if (normalizedFilename.includes(queryText)) {
+      score += 120
+    }
+
+    const orderedMatches = this.countOrderedTermMatches(basenameTerms, terms)
+    score += orderedMatches * 18
+
+    if (strongMatches >= 2) {
+      score += strongMatches * 24
+    }
+
+    if (strongMatches === terms.length) {
+      score += 160
+    }
+
+    return score
+  }
+
+  private countOrderedTermMatches(filenameTerms: string[], queryTerms: string[]): number {
+    let matchCount = 0
+    let nextIndex = 0
+
+    for (const queryTerm of queryTerms) {
+      const matchedIndex = filenameTerms.findIndex(
+        (filenameTerm, index) =>
+          index >= nextIndex &&
+          (filenameTerm === queryTerm ||
+            filenameTerm.startsWith(queryTerm) ||
+            queryTerm.startsWith(filenameTerm))
+      )
+
+      if (matchedIndex === -1) {
+        continue
+      }
+
+      matchCount += 1
+      nextIndex = matchedIndex + 1
+    }
+
+    return matchCount
+  }
+
+  private getSearchTermWeight(term: string): number {
+    if (term.length >= 6) {
+      return 18
+    }
+    if (term.length >= 4) {
+      return 12
+    }
+    if (term.length >= 3) {
+      return 8
+    }
+    return 4
   }
 
   private readItemCount(): number {
@@ -658,6 +823,9 @@ export class CollectionService {
     }
 
     const context = await this.resolveScanContext()
+    this.status.lastError = context.warning
+    this.emitStatus()
+
     for (const rootPath of context.scanRoots) {
       try {
         const watcher = watch(rootPath, { recursive: true }, () => {
@@ -704,17 +872,23 @@ export class CollectionService {
       bestCandidatesJson: (row['best_candidates_json'] as string | null) ?? null,
       downloadUsername: (row['download_username'] as string | null) ?? null,
       downloadFilename: (row['download_filename'] as string | null) ?? null,
-      pipelineError: (row['pipeline_error'] as string | null) ?? null
+      pipelineError: (row['pipeline_error'] as string | null) ?? null,
+      discogsReleaseId:
+        row['discogs_release_id'] != null ? toNumber(row['discogs_release_id']) : null,
+      discogsTrackPosition: (row['discogs_track_position'] as string | null) ?? null,
+      importedFilename: (row['imported_filename'] as string | null) ?? null
     }
   }
 
   private readonly WANT_LIST_COLUMNS = `
     id, artist, title, version, length, album, label, added_at,
     pipeline_status, search_id, search_result_count, best_candidates_json,
-    download_username, download_filename, pipeline_error
+    download_username, download_filename, pipeline_error,
+    discogs_release_id, discogs_track_position, imported_filename
   `
 
   public wantListAdd(input: WantListAddInput): WantListItem {
+    const normalized = normalizeWantListInput(input)
     const row = this.db
       .prepare(
         `INSERT INTO want_list (artist, title, version, length, album, label)
@@ -722,12 +896,12 @@ export class CollectionService {
          RETURNING ${this.WANT_LIST_COLUMNS}`
       )
       .get(
-        input.artist,
-        input.title,
-        input.version ?? null,
-        input.length ?? null,
-        input.album ?? null,
-        input.label ?? null
+        normalized.artist,
+        normalized.title,
+        normalized.version ?? null,
+        normalized.length ?? null,
+        normalized.album ?? null,
+        normalized.label ?? null
       ) as Record<string, unknown>
     return this.rowToWantListItem(row)
   }
@@ -740,6 +914,7 @@ export class CollectionService {
   }
 
   public wantListUpdate(id: number, input: WantListAddInput): WantListItem | null {
+    const normalized = normalizeWantListInput(input)
     const row = this.db
       .prepare(
         `UPDATE want_list
@@ -748,12 +923,12 @@ export class CollectionService {
          RETURNING ${this.WANT_LIST_COLUMNS}`
       )
       .get(
-        input.artist,
-        input.title,
-        input.version ?? null,
-        input.length ?? null,
-        input.album ?? null,
-        input.label ?? null,
+        normalized.artist,
+        normalized.title,
+        normalized.version ?? null,
+        normalized.length ?? null,
+        normalized.album ?? null,
+        normalized.label ?? null,
         id
       ) as Record<string, unknown> | undefined
     return row ? this.rowToWantListItem(row) : null
@@ -761,7 +936,7 @@ export class CollectionService {
 
   public wantListUpdatePipeline(id: number, patch: WantListPipelinePatch): WantListItem | null {
     const parts: string[] = []
-    const params: unknown[] = []
+    const params: SQLInputValue[] = []
     if ('pipelineStatus' in patch) {
       parts.push('pipeline_status = ?')
       params.push(patch.pipelineStatus ?? 'idle')
@@ -790,6 +965,18 @@ export class CollectionService {
       parts.push('pipeline_error = ?')
       params.push(patch.pipelineError ?? null)
     }
+    if ('discogsReleaseId' in patch) {
+      parts.push('discogs_release_id = ?')
+      params.push(patch.discogsReleaseId ?? null)
+    }
+    if ('discogsTrackPosition' in patch) {
+      parts.push('discogs_track_position = ?')
+      params.push(patch.discogsTrackPosition ?? null)
+    }
+    if ('importedFilename' in patch) {
+      parts.push('imported_filename = ?')
+      params.push(patch.importedFilename ?? null)
+    }
     if (parts.length === 0) return this.wantListGet(id)
     params.push(id)
     const row = this.db
@@ -816,7 +1003,8 @@ export class CollectionService {
     if (!musicFolderPath) {
       return {
         musicRootPath: null,
-        scanRoots: []
+        scanRoots: [],
+        warning: 'Music root folder is not configured.'
       }
     }
 
@@ -827,13 +1015,15 @@ export class CollectionService {
       if (!rootStats.isDirectory()) {
         return {
           musicRootPath,
-          scanRoots: []
+          scanRoots: [],
+          warning: `Music root is not a directory: ${musicRootPath}`
         }
       }
-    } catch {
+    } catch (error) {
       return {
         musicRootPath,
-        scanRoots: []
+        scanRoots: [],
+        warning: `Music root is not accessible: ${formatError(error)}`
       }
     }
 
@@ -883,7 +1073,11 @@ export class CollectionService {
 
     return {
       musicRootPath,
-      scanRoots: dedupedRoots
+      scanRoots: dedupedRoots,
+      warning:
+        dedupedRoots.length > 0
+          ? null
+          : 'No accessible songs or download folders were found under the configured music root.'
     }
   }
 }

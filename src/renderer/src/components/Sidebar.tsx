@@ -36,7 +36,7 @@ export default function Sidebar(): React.JSX.Element {
       </nav>
 
       <Separator.Root className="my-4 h-px w-full bg-zinc-800" />
-      <div className="text-xs text-zinc-500">Local-first DJ manager. UI scaffold only.</div>
+      <div className="text-xs text-zinc-500">Browser-first DJ manager with local demo data.</div>
     </aside>
   )
 }
