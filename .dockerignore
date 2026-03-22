@@ -1,0 +1,10 @@
+node_modules
+dist
+out
+.djbrain-data
+.git
+.gitignore
+*.md
+.eslintcache
+.vscode
+.idea

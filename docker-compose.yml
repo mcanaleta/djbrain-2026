@@ -1,0 +1,29 @@
+services:
+  djbrain:
+    build: .
+    ports:
+      - "5178:5178"
+    volumes:
+      # Persistent app data (SQLite DB, settings, cache)
+      - djbrain-data:/data
+      # Mount your music library (read/write for imports & tagging)
+      - /Users/mcanaleta/Library/CloudStorage/Dropbox/music:/music
+    env_file: .env
+    environment:
+      DJBRAIN_DATA_DIR: /data
+    restart: unless-stopped
+
+  # Optional: Soulseek daemon for P2P search/download
+  # slskd:
+  #   image: slskd/slskd
+  #   ports:
+  #     - "5030:5030"
+  #   volumes:
+  #     - slskd-data:/app
+  #     - /path/to/your/music:/music
+  #   environment:
+  #     SLSKD_REMOTE_CONFIGURATION: "true"
+
+volumes:
+  djbrain-data:
+  # slskd-data:

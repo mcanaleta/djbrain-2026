@@ -1,6 +1,6 @@
 import type { AppSettings } from './settings-store.ts'
 import type { OnlineSearchService } from './online-search-service.ts'
-import type { DiscogsEntityDetail } from '../shared/discogs.ts'
+import type { DiscogsRelease, DiscogsMaster, DiscogsEntity } from '../shared/discogs.ts'
 import type { DiscogsTrackMatch } from '../shared/discogs-match.ts'
 import { DISCOGS_CONFIDENT_THRESHOLD } from '../shared/discogs-match.ts'
 
@@ -51,19 +51,12 @@ function scoreTrackTitle(
 
 // ─── Per-release scoring ──────────────────────────────────────────────────────
 
-function scoreArtist(entity: DiscogsEntityDetail, targetArtist: string): number {
+type TrackableEntity = DiscogsRelease | DiscogsMaster
+
+function scoreArtist(entity: TrackableEntity, targetArtist: string): number {
   const normTarget = norm(targetArtist)
 
-  // subtitle is the artist string for releases/masters
-  const candidates = [
-    entity.subtitle ?? '',
-    // also check inside relatedSections for artists
-    ...(entity.relatedSections
-      .find((s) => s.title === 'Artists')
-      ?.items.map((i) => i.name) ?? [])
-  ]
-
-  for (const candidate of candidates) {
+  for (const candidate of entity.artists) {
     const normCandidate = norm(candidate)
     if (normCandidate === normTarget) return 20
     if (normCandidate.includes(normTarget) || normTarget.includes(normCandidate)) return 12
@@ -72,20 +65,29 @@ function scoreArtist(entity: DiscogsEntityDetail, targetArtist: string): number 
   return 0
 }
 
-function extractLabel(entity: DiscogsEntityDetail): string | null {
-  return entity.facts.find((f) => f.label === 'Labels')?.value ?? null
-}
-
-function extractCatalogNumber(entity: DiscogsEntityDetail): string | null {
-  return entity.facts.find((f) => f.label === 'Catalog No')?.value ?? null
-}
-
-function resolveArtist(entity: DiscogsEntityDetail, fallback: string): string {
-  const artistSection = entity.relatedSections.find((s) => s.title === 'Artists')
-  if (artistSection && artistSection.items.length > 0) {
-    return artistSection.items.map((i) => i.name).join(', ')
+function extractLabel(entity: TrackableEntity): string | null {
+  if (entity.type === 'release' && entity.labels.length > 0) {
+    return entity.labels[0]
   }
-  return entity.subtitle ?? fallback
+  return null
+}
+
+function extractCatalogNumber(entity: TrackableEntity): string | null {
+  if (entity.type === 'release' && entity.catalogNumbers.length > 0) {
+    return entity.catalogNumbers[0]
+  }
+  return null
+}
+
+function resolveArtist(entity: TrackableEntity, fallback: string): string {
+  if (entity.artists.length > 0) {
+    return entity.artists.join(', ')
+  }
+  return fallback
+}
+
+function isTrackable(entity: DiscogsEntity): entity is TrackableEntity {
+  return entity.type === 'release' || entity.type === 'master'
 }
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -123,7 +125,7 @@ export class DiscogsMatchService {
       if (type !== 'release' && type !== 'master') continue
       if (!result.id) continue
 
-      let entity: DiscogsEntityDetail
+      let entity: DiscogsEntity
       try {
         entity = await onlineSearch.getDiscogsEntity(settings, type, result.id)
       } catch (err) {
@@ -131,6 +133,7 @@ export class DiscogsMatchService {
         continue
       }
 
+      if (!isTrackable(entity)) continue
       if (!entity.tracklist.length) continue
 
       const artistScore = scoreArtist(entity, artist)

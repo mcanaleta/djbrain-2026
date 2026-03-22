@@ -9,4 +9,5 @@ release/
 *.tsbuildinfo
 .djbrain-data/
 
+.env
 .claude/

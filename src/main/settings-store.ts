@@ -111,6 +111,35 @@ function normalizeDownloadFolderPaths(value: unknown, musicFolderPath: string): 
   return output
 }
 
+// Environment variable overrides (DJBRAIN_* prefix).
+// Non-empty env vars take precedence over file-based settings.
+function applyEnvOverrides(settings: Record<string, unknown>): Record<string, unknown> {
+  const ENV_MAP: Record<string, string> = {
+    DJBRAIN_MUSIC_FOLDER_PATH: 'musicFolderPath',
+    DJBRAIN_SONGS_FOLDER_PATH: 'songsFolderPath',
+    DJBRAIN_DOWNLOAD_FOLDER_PATHS: 'downloadFolderPaths',
+    DJBRAIN_SLSKD_BASE_URL: 'slskdBaseURL',
+    DJBRAIN_SLSKD_API_KEY: 'slskdApiKey',
+    DJBRAIN_DISCOGS_USER_TOKEN: 'discogsUserToken',
+    DJBRAIN_GROK_API_KEY: 'grokApiKey',
+    DJBRAIN_SERPER_API_KEY: 'serperApiKey',
+    DJBRAIN_YOUTUBE_API_KEY: 'youtubeApiKey'
+  }
+
+  const result = { ...settings }
+  for (const [envKey, settingKey] of Object.entries(ENV_MAP)) {
+    const envValue = process.env[envKey]
+    if (typeof envValue === 'string' && envValue.trim()) {
+      if (settingKey === 'downloadFolderPaths') {
+        result[settingKey] = envValue.split(',').map((s) => s.trim()).filter(Boolean)
+      } else {
+        result[settingKey] = envValue.trim()
+      }
+    }
+  }
+  return result
+}
+
 function normalizeSettings(value: unknown): AppSettings {
   const source = isRecord(value) ? value : {}
   const slskdBaseURL = normalizeString(source.slskdBaseURL)
@@ -196,13 +225,15 @@ export class SettingsStore {
       mkdir(this.appPaths.logsDirPath, { recursive: true })
     ])
 
+    let fileSettings: unknown = {}
     try {
       const fileContent = await readFile(this.appPaths.settingsFilePath, 'utf-8')
-      this.settings = normalizeSettings(JSON.parse(fileContent))
+      fileSettings = JSON.parse(fileContent)
     } catch {
-      this.settings = { ...DEFAULT_SETTINGS }
-      await this.persist()
+      // No settings file yet — start from defaults
     }
+    const merged = applyEnvOverrides(isRecord(fileSettings) ? fileSettings : {})
+    this.settings = normalizeSettings(merged)
     await this.persist()
   }
 

@@ -207,8 +207,8 @@ const browserApi: DJBrainApi = {
       request(
         `/api/online-search?query=${encodeURIComponent(query)}&scope=${encodeURIComponent(scope ?? 'online')}`
       ),
-    getDiscogsEntity: (type: DiscogsEntityType, id: number | string) =>
-      request(`/api/discogs/${type}/${id}`)
+    getDiscogsEntity: ((type: DiscogsEntityType, id: number | string) =>
+      request(`/api/discogs/${type}/${id}`)) as DJBrainApi['onlineSearch']['getDiscogsEntity']
   },
   youtube: {
     search: (query: string) => request(`/api/youtube-search?query=${encodeURIComponent(query)}`)
