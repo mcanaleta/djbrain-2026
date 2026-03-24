@@ -63,9 +63,9 @@ export default function GrokSearchPage(): React.JSX.Element {
     const loadSettings = async (): Promise<void> => {
       setIsLoadingSettings(true)
       try {
-        const snapshot = await window.api.settings.get()
+        const settings = await window.api.settings.get()
         setSettings({
-          grokApiKey: snapshot.settings.grokApiKey
+          grokApiKey: settings.grokApiKey
         })
       } catch (error) {
         setErrorMessage(formatError(error))
@@ -85,7 +85,7 @@ export default function GrokSearchPage(): React.JSX.Element {
       return
     }
     if (!hasConfig) {
-      setErrorMessage('Configure Grok API key in Settings before searching.')
+      setErrorMessage('Set DJBRAIN_GROK_API_KEY before searching.')
       return
     }
 
@@ -137,7 +137,7 @@ export default function GrokSearchPage(): React.JSX.Element {
 
         {!hasConfig && !isLoadingSettings ? (
           <Notice tone="warning" className="mt-3 text-sm">
-            Configure Grok API key in Settings before searching.
+            Set `DJBRAIN_GROK_API_KEY` before searching.
           </Notice>
         ) : null}
       </ViewSection>

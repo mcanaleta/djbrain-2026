@@ -1,7 +1,9 @@
 import type {
+  ImportCommitInput,
+  ImportComparison,
   ImportFileResult,
+  ImportReview,
   DJBrainApi,
-  SettingsPatch,
   SlskdConnectionTestInput,
   WantListAddInput,
   WantListItem,
@@ -181,18 +183,7 @@ const browserApi: DJBrainApi = {
     }
   },
   settings: {
-    get: () => request('/api/settings'),
-    update: (patch: SettingsPatch) =>
-      request('/api/settings', {
-        method: 'PATCH',
-        headers: JSON_HEADERS,
-        body: JSON.stringify(patch)
-      }),
-    async pickDirectory(options) {
-      const promptText = options?.title ?? 'Enter an absolute folder path'
-      const defaultValue = options?.defaultPath ?? ''
-      return window.prompt(promptText, defaultValue)?.trim() || null
-    }
+    get: () => request('/api/settings')
   },
   slskd: {
     testConnection: (input: SlskdConnectionTestInput) =>
@@ -240,6 +231,27 @@ const browserApi: DJBrainApi = {
         collectionListeners.delete(listener)
         stopCollectionPolling()
       }
+    },
+    getImportReview: (filename: string) =>
+      request<ImportReview>('/api/collection/import/review', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ filename })
+      }),
+    compareImport: (filename: string, existingFilename: string) =>
+      request<ImportComparison>('/api/collection/import/compare', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ filename, existingFilename })
+      }),
+    async commitImport(input: ImportCommitInput) {
+      const result = await request<ImportFileResult>('/api/collection/import', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify(input)
+      })
+      void syncCollectionSnapshot()
+      return result
     },
     async importFile(filename: string) {
       const result = await request<ImportFileResult>(`/api/collection/import`, {

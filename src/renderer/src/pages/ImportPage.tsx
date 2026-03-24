@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ExternalLinkIcon, OpenInNewWindowIcon, PauseIcon, PlayIcon, TrashIcon } from '@radix-ui/react-icons'
-import type { ImportFileResult } from '../../../shared/api'
+import { useNavigate } from 'react-router-dom'
 import { ActionButton, DataTable, LabeledInput, Notice, ViewSection, type DataTableColumn } from '../components/view'
 import { usePlayer, localFileUrl } from '../context/PlayerContext'
 import {
@@ -27,6 +27,7 @@ type RowImportState =
   | { status: 'importing' }
   | { status: 'imported'; dest: string }
   | { status: 'imported_upgrade'; dest: string; existing: string }
+  | { status: 'replaced'; dest: string }
   | { status: 'skipped'; existing: string }
   | { status: 'needs_review' }
   | { status: 'error'; message: string }
@@ -43,46 +44,32 @@ function formatError(error: unknown): string {
   return 'Unexpected import list error'
 }
 
+function statusChip(label: string, className: string, title?: string): React.JSX.Element {
+  return <span className={`inline-flex rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${className}`} title={title}>{label}</span>
+}
+
 function importStateLabel(state: RowImportState): React.JSX.Element | null {
   if (state.status === 'idle') return null
   if (state.status === 'importing') {
-    return (
-      <span className="inline-flex items-center gap-1 text-xs text-zinc-400">
-        <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-zinc-400" />
-        Importing…
-      </span>
-    )
+    return statusChip('Importing', 'border-zinc-700 bg-zinc-950/60 text-zinc-200')
   }
   if (state.status === 'imported') {
-    return (
-      <span className="text-xs text-emerald-400" title={state.dest}>
-        ✓ Imported
-      </span>
-    )
+    return statusChip('Imported', 'border-sky-700/50 bg-sky-950/60 text-sky-100', state.dest)
   }
   if (state.status === 'imported_upgrade') {
-    return (
-      <span className="text-xs text-sky-400" title={`Saved as: ${state.dest}`}>
-        ↑ Upgraded
-      </span>
-    )
+    return statusChip('Upgraded', 'border-violet-700/50 bg-violet-950/60 text-violet-100', `Saved as: ${state.dest}`)
+  }
+  if (state.status === 'replaced') {
+    return statusChip('Replaced', 'border-amber-700/50 bg-amber-950/60 text-amber-100', `Replaced: ${state.dest}`)
   }
   if (state.status === 'skipped') {
-    return (
-      <span className="text-xs text-zinc-500" title={`Already at: ${state.existing}`}>
-        — Already have it
-      </span>
-    )
+    return statusChip('Already have it', 'border-zinc-700 bg-zinc-950/60 text-zinc-300', `Already at: ${state.existing}`)
   }
   if (state.status === 'needs_review') {
-    return <span className="text-xs text-amber-400">? No Discogs match</span>
+    return statusChip('Needs review', 'border-amber-700/50 bg-amber-950/60 text-amber-100')
   }
   if (state.status === 'error') {
-    return (
-      <span className="max-w-[14rem] truncate text-xs text-red-400" title={state.message}>
-        ✗ {state.message}
-      </span>
-    )
+    return statusChip('Error', 'max-w-[14rem] truncate border-rose-700/50 bg-rose-950/60 text-rose-100', state.message)
   }
   return null
 }
@@ -95,7 +82,9 @@ type ImportRow = CollectionItem & {
 
 export default function ImportPage(): React.JSX.Element {
   const player = usePlayer()
+  const navigate = useNavigate()
   const [musicFolderPath, setMusicFolderPath] = useState<string>('')
+  const [downloadFolderPaths, setDownloadFolderPaths] = useState<string[]>([])
 
   const [query, setQuery] = useState('')
   const [submittedSearch, setSubmittedSearch] = useState({ query: '', submittedAt: 0 })
@@ -113,8 +102,9 @@ export default function ImportPage(): React.JSX.Element {
   latestQueryRef.current = submittedSearch.query
 
   useEffect(() => {
-    window.api.settings.get().then((snap) => {
-      setMusicFolderPath(snap.settings.musicFolderPath)
+    window.api.settings.get().then((settings) => {
+      setMusicFolderPath(settings.musicFolderPath)
+      setDownloadFolderPaths(settings.downloadFolderPaths)
     }).catch(() => {})
   }, [])
 
@@ -167,39 +157,6 @@ export default function ImportPage(): React.JSX.Element {
       title: item.title,
       artist: item.artist
     })
-  }
-
-  const handleImport = async (filename: string): Promise<void> => {
-    setImportStates((prev) => new Map(prev).set(filename, { status: 'importing' }))
-    try {
-      const result: ImportFileResult = await window.api.collection.importFile(filename)
-      setImportStates((prev) => {
-        const next = new Map(prev)
-        if (result.status === 'imported') {
-          next.set(filename, { status: 'imported', dest: result.destRelativePath })
-        } else if (result.status === 'imported_upgrade') {
-          next.set(filename, {
-            status: 'imported_upgrade',
-            dest: result.destRelativePath,
-            existing: result.existingRelativePath
-          })
-        } else if (result.status === 'skipped_existing') {
-          next.set(filename, { status: 'skipped', existing: result.existingRelativePath })
-        } else if (result.status === 'needs_review') {
-          next.set(filename, { status: 'needs_review' })
-        } else if (result.status === 'error') {
-          next.set(filename, { status: 'error', message: result.message })
-        }
-        return next
-      })
-    } catch (error) {
-      setImportStates((prev) =>
-        new Map(prev).set(filename, {
-          status: 'error',
-          message: error instanceof Error ? error.message : 'Import failed'
-        })
-      )
-    }
   }
 
   const handleDeleteFile = async (filename: string): Promise<void> => {
@@ -272,7 +229,12 @@ export default function ImportPage(): React.JSX.Element {
       key: 'title',
       header: 'Title',
       cellClassName: 'max-w-[240px] truncate text-zinc-100',
-      render: (row) => <span title={row.title}>{row.title}</span>
+      render: (row) => (
+        <div className="min-w-0">
+          <div className="truncate" title={row.title}>{row.title}</div>
+          <div className="truncate text-[10px] text-zinc-500" title={row.filename}>{row.filename}</div>
+        </div>
+      )
     },
     {
       key: 'artist',
@@ -315,11 +277,11 @@ export default function ImportPage(): React.JSX.Element {
               type="button"
               size="xs"
               onClick={() => {
-                void handleImport(row.filename)
+                navigate(`/import/review?filename=${encodeURIComponent(row.filename)}`)
               }}
               className="rounded px-2.5 py-0.5"
             >
-              Import
+              Review
             </ActionButton>
           )
         }
@@ -390,7 +352,7 @@ export default function ImportPage(): React.JSX.Element {
             void handleDeleteFile(row.filename)
           }}
           title="Delete file"
-          className="inline-flex h-7 w-7 items-center justify-center rounded text-zinc-600 transition-colors hover:bg-red-950/40 hover:text-red-400"
+          className="inline-flex h-7 w-7 items-center justify-center rounded text-zinc-600 transition-colors hover:bg-rose-950/40 hover:text-rose-300"
         >
           <TrashIcon className="h-3.5 w-3.5" />
         </button>
@@ -444,6 +406,22 @@ export default function ImportPage(): React.JSX.Element {
           />
           <div className="shrink-0 pb-1 text-xs text-zinc-400">{total} items</div>
         </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <ActionButton size="xs" tone={submittedSearch.query ? 'default' : 'primary'} onClick={() => {
+            setQuery('')
+            setSubmittedSearch({ query: '', submittedAt: Date.now() })
+          }}>
+            All
+          </ActionButton>
+          {downloadFolderPaths.map((folder) => (
+            <ActionButton key={folder} size="xs" tone={submittedSearch.query === folder ? 'primary' : 'default'} onClick={() => {
+              setQuery(folder)
+              setSubmittedSearch({ query: folder, submittedAt: Date.now() })
+            }}>
+              {folder}
+            </ActionButton>
+          ))}
+        </div>
       </ViewSection>
 
       <ViewSection title="Download Files" subtitle="Compact import queue from configured download roots." className="p-0" bodyClassName="mt-0">
@@ -453,7 +431,7 @@ export default function ImportPage(): React.JSX.Element {
           getRowKey={(row) => row.filename}
           loading={isLoading}
           loadingMessage="Loading…"
-          emptyMessage="No files in download folders. Configure paths in Settings and sync."
+          emptyMessage="No files in configured download folders. Update env and sync."
           tableClassName="min-w-[1120px]"
           rowClassName={(row) =>
             player.track?.filename === row.filename ? 'bg-zinc-800/40' : 'hover:bg-zinc-800/20'

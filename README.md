@@ -92,7 +92,7 @@ src/
 │   ├── slskd-service.ts         # Soulseek search & download via slskd REST API
 │   ├── online-search-service.ts # Discogs + Serper search, entity detail fetching
 │   ├── grok-search-service.ts   # Grok AI LLM music search
-│   └── settings-store.ts        # settings.json persistence
+│   └── settings-store.ts        # env-backed app settings normalization
 ├── server/
 │   └── index.ts                 # Express routes + media streaming + startup
 ├── renderer/
@@ -207,7 +207,7 @@ Always use this pattern — never use `IF NOT EXISTS` (not supported for columns
 
 ## Settings
 
-Persisted to `{userData}/settings.json`.
+Loaded from `DJBRAIN_*` environment variables.
 
 ```typescript
 interface AppSettings {
@@ -227,7 +227,7 @@ interface AppSettings {
 }
 ```
 
-`SettingsStore` in `src/main/settings-store.ts` handles reads, writes, and path derivation.
+`settings-store.ts` in `src/main/settings-store.ts` normalizes environment values into `AppSettings`.
 
 ---
 
@@ -261,7 +261,6 @@ To add a new page:
 | `/spotify` | SpotifyPage | Stub |
 | `/import` | ImportPage | Stub |
 | `/dropbox` | DropboxPage | Stub |
-| `/settings` | SettingsPage | Working |
 
 ---
 
@@ -305,8 +304,8 @@ Uses Grok AI with web search tools to find tracks. Returns structured `GrokTrack
 
 ### SettingsStore (`src/main/settings-store.ts`)
 
-- Reads/writes `settings.json`
-- Exposes `snapshot()` and `update(patch)` — patch is merged, not replaced
+- Reads `DJBRAIN_*` env vars
+- Returns a normalized `AppSettings` object
 
 ---
 
@@ -437,7 +436,7 @@ Use the idempotent migration pattern (see [Migrations](#migrations) above). Plac
 
 ### New external API integration
 
-- Add API key to `AppSettings` in `settings-store.ts` and to `SettingsPage`
+- Add API key to `AppSettings` in `settings-store.ts`
 - Create `src/main/my-api-service.ts`
 - Register route in `src/server/index.ts`
 - Add client call in `src/renderer/src/lib/browser-api.ts`

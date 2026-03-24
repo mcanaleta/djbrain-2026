@@ -1,4 +1,5 @@
 import type { DiscogsArtist, DiscogsLabel, DiscogsMaster, DiscogsRelease } from './discogs'
+import type { DiscogsTrackMatch } from './discogs-match'
 import type { GrokSearchResponse } from './grok-search'
 import type { OnlineSearchResponse, OnlineSearchScope } from './online-search'
 
@@ -12,27 +13,6 @@ export type AppSettings = {
   grokApiKey: string
   serperApiKey: string
   youtubeApiKey: string
-}
-
-export type AppPaths = {
-  userDataPath: string
-  settingsFilePath: string
-  dataDirPath: string
-  databaseFilePath: string
-  cacheDirPath: string
-  logsDirPath: string
-}
-
-export type SettingsSnapshot = {
-  settings: AppSettings
-  appPaths: AppPaths
-}
-
-export type SettingsPatch = Partial<AppSettings>
-
-export type PickDirectoryOptions = {
-  title?: string
-  defaultPath?: string
 }
 
 export type CollectionItem = {
@@ -132,9 +112,74 @@ export type SlskdConnectionTestResult = {
 export type ImportFileResult =
   | { status: 'imported'; destRelativePath: string }
   | { status: 'imported_upgrade'; destRelativePath: string; existingRelativePath: string }
+  | { status: 'replaced'; replacedRelativePath: string }
   | { status: 'skipped_existing'; existingRelativePath: string }
   | { status: 'needs_review' }
   | { status: 'error'; message: string }
+
+export type ImportTagPreview = {
+  artist: string | null
+  title: string | null
+  album: string | null
+  year: string | null
+  label: string | null
+  catalogNumber: string | null
+  trackPosition: string | null
+  discogsReleaseId: number | null
+  discogsTrackPosition: string | null
+}
+
+export type AudioAnalysis = {
+  format: string
+  codec: string | null
+  channels: number | null
+  sampleRateHz: number | null
+  bitDepth: number | null
+  bitrateKbps: number | null
+  durationSeconds: number | null
+  fileSizeBytes: number
+  integratedLufs: number | null
+  loudnessRangeLu: number | null
+  truePeakDbfs: number | null
+  peakLevelDb: number | null
+  rmsLevelDb: number | null
+  crestDb: number | null
+  noiseFloorDb: number | null
+  lowBandRmsDb: number | null
+  highBandRmsDb: number | null
+}
+
+export type ImportReviewCandidate = {
+  match: DiscogsTrackMatch
+  proposedTags: ImportTagPreview
+  destinationRelativePath: string
+  exactExistingFilename: string | null
+}
+
+export type ImportReview = {
+  filename: string
+  parsed: { artist: string; title: string; version: string | null } | null
+  selectedCandidateIndex: number | null
+  candidates: ImportReviewCandidate[]
+  similarItems: CollectionItem[]
+  sourceAnalysis: AudioAnalysis | null
+  tagWriteSupported: boolean
+}
+
+export type ImportComparison = {
+  sourceFilename: string
+  existingFilename: string
+  sourceAnalysis: AudioAnalysis | null
+  existingAnalysis: AudioAnalysis | null
+}
+
+export type ImportCommitInput = {
+  filename: string
+  match?: DiscogsTrackMatch | null
+  tags?: ImportTagPreview | null
+  mode?: 'import_new' | 'replace_existing'
+  replaceFilename?: string | null
+}
 
 export type DJBrainApi = {
   wantList: {
@@ -151,9 +196,7 @@ export type DJBrainApi = {
     onItemUpdated: (listener: (item: WantListItem) => void) => () => void
   }
   settings: {
-    get: () => Promise<SettingsSnapshot>
-    update: (patch: SettingsPatch) => Promise<SettingsSnapshot>
-    pickDirectory: (options?: PickDirectoryOptions) => Promise<string | null>
+    get: () => Promise<AppSettings>
   }
   slskd: {
     testConnection: (input: SlskdConnectionTestInput) => Promise<SlskdConnectionTestResult>
@@ -182,6 +225,9 @@ export type DJBrainApi = {
     syncNow: () => Promise<CollectionSyncStatus>
     getStatus: () => Promise<CollectionSyncStatus>
     onUpdated: (listener: (status: CollectionSyncStatus) => void) => () => void
+    getImportReview: (filename: string) => Promise<ImportReview>
+    compareImport: (filename: string, existingFilename: string) => Promise<ImportComparison>
+    commitImport: (input: ImportCommitInput) => Promise<ImportFileResult>
     importFile: (filename: string) => Promise<ImportFileResult>
     deleteFile: (filename: string) => Promise<void>
     clearEmptyFolders: () => Promise<number>

@@ -73,8 +73,8 @@ export default function SearchOnlinePage(): React.JSX.Element {
   useEffect(() => {
     const load = async (): Promise<void> => {
       try {
-        const snapshot = await window.api.settings.get()
-        setHasDiscogsToken(Boolean(snapshot.settings.discogsUserToken.trim()))
+        const settings = await window.api.settings.get()
+        setHasDiscogsToken(Boolean(settings.discogsUserToken.trim()))
       } catch (error) {
         setErrorMessage(formatError(error))
       } finally {
@@ -143,7 +143,7 @@ export default function SearchOnlinePage(): React.JSX.Element {
 
         {!hasDiscogsToken && !isLoadingSettings ? (
           <Notice tone="warning" className="mt-3 text-sm">
-            Configure the Discogs user token in Settings before searching.
+            Set `DJBRAIN_DISCOGS_USER_TOKEN` before searching.
           </Notice>
         ) : null}
       </ViewSection>

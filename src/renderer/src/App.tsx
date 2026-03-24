@@ -16,8 +16,8 @@ import DiscogsLabelPage from './pages/DiscogsLabelPage'
 import DropboxPage from './pages/DropboxPage'
 import GrokSearchPage from './pages/GrokSearchPage'
 import ImportPage from './pages/ImportPage'
+import ImportReviewPage from './pages/ImportReviewPage'
 import SearchOnlinePage from './pages/SearchOnlinePage'
-import SettingsPage from './pages/SettingsPage'
 import SoulseekPage from './pages/SoulseekPage'
 import SpotifyPage from './pages/SpotifyPage'
 
@@ -37,8 +37,8 @@ const router = createBrowserRouter(
       <Route path="/soulseek" element={<SoulseekPage />} />
       <Route path="/spotify" element={<SpotifyPage />} />
       <Route path="/import" element={<ImportPage />} />
+      <Route path="/import/review" element={<ImportReviewPage />} />
       <Route path="/dropbox" element={<DropboxPage />} />
-      <Route path="/settings" element={<SettingsPage />} />
     </Route>
   )
 )

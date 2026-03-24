@@ -8,7 +8,7 @@ services:
       - djbrain-data:/data
       # Mount your music library (read/write for imports & tagging)
       - /Users/mcanaleta/Library/CloudStorage/Dropbox/music:/music
-    env_file: .env
+    env_file: .env.docker
     environment:
       DJBRAIN_DATA_DIR: /data
     restart: unless-stopped

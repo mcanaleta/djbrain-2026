@@ -1,11 +1,10 @@
 import { execFile } from 'node:child_process'
 import { createReadStream } from 'node:fs'
-import { readFile, readdir, rmdir, stat, unlink } from 'node:fs/promises'
+import { mkdir, readdir, rmdir, stat, unlink } from 'node:fs/promises'
 import { basename, dirname, extname, join, relative, resolve } from 'node:path'
-import { homedir } from 'node:os'
 import { promisify } from 'node:util'
 import express, { type NextFunction, type Request, type Response } from 'express'
-import { SettingsStore, type AppSettings } from '../main/settings-store.ts'
+import { readSettings, type AppSettings } from '../main/settings-store.ts'
 import {
   CollectionService,
   type WantListAddInput,
@@ -16,9 +15,11 @@ import { GrokSearchService } from '../main/grok-search-service.ts'
 import { SlskdService } from '../main/slskd-service.ts'
 import { DiscogsMatchService } from '../main/discogs-match-service.ts'
 import { TaggerService } from '../main/tagger-service.ts'
-import { ImportService, parseSongFilename } from '../main/import-service.ts'
+import { AudioAnalysisService } from '../main/audio-analysis-service.ts'
+import { ImportService, buildImportDestRelativePath, parseSongFilename } from '../main/import-service.ts'
 import { YouTubeApiService } from '../main/youtube-api-service.ts'
-import type { SlskdCandidate } from '../shared/api.ts'
+import type { DiscogsTrackMatch } from '../shared/discogs-match.ts'
+import type { ImportTagPreview, SlskdCandidate } from '../shared/api.ts'
 
 const execFileAsync = promisify(execFile)
 
@@ -49,13 +50,6 @@ const AUDIO_MIME: Record<string, string> = {
 
 const EMPTY_DIR_IGNORED_FILES = new Set(['.DS_Store', 'Thumbs.db', 'desktop.ini'])
 
-const LEGACY_USER_DATA_CANDIDATES = [
-  resolve(homedir(), 'Library/Application Support/electron-app'),
-  resolve(homedir(), 'Library/Application Support/djbrain-2026'),
-  resolve(homedir(), 'Library/Application Support/djbrain'),
-  resolve(homedir(), 'Library/Application Support/com.mcanaleta.djbrain')
-]
-
 const port = Number(readArgValue('--port') ?? '5179')
 const staticDirArg = readArgValue('--static')
 const staticDir = staticDirArg ? resolve(process.cwd(), staticDirArg) : null
@@ -67,10 +61,11 @@ const grokSearchService = new GrokSearchService()
 const slskdService = new SlskdService()
 const discogsMatchService = new DiscogsMatchService()
 const taggerService = new TaggerService()
+const audioAnalysisService = new AudioAnalysisService()
 const importService = new ImportService(discogsMatchService, taggerService, onlineSearchService)
 
-let settingsStore: SettingsStore | null = null
 let collectionService: CollectionService | null = null
+let settings: AppSettings | null = null
 
 class HttpError extends Error {
   public readonly status: number
@@ -122,6 +117,10 @@ function normalizeRelativeFolderPath(value: string): string {
 
 function normalizeSearchText(value: string | null | undefined): string {
   return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : ''
+}
+
+function strongSearchTerms(value: string | null | undefined): string[] {
+  return normalizeSearchText(value).toLowerCase().split(' ').filter((term) => term.length > 1 && !/^\d+$/.test(term))
 }
 
 function isPathInside(rootPath: string, candidatePath: string): boolean {
@@ -280,39 +279,8 @@ function parseStoredCandidates(value: string | null): SlskdCandidate[] {
   }
 }
 
-async function readSettingsFile(userDataDir: string): Promise<Partial<AppSettings> | null> {
-  try {
-    const fileContent = await readFile(join(userDataDir, 'settings.json'), 'utf-8')
-    const parsed = JSON.parse(fileContent) as Partial<AppSettings>
-    return typeof parsed === 'object' && parsed !== null ? parsed : null
-  } catch {
-    return null
-  }
-}
-
 async function resolveUserDataDir(): Promise<string> {
-  if (dataDirArg) {
-    return resolve(process.cwd(), dataDirArg)
-  }
-
-  const cwdDataDir = resolve(process.cwd(), '.djbrain-data')
-  const candidates = [cwdDataDir, ...LEGACY_USER_DATA_CANDIDATES]
-
-  for (const candidate of candidates) {
-    const settings = await readSettingsFile(candidate)
-    if (typeof settings?.musicFolderPath === 'string' && settings.musicFolderPath.trim()) {
-      return candidate
-    }
-  }
-
-  for (const candidate of candidates) {
-    const settings = await readSettingsFile(candidate)
-    if (settings) {
-      return candidate
-    }
-  }
-
-  return cwdDataDir
+  return resolve(process.cwd(), dataDirArg || '.djbrain-data')
 }
 
 async function testSlskdConnection(input: unknown): Promise<SlskdConnectionTestResult> {
@@ -408,22 +376,11 @@ async function testSlskdConnection(input: unknown): Promise<SlskdConnectionTestR
   return lastFailure
 }
 
-function requireSettingsStore(): SettingsStore {
-  if (!settingsStore) {
-    throw new Error('Settings store not initialized')
-  }
-  return settingsStore
-}
-
-function requireCollectionService(): CollectionService {
-  if (!collectionService) {
-    throw new Error('Collection service not initialized')
-  }
-  return collectionService
-}
-
 function currentSettings(): AppSettings {
-  return requireSettingsStore().snapshot().settings
+  if (!settings) {
+    throw new Error('Settings not initialized')
+  }
+  return settings
 }
 
 function resolveMusicRelativePath(filename: string): string {
@@ -440,6 +397,177 @@ function resolveMusicRelativePath(filename: string): string {
   }
 
   return absolutePath
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await stat(filePath)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function isDownloadFilename(filename: string): boolean {
+  const normalized = normalizeFilename(filename)
+  return currentSettings().downloadFolderPaths.some((folder) => {
+    const prefix = normalizeRelativeFolderPath(folder)
+    return normalized === prefix || normalized.startsWith(`${prefix}/`)
+  })
+}
+
+function buildImportTagPreview(match: DiscogsTrackMatch): ImportTagPreview {
+  return {
+    artist: match.artist,
+    title: match.title,
+    album: match.releaseTitle,
+    year: match.year,
+    label: match.label,
+    catalogNumber: match.catalogNumber,
+    trackPosition: match.trackPosition,
+    discogsReleaseId: match.releaseId,
+    discogsTrackPosition: match.trackPosition
+  }
+}
+
+function dedupeMatches(matches: DiscogsTrackMatch[]): DiscogsTrackMatch[] {
+  const seen = new Set<string>()
+  return matches.filter((match) => {
+    const key = [match.releaseId, match.trackPosition, match.artist, match.title, match.version].join('|')
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function readDiscogsTrackMatch(value: unknown): DiscogsTrackMatch | null {
+  if (typeof value !== 'object' || value === null) return null
+  const match = value as Partial<DiscogsTrackMatch>
+  return (
+    typeof match.releaseId === 'number' &&
+    typeof match.releaseTitle === 'string' &&
+    typeof match.artist === 'string' &&
+    typeof match.title === 'string' &&
+    (typeof match.version === 'string' || match.version === null || typeof match.version === 'undefined') &&
+    (typeof match.trackPosition === 'string' || match.trackPosition === null || typeof match.trackPosition === 'undefined') &&
+    (typeof match.year === 'string' || match.year === null || typeof match.year === 'undefined') &&
+    (typeof match.label === 'string' || match.label === null || typeof match.label === 'undefined') &&
+    (typeof match.catalogNumber === 'string' || match.catalogNumber === null || typeof match.catalogNumber === 'undefined') &&
+    typeof match.score === 'number'
+  )
+    ? {
+        releaseId: match.releaseId,
+        releaseTitle: match.releaseTitle,
+        artist: match.artist,
+        title: match.title,
+        version: match.version ?? null,
+        trackPosition: match.trackPosition ?? null,
+        year: match.year ?? null,
+        label: match.label ?? null,
+        catalogNumber: match.catalogNumber ?? null,
+        score: match.score
+      }
+    : null
+}
+
+function readImportTagPreview(value: unknown): ImportTagPreview | null {
+  if (typeof value !== 'object' || value === null) return null
+  const tags = value as Partial<ImportTagPreview>
+  const readText = (input: unknown): string | null =>
+    typeof input === 'string' ? (input.trim() || null) : input === null || typeof input === 'undefined' ? null : null
+  const readNumber = (input: unknown): number | null =>
+    typeof input === 'number' && isFinite(input) ? input : input === null || typeof input === 'undefined' ? null : null
+  return {
+    artist: readText(tags.artist),
+    title: readText(tags.title),
+    album: readText(tags.album),
+    year: readText(tags.year),
+    label: readText(tags.label),
+    catalogNumber: readText(tags.catalogNumber),
+    trackPosition: readText(tags.trackPosition),
+    discogsReleaseId: readNumber(tags.discogsReleaseId),
+    discogsTrackPosition: readText(tags.discogsTrackPosition)
+  }
+}
+
+function applyTagOverrides(match: DiscogsTrackMatch, tags: ImportTagPreview | null): DiscogsTrackMatch {
+  if (!tags) return match
+  return {
+    ...match,
+    releaseId: tags.discogsReleaseId ?? match.releaseId,
+    releaseTitle: tags.album ?? match.releaseTitle,
+    artist: tags.artist ?? match.artist,
+    title: tags.title ?? match.title,
+    trackPosition: tags.discogsTrackPosition ?? tags.trackPosition ?? match.trackPosition,
+    year: tags.year ?? match.year,
+    label: tags.label ?? match.label,
+    catalogNumber: tags.catalogNumber ?? match.catalogNumber
+  }
+}
+
+function isLikelySimilarTrack(
+  filename: string,
+  parsed: { artist: string; title: string; version: string | null }
+): boolean {
+  const normalized = normalizeSearchText(filename).toLowerCase()
+  const artistTerms = strongSearchTerms(parsed.artist)
+  const titleTerms = strongSearchTerms(parsed.title)
+  const artistHit = artistTerms.length === 0 || artistTerms.some((term) => normalized.includes(term))
+  const titleHit = titleTerms.length === 0 || titleTerms.some((term) => normalized.includes(term))
+  return artistHit && titleHit
+}
+
+async function buildImportReview(filename: string) {
+  const absolutePath = resolveMusicRelativePath(filename)
+  const parsed = parseSongFilename(basename(absolutePath))
+  if (!parsed) {
+    throw new HttpError(400, `Cannot parse filename: ${basename(absolutePath)}`)
+  }
+
+  const settings = currentSettings()
+  const { match, candidates } = await discogsMatchService.findTrack(
+    settings,
+    parsed.artist,
+    parsed.title,
+    parsed.version,
+    onlineSearchService
+  )
+  const ext = extname(absolutePath).toLowerCase()
+  const candidateMatches = dedupeMatches(match ? [match, ...candidates] : candidates).slice(0, 8)
+  const reviewCandidates = await Promise.all(
+    candidateMatches.map(async (candidate) => {
+      const destinationRelativePath = buildImportDestRelativePath(settings.songsFolderPath, candidate, ext)
+      return {
+        match: candidate,
+        proposedTags: buildImportTagPreview(candidate),
+        destinationRelativePath,
+        exactExistingFilename:
+          (await fileExists(join(settings.musicFolderPath, destinationRelativePath))) ? destinationRelativePath : null
+      }
+    })
+  )
+  const query = `${parsed.artist} ${parsed.title} ${parsed.version ?? ''}`
+  const similarItems = requireCollectionService()
+    .list(query)
+    .items
+    .filter(
+      (item) =>
+        item.filename !== filename &&
+        !isDownloadFilename(item.filename) &&
+        isLikelySimilarTrack(item.filename, parsed)
+    )
+    .slice(0, 12)
+    .map((item) => ({ ...item, duration: null }))
+
+  return {
+    filename,
+    parsed,
+    selectedCandidateIndex: reviewCandidates.length > 0 ? 0 : null,
+    candidates: reviewCandidates,
+    similarItems,
+    sourceAnalysis: await audioAnalysisService.analyze(absolutePath).catch(() => null),
+    tagWriteSupported: taggerService.supportsFile(absolutePath)
+  }
 }
 
 async function showInFolder(filePath: string): Promise<void> {
@@ -725,19 +853,8 @@ function createApp(): express.Express {
   )
 
   app.get('/api/settings', (_request, response) => {
-    sendJson(response, 200, requireSettingsStore().snapshot())
+    sendJson(response, 200, currentSettings())
   })
-
-  app.patch(
-    '/api/settings',
-    asyncHandler(async (request, response) => {
-      const service = requireCollectionService()
-      const snapshot = await requireSettingsStore().update(request.body ?? null)
-      await service.reconfigure(snapshot.settings)
-      void service.syncNow()
-      sendJson(response, 200, snapshot)
-    })
-  )
 
   app.post(
     '/api/slskd/test-connection',
@@ -833,30 +950,65 @@ function createApp(): express.Express {
   )
 
   app.post(
+    '/api/collection/import/review',
+    asyncHandler(async (request, response) => {
+      const body = (request.body ?? null) as { filename?: string } | null
+      const filename = typeof body?.filename === 'string' ? body.filename : ''
+      sendJson(response, 200, await buildImportReview(filename))
+    })
+  )
+
+  app.post(
+    '/api/collection/import/compare',
+    asyncHandler(async (request, response) => {
+      const body = (request.body ?? null) as { filename?: string; existingFilename?: string } | null
+      const filename = typeof body?.filename === 'string' ? body.filename : ''
+      const existingFilename = typeof body?.existingFilename === 'string' ? body.existingFilename : ''
+      const [sourceAnalysis, existingAnalysis] = await Promise.all([
+        audioAnalysisService.analyze(resolveMusicRelativePath(filename)).catch(() => null),
+        audioAnalysisService.analyze(resolveMusicRelativePath(existingFilename)).catch(() => null)
+      ])
+      sendJson(response, 200, { sourceFilename: filename, existingFilename, sourceAnalysis, existingAnalysis })
+    })
+  )
+
+  app.post(
     '/api/collection/import',
     asyncHandler(async (request, response) => {
       const service = requireCollectionService()
-      const body = (request.body ?? null) as { filename?: string } | null
+      const body = (request.body ?? null) as {
+        filename?: string
+        match?: DiscogsTrackMatch | null
+        tags?: ImportTagPreview | null
+        mode?: 'import_new' | 'replace_existing'
+        replaceFilename?: string | null
+      } | null
       const filename = typeof body?.filename === 'string' ? body.filename : ''
       const settings = currentSettings()
       const absolutePath = resolveMusicRelativePath(filename)
-      const parsed = parseSongFilename(basename(absolutePath))
+      const replaceFilename =
+        typeof body?.replaceFilename === 'string' && body.replaceFilename.trim()
+          ? normalizeFilename(body.replaceFilename)
+          : null
+      if (replaceFilename) resolveMusicRelativePath(replaceFilename)
 
-      if (!parsed) {
-        sendJson(response, 400, {
-          status: 'error',
-          message: `Cannot parse filename: ${basename(absolutePath)}`
-        })
-        return
-      }
-
-      const result = await importService.importFile(
-        settings,
-        parsed.artist,
-        parsed.title,
-        parsed.version,
-        absolutePath
-      )
+      const providedMatch = readDiscogsTrackMatch(body?.match)
+      const tagOverrides = readImportTagPreview(body?.tags)
+      const result = providedMatch
+        ? await importService.importFileWithKnownMatch(settings, applyTagOverrides(providedMatch, tagOverrides), absolutePath, null, {
+            conflictStrategy: body?.mode === 'replace_existing' ? 'replace' : 'keep_both',
+            replaceRelativePath: replaceFilename
+          })
+        : await (async () => {
+            const parsed = parseSongFilename(basename(absolutePath))
+            if (!parsed) {
+              return {
+                status: 'error',
+                message: `Cannot parse filename: ${basename(absolutePath)}`
+              } as const
+            }
+            return importService.importFile(settings, parsed.artist, parsed.title, parsed.version, absolutePath)
+          })()
       void service.syncNow()
 
       if (result.status === 'imported') {
@@ -875,6 +1027,13 @@ function createApp(): express.Express {
         sendJson(response, 200, {
           status: 'skipped_existing',
           existingRelativePath: result.existingRelativePath
+        })
+        return
+      }
+      if (result.status === 'replaced') {
+        sendJson(response, 200, {
+          status: 'replaced',
+          replacedRelativePath: result.replacedRelativePath
         })
         return
       }
@@ -1092,13 +1251,19 @@ function createApp(): express.Express {
 
 async function start(): Promise<void> {
   const userDataDir = await resolveUserDataDir()
-  settingsStore = new SettingsStore(userDataDir)
-  await settingsStore.init()
+  const dataDir = join(userDataDir, 'data')
+  settings = readSettings()
+  await Promise.all([
+    mkdir(userDataDir, { recursive: true }),
+    mkdir(dataDir, { recursive: true }),
+    mkdir(join(userDataDir, 'cache'), { recursive: true }),
+    mkdir(join(userDataDir, 'logs'), { recursive: true })
+  ])
 
   collectionService = new CollectionService({
-    databaseFilePath: settingsStore.snapshot().appPaths.databaseFilePath
+    databaseFilePath: join(dataDir, 'djbrain.sqlite')
   })
-  await collectionService.reconfigure(settingsStore.snapshot().settings)
+  await collectionService.reconfigure(currentSettings())
   void collectionService.syncNow()
 
   const app = createApp()
@@ -1124,3 +1289,9 @@ void start().catch((error) => {
   console.error('[server] failed to start', error)
   process.exit(1)
 })
+function requireCollectionService(): CollectionService {
+  if (!collectionService) {
+    throw new Error('Collection service not initialized')
+  }
+  return collectionService
+}

@@ -11,16 +11,14 @@ import { DiscogsMatchService } from '../src/main/discogs-match-service.ts'
 import { TaggerService } from '../src/main/tagger-service.ts'
 import { ImportService, parseSongFilename, type ImportResult } from '../src/main/import-service.ts'
 import { OnlineSearchService } from '../src/main/online-search-service.ts'
-import { readFile, readdir } from 'node:fs/promises'
-import { homedir } from 'node:os'
+import { readSettings } from '../src/main/settings-store.ts'
+import { readdir } from 'node:fs/promises'
 import { join, extname, basename, resolve } from 'node:path'
 
-const SETTINGS_PATH = join(homedir(), 'Library/Application Support/electron-app/settings.json')
 const AUDIO_EXTS = new Set(['.mp3', '.aif', '.aiff', '.flac', '.wav', '.aac', '.m4a', '.ogg'])
 
 async function loadSettings() {
-  const raw = await readFile(SETTINGS_PATH, 'utf-8')
-  return JSON.parse(raw)
+  return readSettings()
 }
 
 function printImportResult(result: ImportResult) {

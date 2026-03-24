@@ -13,7 +13,6 @@ export default function Sidebar(): React.JSX.Element {
       <nav className="flex flex-1 flex-col gap-1">
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon
-          const isSettings = item.key === 'settings'
           return (
             <NavLink
               key={item.key}
@@ -23,8 +22,7 @@ export default function Sidebar(): React.JSX.Element {
                   'flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
                   isActive
                     ? 'bg-zinc-900/60 text-zinc-100'
-                    : 'text-zinc-300 hover:bg-zinc-900/40 hover:text-zinc-100',
-                  isSettings ? 'mt-auto' : ''
+                    : 'text-zinc-300 hover:bg-zinc-900/40 hover:text-zinc-100'
                 ].join(' ')
               }
             >

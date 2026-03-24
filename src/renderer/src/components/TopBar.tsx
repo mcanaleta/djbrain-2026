@@ -1,7 +1,7 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { DotsHorizontalIcon, GearIcon, InfoCircledIcon, ReloadIcon } from '@radix-ui/react-icons'
+import { DotsHorizontalIcon, InfoCircledIcon, ReloadIcon } from '@radix-ui/react-icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { resolveNavTitle } from '../app/nav'
 import type { SearchScope } from '../layout/AppShell'
 
@@ -46,7 +46,6 @@ export default function TopBar({
   onSearchSubmit
 }: TopBarProps): React.JSX.Element {
   const location = useLocation()
-  const navigate = useNavigate()
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
   const [isSearchMenuOpen, setIsSearchMenuOpen] = useState(false)
@@ -262,10 +261,6 @@ export default function TopBar({
             >
               <ReloadIcon />
               {isSyncing ? 'Syncing collection…' : 'Sync Collection'}
-            </DropdownMenu.Item>
-            <DropdownMenu.Item className={menuItemClassName} onSelect={() => navigate('/settings')}>
-              <GearIcon />
-              Open Settings
             </DropdownMenu.Item>
             <DropdownMenu.Separator className="my-1 h-px bg-zinc-800" />
             <DropdownMenu.Item className={menuItemClassName} onSelect={() => {}}>

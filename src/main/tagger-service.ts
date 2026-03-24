@@ -27,19 +27,21 @@ const ID3_SUPPORTED = new Set(['.mp3', '.aif', '.aiff', '.wav'])
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 export class TaggerService {
+  supportsFile(filePath: string): boolean {
+    return ID3_SUPPORTED.has(extname(filePath).toLowerCase())
+  }
+
   /**
    * Write metadata tags to an audio file.
    * Returns true if tags were written, false if the format is not yet supported.
    */
   async writeTags(filePath: string, tags: AudioTags): Promise<boolean> {
-    const ext = extname(filePath).toLowerCase()
-
-    if (ID3_SUPPORTED.has(ext)) {
+    if (this.supportsFile(filePath)) {
       await this.writeID3Tags(filePath, tags)
       return true
     }
 
-    console.warn(`[tagger] skipping tag write for unsupported format: ${ext}`)
+    console.warn(`[tagger] skipping tag write for unsupported format: ${extname(filePath).toLowerCase()}`)
     return false
   }
 

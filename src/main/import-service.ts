@@ -30,8 +30,14 @@ export type ImportResult =
       existingQuality: FileQuality
       newQuality: FileQuality
     }
+  | { status: 'replaced'; replacedRelativePath: string; match: DiscogsTrackMatch }
   | { status: 'needs_review'; candidates: DiscogsTrackMatch[] }
   | { status: 'error'; message: string }
+
+type ImportFileOptions = {
+  conflictStrategy?: 'auto' | 'keep_both' | 'replace'
+  replaceRelativePath?: string | null
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -78,6 +84,20 @@ async function findAvailablePath(destAbsPath: string): Promise<string> {
   return join(dir, `${base} (${n})${ext}`)
 }
 
+function buildTags(match: DiscogsTrackMatch) {
+  return {
+    artist: match.artist,
+    title: match.title,
+    album: match.releaseTitle,
+    year: match.year,
+    label: match.label,
+    catalogNumber: match.catalogNumber,
+    trackPosition: match.trackPosition,
+    discogsReleaseId: match.releaseId,
+    discogsTrackPosition: match.trackPosition
+  }
+}
+
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 export class ImportService {
@@ -111,7 +131,8 @@ export class ImportService {
     title: string,
     version: string | null,
     localFilePath: string,
-    bitrateHintKbps: number | null = null
+    bitrateHintKbps: number | null = null,
+    options: ImportFileOptions = {}
   ): Promise<ImportResult> {
     if (!(await fileExists(localFilePath))) {
       return { status: 'error', message: `File not found: ${localFilePath}` }
@@ -135,88 +156,7 @@ export class ImportService {
     console.log(
       `[import] confident match: release=${match.releaseId} "${match.releaseTitle}" track="${match.title}" pos=${match.trackPosition} year=${match.year} score=${match.score}`
     )
-
-    // ── Build destination path ─────────────────────────────────────────────
-    const year = match.year ?? 'unknown'
-    const ext = extname(localFilePath).toLowerCase()
-    const destFilename = buildDestFilename(match.artist, match.title, match.version, ext)
-    const destDir = join(settings.musicFolderPath, settings.songsFolderPath, year)
-    const destAbsPath = join(destDir, destFilename)
-    const destRelativePath = join(settings.songsFolderPath, year, destFilename)
-
-    await mkdir(destDir, { recursive: true })
-
-    // ── Handle existing file ───────────────────────────────────────────────
-    if (await fileExists(destAbsPath)) {
-      const newQuality = await readQuality(localFilePath, bitrateHintKbps)
-      const existingQuality = await readQuality(destAbsPath)
-      const comparison = compareQuality(newQuality, existingQuality)
-
-      console.log(
-        `[import] destination exists — new: ${qualitySummary(newQuality)}, existing: ${qualitySummary(existingQuality)} → ${comparison}`
-      )
-
-      if (comparison !== 'better') {
-        // Existing file is as good or better — skip
-        return {
-          status: 'skipped_existing',
-          existingRelativePath: destRelativePath,
-          match,
-          existingQuality,
-          newQuality
-        }
-      }
-
-      // New file is higher quality — import alongside as "(2)" (or "(3)" etc.)
-      const upgradePath = await findAvailablePath(destAbsPath)
-      const upgradeRelativePath = join(
-        settings.songsFolderPath,
-        year,
-        basename(upgradePath)
-      )
-      console.log('[import] upgrading — saving new version as:', upgradeRelativePath)
-
-      await this.tagger.writeTags(localFilePath, {
-        artist: match.artist,
-        title: match.title,
-        album: match.releaseTitle,
-        year: match.year,
-        label: match.label,
-        catalogNumber: match.catalogNumber,
-        trackPosition: match.trackPosition,
-        discogsReleaseId: match.releaseId,
-        discogsTrackPosition: match.trackPosition
-      })
-
-      await copyFile(localFilePath, upgradePath)
-      await unlink(localFilePath)
-
-      return {
-        status: 'imported_upgrade',
-        destRelativePath: upgradeRelativePath,
-        existingRelativePath: destRelativePath,
-        match
-      }
-    }
-
-    // ── Normal import ──────────────────────────────────────────────────────
-    await this.tagger.writeTags(localFilePath, {
-      artist: match.artist,
-      title: match.title,
-      album: match.releaseTitle,
-      year: match.year,
-      label: match.label,
-      catalogNumber: match.catalogNumber,
-      trackPosition: match.trackPosition,
-      discogsReleaseId: match.releaseId,
-      discogsTrackPosition: match.trackPosition
-    })
-
-    console.log('[import] moving to:', destRelativePath)
-    await copyFile(localFilePath, destAbsPath)
-    await unlink(localFilePath)
-
-    return { status: 'imported', destRelativePath, match }
+    return this.importMatchedFile(settings, match, localFilePath, bitrateHintKbps, options)
   }
 
   /**
@@ -227,56 +167,15 @@ export class ImportService {
     settings: AppSettings,
     match: DiscogsTrackMatch,
     localFilePath: string,
-    bitrateHintKbps: number | null = null
+    bitrateHintKbps: number | null = null,
+    options: ImportFileOptions = {}
   ): Promise<ImportResult> {
     if (!(await fileExists(localFilePath))) {
       return { status: 'error', message: `File not found: ${localFilePath}` }
     }
 
     console.log('[import] importing with known match:', match.artist, '-', match.title, match.version ?? '')
-
-    const year = match.year ?? 'unknown'
-    const ext = extname(localFilePath).toLowerCase()
-    const destFilename = buildDestFilename(match.artist, match.title, match.version, ext)
-    const destDir = join(settings.musicFolderPath, settings.songsFolderPath, year)
-    const destAbsPath = join(destDir, destFilename)
-    const destRelativePath = join(settings.songsFolderPath, year, destFilename)
-
-    await mkdir(destDir, { recursive: true })
-
-    const tags = {
-      artist: match.artist,
-      title: match.title,
-      album: match.releaseTitle,
-      year: match.year,
-      label: match.label,
-      catalogNumber: match.catalogNumber,
-      trackPosition: match.trackPosition,
-      discogsReleaseId: match.releaseId,
-      discogsTrackPosition: match.trackPosition
-    }
-
-    if (await fileExists(destAbsPath)) {
-      const newQuality = await readQuality(localFilePath, bitrateHintKbps)
-      const existingQuality = await readQuality(destAbsPath)
-      const comparison = compareQuality(newQuality, existingQuality)
-
-      if (comparison !== 'better') {
-        return { status: 'skipped_existing', existingRelativePath: destRelativePath, match, existingQuality, newQuality }
-      }
-
-      const upgradePath = await findAvailablePath(destAbsPath)
-      const upgradeRelativePath = join(settings.songsFolderPath, year, basename(upgradePath))
-      await this.tagger.writeTags(localFilePath, tags)
-      await copyFile(localFilePath, upgradePath)
-      await unlink(localFilePath)
-      return { status: 'imported_upgrade', destRelativePath: upgradeRelativePath, existingRelativePath: destRelativePath, match }
-    }
-
-    await this.tagger.writeTags(localFilePath, tags)
-    await copyFile(localFilePath, destAbsPath)
-    await unlink(localFilePath)
-    return { status: 'imported', destRelativePath, match }
+    return this.importMatchedFile(settings, match, localFilePath, bitrateHintKbps, options)
   }
 
   /**
@@ -315,6 +214,70 @@ export class ImportService {
       }
     }
     return null
+  }
+
+  private async importMatchedFile(
+    settings: AppSettings,
+    match: DiscogsTrackMatch,
+    localFilePath: string,
+    bitrateHintKbps: number | null = null,
+    options: ImportFileOptions = {}
+  ): Promise<ImportResult> {
+    const year = match.year ?? 'unknown'
+    const ext = extname(localFilePath).toLowerCase()
+    const destFilename = buildDestFilename(match.artist, match.title, match.version, ext)
+    const destDir = join(settings.musicFolderPath, settings.songsFolderPath, year)
+    const destAbsPath = join(destDir, destFilename)
+    const destRelativePath = join(settings.songsFolderPath, year, destFilename)
+    const tags = buildTags(match)
+
+    await mkdir(destDir, { recursive: true })
+
+    if (options.conflictStrategy === 'replace') {
+      const replaceRelativePath = options.replaceRelativePath || destRelativePath
+      const replaceAbsPath = join(settings.musicFolderPath, replaceRelativePath)
+      await mkdir(dirname(replaceAbsPath), { recursive: true })
+      await this.tagger.writeTags(localFilePath, tags)
+      await copyFile(localFilePath, replaceAbsPath)
+      await unlink(localFilePath)
+      return { status: 'replaced', replacedRelativePath: replaceRelativePath, match }
+    }
+
+    if (await fileExists(destAbsPath)) {
+      if (options.conflictStrategy === 'keep_both') {
+        const upgradePath = await findAvailablePath(destAbsPath)
+        const upgradeRelativePath = join(settings.songsFolderPath, year, basename(upgradePath))
+        await this.tagger.writeTags(localFilePath, tags)
+        await copyFile(localFilePath, upgradePath)
+        await unlink(localFilePath)
+        return { status: 'imported_upgrade', destRelativePath: upgradeRelativePath, existingRelativePath: destRelativePath, match }
+      }
+
+      const newQuality = await readQuality(localFilePath, bitrateHintKbps)
+      const existingQuality = await readQuality(destAbsPath)
+      const comparison = compareQuality(newQuality, existingQuality)
+
+      console.log(
+        `[import] destination exists — new: ${qualitySummary(newQuality)}, existing: ${qualitySummary(existingQuality)} → ${comparison}`
+      )
+
+      if (comparison !== 'better') {
+        return { status: 'skipped_existing', existingRelativePath: destRelativePath, match, existingQuality, newQuality }
+      }
+
+      const upgradePath = await findAvailablePath(destAbsPath)
+      const upgradeRelativePath = join(settings.songsFolderPath, year, basename(upgradePath))
+      console.log('[import] upgrading — saving new version as:', upgradeRelativePath)
+      await this.tagger.writeTags(localFilePath, tags)
+      await copyFile(localFilePath, upgradePath)
+      await unlink(localFilePath)
+      return { status: 'imported_upgrade', destRelativePath: upgradeRelativePath, existingRelativePath: destRelativePath, match }
+    }
+
+    await this.tagger.writeTags(localFilePath, tags)
+    await copyFile(localFilePath, destAbsPath)
+    await unlink(localFilePath)
+    return { status: 'imported', destRelativePath, match }
   }
 }
 
