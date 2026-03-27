@@ -3,7 +3,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 export default defineConfig({
-  root: 'src/renderer',
+  root: 'src/web',
   plugins: [react()],
   server: {
     port: 5178,
@@ -20,7 +20,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@renderer': resolve(__dirname, 'src/renderer/src')
+      '@web': resolve(__dirname, 'src/web/src')
     }
   }
 })

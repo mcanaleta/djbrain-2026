@@ -3,6 +3,8 @@ services:
     build: .
     ports:
       - "5178:5178"
+    depends_on:
+      - redis
     volumes:
       # Persistent app data (SQLite DB, settings, cache)
       - djbrain-data:/data
@@ -11,6 +13,11 @@ services:
     env_file: .env.docker
     environment:
       DJBRAIN_DATA_DIR: /data
+      DJBRAIN_REDIS_URL: redis://redis:6379
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
     restart: unless-stopped
 
   # Optional: Soulseek daemon for P2P search/download

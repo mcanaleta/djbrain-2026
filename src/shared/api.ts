@@ -20,6 +20,12 @@ export type CollectionItem = {
   filesize: number
   duration: number | null
   score: number | null
+  importStatus?: 'pending' | 'processing' | 'ready' | 'error' | null
+  importArtist?: string | null
+  importTitle?: string | null
+  importVersion?: string | null
+  importYear?: string | null
+  importError?: string | null
 }
 
 export type CollectionSyncStatus = {
@@ -27,6 +33,14 @@ export type CollectionSyncStatus = {
   lastSyncedAt: string | null
   itemCount: number
   lastError: string | null
+  importPendingCount?: number
+  importProcessingCount?: number
+  importErrorCount?: number
+  queueBackend?: 'redis' | 'memory'
+  queueDepth?: number
+  audioHashVersion?: number
+  audioAnalysisVersion?: number
+  importReviewVersion?: number
 }
 
 export type CollectionListResult = {
@@ -145,8 +159,16 @@ export type AudioAnalysis = {
   rmsLevelDb: number | null
   crestDb: number | null
   noiseFloorDb: number | null
+  noiseScore: number | null
   lowBandRmsDb: number | null
   highBandRmsDb: number | null
+  subBassRmsDb: number | null
+  airBandRmsDb: number | null
+  humRmsDb: number | null
+  cutoffDb: number | null
+  rumbleScore: number | null
+  humScore: number | null
+  vinylLikelihood: number | null
 }
 
 export type ImportReviewCandidate = {
@@ -156,9 +178,16 @@ export type ImportReviewCandidate = {
   exactExistingFilename: string | null
 }
 
+export type ImportReviewSearch = {
+  artist: string
+  title: string
+  version: string | null
+}
+
 export type ImportReview = {
   filename: string
   parsed: { artist: string; title: string; version: string | null } | null
+  search: ImportReviewSearch
   selectedCandidateIndex: number | null
   candidates: ImportReviewCandidate[]
   similarItems: CollectionItem[]
@@ -225,8 +254,9 @@ export type DJBrainApi = {
     syncNow: () => Promise<CollectionSyncStatus>
     getStatus: () => Promise<CollectionSyncStatus>
     onUpdated: (listener: (status: CollectionSyncStatus) => void) => () => void
-    getImportReview: (filename: string) => Promise<ImportReview>
+    getImportReview: (filename: string, search?: Partial<ImportReviewSearch>, force?: boolean) => Promise<ImportReview>
     compareImport: (filename: string, existingFilename: string) => Promise<ImportComparison>
+    queueImportProcessing: (filenames?: string[], force?: boolean) => Promise<{ queued: number }>
     commitImport: (input: ImportCommitInput) => Promise<ImportFileResult>
     importFile: (filename: string) => Promise<ImportFileResult>
     deleteFile: (filename: string) => Promise<void>

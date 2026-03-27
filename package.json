@@ -30,7 +30,8 @@
     "ai": "^6.0.112",
     "express": "^5.2.1",
     "node-id3": "^0.2.9",
-    "react-router-dom": "^7.13.1"
+    "react-router-dom": "^7.13.1",
+    "redis": "^5.11.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

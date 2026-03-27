@@ -63,21 +63,21 @@ Node.js 24+, npm 11+.
 ```
 ┌────────────────────────────────────────────────────────────┐
 │  Browser App (React Router + Vite)                          │
-│  src/renderer/src/                                          │
-│  Pages → window.api.* → fetch('/api/...')                  │
+│  src/web/src/                                               │
+│  Pages → api.* → fetch('/api/...')                         │
 └──────────────────────┬─────────────────────────────────────┘
                        │ HTTP / JSON
 ┌──────────────────────▼─────────────────────────────────────┐
 │  Local API Server (Express)                                 │
-│  src/server/index.ts   – route registry + media streaming   │
-│  src/main/*-service.ts – business logic + SQLite            │
+│  src/server/app.ts     – route registry + media streaming   │
+│  src/backend/*-service.ts – business logic + SQLite         │
 │  node:sqlite          – SQLite (synchronous API)            │
 └────────────────────────────────────────────────────────────┘
 ```
 
 **Rules:**
-- The renderer never accesses the filesystem directly.
-- `window.api` is the browser-side client contract and lives in `src/shared/api.ts`.
+- The web client never accesses the filesystem directly.
+- `api` is the browser-side client and lives in `src/web/src/api/client.ts`.
 - Heavy I/O and database work happens in the local server/services layer.
 - Collection and want-list updates are polled from the browser client.
 
@@ -87,18 +87,20 @@ Node.js 24+, npm 11+.
 
 ```
 src/
-├── main/
+├── backend/
 │   ├── collection-service.ts    # SQLite DB, file scanning, FTS, want list CRUD
 │   ├── slskd-service.ts         # Soulseek search & download via slskd REST API
 │   ├── online-search-service.ts # Discogs + Serper search, entity detail fetching
 │   ├── grok-search-service.ts   # Grok AI LLM music search
 │   └── settings-store.ts        # env-backed app settings normalization
 ├── server/
-│   └── index.ts                 # Express routes + media streaming + startup
-├── renderer/
+│   ├── app.ts                   # Express routes + media streaming
+│   └── index.ts                 # Startup/bootstrap
+├── web/
 │   ├── index.html               # Entry HTML (CSP meta tag lives here)
 │   └── src/
 │       ├── App.tsx              # RouterProvider + all routes
+│       ├── api/client.ts        # Browser API client
 │       ├── app/nav.ts           # NAV_ITEMS constant (sidebar entries)
 │       ├── layout/AppShell.tsx  # Sidebar + TopBar + NowPlayingBar wrapper
 │       ├── components/          # Sidebar, TopBar, NowPlayingBar
@@ -119,7 +121,7 @@ src/
 
 ### Adding a new API call
 
-**1. Server — add route** (`src/server/index.ts`):
+**1. Server — add route** (`src/server/app.ts`):
 ```typescript
 app.post('/api/my-feature/do-thing', async (request, response) => {
   response.json(await myService.doThing(request.body.arg))
@@ -133,7 +135,7 @@ myFeature: {
 }
 ```
 
-**3. Browser client — implement the fetch wrapper** (`src/renderer/src/lib/browser-api.ts`):
+**3. Browser client — implement the fetch wrapper** (`src/web/src/api/client.ts`):
 ```typescript
 doThing: (arg) =>
   request('/api/my-feature/do-thing', {
@@ -143,16 +145,16 @@ doThing: (arg) =>
   })
 ```
 
-**4. Renderer — call it**:
+**4. Web client — call it**:
 ```typescript
-const result = await window.api.myFeature.doThing('hello')
+const result = await api.myFeature.doThing('hello')
 ```
 
 ---
 
 ## Database Schema
 
-Single SQLite file at `{userData}/data/djbrain.sqlite`. WAL mode, `synchronous = NORMAL`.
+Single SQLite file at `{projectRoot}/.djbrain-data/data/djbrain.sqlite` by default. WAL mode, `synchronous = NORMAL`.
 
 ### `collection_files`
 ```sql
@@ -227,21 +229,21 @@ interface AppSettings {
 }
 ```
 
-`settings-store.ts` in `src/main/settings-store.ts` normalizes environment values into `AppSettings`.
+`settings-store.ts` in `src/backend/settings-store.ts` normalizes environment values into `AppSettings`.
 
 ---
 
 ## Navigation & Routing
 
-`src/renderer/src/app/nav.ts` defines `NAV_ITEMS`. Each entry has:
+`src/web/src/app/nav.ts` defines `NAV_ITEMS`. Each entry has:
 ```typescript
 { key: string; label: string; path: string; icon: React.ComponentType }
 ```
 
-`src/renderer/src/App.tsx` maps paths to page components using `<Route>`.
+`src/web/src/App.tsx` maps paths to page components using `<Route>`.
 
 To add a new page:
-1. Create `src/renderer/src/pages/MyPage.tsx`
+1. Create `src/web/src/pages/MyPage.tsx`
 2. Add a nav item in `nav.ts`
 3. Add `<Route path="/my-page" element={<MyPage />} />` in `App.tsx`
 
@@ -266,7 +268,7 @@ To add a new page:
 
 ## Services
 
-### CollectionService (`src/main/collection-service.ts`)
+### CollectionService (`src/backend/collection-service.ts`)
 
 Manages the SQLite database, file scanning, FTS search, and want list CRUD.
 
@@ -278,7 +280,7 @@ Manages the SQLite database, file scanning, FTS search, and want list CRUD.
 
 Supported audio extensions: `.mp3 .flac .wav .aiff .aif .m4a .aac .ogg .opus .alac`
 
-### SlskdService (`src/main/slskd-service.ts`)
+### SlskdService (`src/backend/slskd-service.ts`)
 
 Wraps the slskd REST API.
 
@@ -291,18 +293,18 @@ Wraps the slskd REST API.
 
 Searches are **intentionally not deleted** so you can inspect them in slskd's web UI.
 
-### OnlineSearchService (`src/main/online-search-service.ts`)
+### OnlineSearchService (`src/backend/online-search-service.ts`)
 
 - Discogs search (`GET /database/search`) + entity detail (`GET /releases/{id}` etc.)
 - Serper.dev Google search
 - Parses release/master/artist/label pages into a uniform `DiscogsEntityDetail` structure
 - Extracts: tracklist, videos (YouTube links only), facts, related sections, hero image
 
-### GrokSearchService (`src/main/grok-search-service.ts`)
+### GrokSearchService (`src/backend/grok-search-service.ts`)
 
 Uses Grok AI with web search tools to find tracks. Returns structured `GrokTrackResult[]`.
 
-### SettingsStore (`src/main/settings-store.ts`)
+### SettingsStore (`src/backend/settings-store.ts`)
 
 - Reads `DJBRAIN_*` env vars
 - Returns a normalized `AppSettings` object
@@ -333,7 +335,7 @@ idle → searching → results_ready → downloading → downloaded
 
 Adding to the want list **auto-triggers** the search pipeline if slskd is configured.
 
-The UI subscribes to `window.api.wantList.onItemUpdated()` for real-time updates pushed from the main process.
+The UI can subscribe to `api.wantList.onItemUpdated()` for polling-backed updates from the local server.
 
 ### Manual actions in UI
 
@@ -414,20 +416,20 @@ Used in `DiscogsEntityPage` before adding a track to the want list.
 ### View composition
 
 - Keep route files high-level and readable: route params, hook wiring, major sections, and navigation decisions should be obvious in the page file.
-- Default to the shared view primitives in `src/renderer/src/components/view.tsx` for page chrome: sections, hero blocks, notices, compact buttons, labeled inputs, stat cards, and dense tables.
+- Default to the shared view primitives in `src/web/src/components/view.tsx` for page chrome: sections, hero blocks, notices, compact buttons, labeled inputs, stat cards, and dense tables.
 - Do not leave raw panel/table Tailwind strings in route files when the intent is generic UI structure; hide that in shared view components first.
-- Move generic formatting, parsing, and error helpers into `src/renderer/src/lib/`.
+- Move generic formatting, parsing, and error helpers into `src/web/src/lib/`.
 - Move feature-specific reusable UI and view-model logic into a small feature folder instead of leaving it inline in the route.
 - Move async loading / action orchestration into hooks when a page starts mixing data fetching with lots of JSX.
 - Do not split every section into its own file by default; extract shared or low-signal code, not the main page narrative.
 
-### New page with data from main process
+### New page with data from backend services
 
 1. Define the data type in `src/shared/api.ts` (add to `DJBrainApi`)
-2. Add the service method in the appropriate `src/main/*-service.ts`
-3. Register an Express route in `src/server/index.ts`
-4. Add the browser client wrapper in `src/renderer/src/lib/browser-api.ts`
-5. Create the page in `src/renderer/src/pages/`
+2. Add the service method in the appropriate `src/backend/*-service.ts`
+3. Register an Express route in `src/server/app.ts`
+4. Add the browser client wrapper in `src/web/src/api/client.ts`
+5. Create the page in `src/web/src/pages/`
 6. Add nav item in `nav.ts` + route in `App.tsx`
 
 ### New SQLite column
@@ -437,9 +439,9 @@ Use the idempotent migration pattern (see [Migrations](#migrations) above). Plac
 ### New external API integration
 
 - Add API key to `AppSettings` in `settings-store.ts`
-- Create `src/main/my-api-service.ts`
-- Register route in `src/server/index.ts`
-- Add client call in `src/renderer/src/lib/browser-api.ts`
+- Create `src/backend/my-api-service.ts`
+- Register route in `src/server/app.ts`
+- Add client call in `src/web/src/api/client.ts`
 
 ---
 
@@ -475,12 +477,12 @@ Test file conventions:
 
 ## Content Security Policy
 
-Defined in `src/renderer/index.html` as a `<meta http-equiv="Content-Security-Policy">` tag.
+Defined in `src/web/index.html` as a `<meta http-equiv="Content-Security-Policy">` tag.
 
 Current policy allows:
 - `img-src 'self' data: https:` — Discogs images and all HTTPS images
 - `frame-src https://www.youtube.com` — YouTube embed iframes
-- `connect-src 'self' https:` — all HTTPS API calls from renderer (Discogs, Serper, etc.)
+- `connect-src 'self' https:` — all HTTPS API calls from the web client (Discogs, Serper, etc.)
 
 When embedding a new external source, add it to the appropriate CSP directive. Do not add `unsafe-eval` or `unsafe-inline` for scripts.
 

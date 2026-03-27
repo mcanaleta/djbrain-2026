@@ -1,17 +1,18 @@
 {
   "extends": "./tsconfig.base.json",
-  "include": ["src/renderer/src/env.d.ts", "src/renderer/src/**/*", "src/shared/**/*"],
+  "include": ["src/web/src/env.d.ts", "src/web/src/**/*", "src/shared/**/*"],
   "exclude": ["src/shared/**/*.test.ts"],
   "compilerOptions": {
     "composite": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
     "types": ["vite/client"],
     "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
-      "@renderer/*": ["src/renderer/src/*"]
+      "@web/*": ["src/web/src/*"]
     }
   }
 }

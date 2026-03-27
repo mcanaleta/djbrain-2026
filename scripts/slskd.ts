@@ -6,12 +6,12 @@
  *   2. Scan hasoulseek/complete and auto-import any audio files found there
  */
 
-import { SlskdService } from '../src/main/slskd-service.ts'
-import { DiscogsMatchService } from '../src/main/discogs-match-service.ts'
-import { TaggerService } from '../src/main/tagger-service.ts'
-import { ImportService, parseSongFilename, type ImportResult } from '../src/main/import-service.ts'
-import { OnlineSearchService } from '../src/main/online-search-service.ts'
-import { readSettings } from '../src/main/settings-store.ts'
+import { SlskdService } from '../src/backend/slskd-service.ts'
+import { DiscogsMatchService } from '../src/backend/discogs-match-service.ts'
+import { TaggerService } from '../src/backend/tagger-service.ts'
+import { ImportService, parseSongFilename, type ImportResult } from '../src/backend/import-service.ts'
+import { OnlineSearchService } from '../src/backend/online-search-service.ts'
+import { readSettings } from '../src/backend/settings-store.ts'
 import { readdir } from 'node:fs/promises'
 import { join, extname, basename, resolve } from 'node:path'
 
