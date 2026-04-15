@@ -130,8 +130,8 @@ export class ImportReviewService {
           }
         })
     )
-    const similarItems = this.deps.getCollectionService()
-      .list([search.artist, search.title, search.version].filter(Boolean).join(' '))
+    const similarItems = (await this.deps.getCollectionService()
+      .list([search.artist, search.title, search.version].filter(Boolean).join(' ')))
       .items
       .filter((item) => item.filename !== filename && !this.deps.isDownloadFilename(item.filename) && isLikelySimilarTrack(item.filename, search))
       .slice(0, 12)

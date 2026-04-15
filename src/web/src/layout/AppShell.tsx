@@ -1,48 +1,13 @@
 import { useState } from 'react'
-import { Outlet, useNavigate } from 'react-router-dom'
+import { Outlet } from 'react-router-dom'
 import NowPlayingBar from '../components/NowPlayingBar'
 import Sidebar from '../components/Sidebar'
 import TopBar from '../components/TopBar'
 import { PlayerProvider } from '../context/PlayerContext'
 import { FloatingYoutubePlayer, YoutubePlayerProvider } from '../context/YoutubePlayerContext'
 
-export type SearchScope = 'collection' | 'discogs' | 'online'
-
-export type SubmittedSearch = {
-  scope: SearchScope
-  query: string
-  submittedAt: number
-}
-
-export type AppShellOutletContext = {
-  submittedSearch: SubmittedSearch
-}
-
 export default function AppShell(): React.JSX.Element {
-  const navigate = useNavigate()
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [submittedSearch, setSubmittedSearch] = useState<SubmittedSearch>({
-    scope: 'collection',
-    query: '',
-    submittedAt: 0
-  })
-
-  const handleSearchSubmit = (scope: SearchScope): void => {
-    const trimmedQuery = searchQuery.trim()
-    setSubmittedSearch({
-      scope,
-      query: trimmedQuery,
-      submittedAt: Date.now()
-    })
-
-    if (scope === 'collection') {
-      navigate('/collection')
-      return
-    }
-
-    navigate('/discogs-search')
-  }
 
   return (
     <PlayerProvider>
@@ -50,13 +15,9 @@ export default function AppShell(): React.JSX.Element {
         <div className="flex h-full w-full bg-zinc-950">
           <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed((value) => !value)} />
           <div className="flex min-w-0 flex-1 flex-col">
-            <TopBar
-              searchQuery={searchQuery}
-              onSearchQueryChange={setSearchQuery}
-              onSearchSubmit={handleSearchSubmit}
-            />
-            <main className="min-h-0 flex-1 overflow-auto p-6">
-              <Outlet context={{ submittedSearch }} />
+            <TopBar />
+            <main className="min-h-0 flex-1 overflow-auto p-3 md:p-4">
+              <Outlet />
             </main>
             <NowPlayingBar />
           </div>

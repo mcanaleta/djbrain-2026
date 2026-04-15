@@ -41,6 +41,6 @@ ENV DJBRAIN_DATA_DIR=/data
 # Configure via DJBRAIN_* env vars → musicFolderPath = /music
 VOLUME ["/data", "/music"]
 
-EXPOSE 5178
+EXPOSE 5180
 
-CMD ["node", "--experimental-strip-types", "src/server/index.ts", "--port", "5178", "--static", "dist"]
+CMD ["node", "--experimental-strip-types", "src/server/index.ts", "--port", "5180", "--static", "dist"]

@@ -1,3 +1,4 @@
+import { ExternalLinkIcon } from '@radix-ui/react-icons'
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react'
 
 function cx(...parts: Array<string | false | null | undefined>): string {
@@ -14,26 +15,29 @@ const PANEL_TONE_CLASS: Record<PanelTone, string> = {
 }
 
 const PANEL_PADDING_CLASS: Record<PanelPadding, string> = {
-  sm: 'p-3',
-  md: 'p-4',
-  lg: 'p-5'
+  sm: 'p-2',
+  md: 'p-3',
+  lg: 'p-4'
 }
 
 export function ViewPanel({
   children,
   tone = 'default',
   padding = 'md',
+  borderless = false,
   className
 }: {
   children: ReactNode
   tone?: PanelTone
   padding?: PanelPadding
+  borderless?: boolean
   className?: string
 }): React.JSX.Element {
   return (
     <div
       className={cx(
-        'rounded-xl border',
+        'rounded-xl',
+        !borderless && 'border',
         PANEL_TONE_CLASS[tone],
         PANEL_PADDING_CLASS[padding],
         className
@@ -51,6 +55,7 @@ export function ViewSection({
   children,
   tone = 'default',
   padding = 'md',
+  borderless = false,
   className,
   bodyClassName
 }: {
@@ -60,15 +65,16 @@ export function ViewSection({
   children: ReactNode
   tone?: PanelTone
   padding?: PanelPadding
+  borderless?: boolean
   className?: string
   bodyClassName?: string
 }): React.JSX.Element {
   const hasHeader = Boolean(title || subtitle || aside)
 
   return (
-    <ViewPanel tone={tone} padding={padding} className={className}>
+    <ViewPanel tone={tone} padding={padding} borderless={borderless} className={className}>
       {hasHeader ? (
-        <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             {title ? <div className="text-[13px] font-semibold text-zinc-100">{title}</div> : null}
             {subtitle ? <div className="mt-0.5 text-[11px] text-zinc-500">{subtitle}</div> : null}
@@ -76,7 +82,7 @@ export function ViewSection({
           {aside}
         </div>
       ) : null}
-      <div className={cx(hasHeader && 'mt-3', bodyClassName)}>{children}</div>
+      <div className={cx(hasHeader && 'mt-2', bodyClassName)}>{children}</div>
     </ViewPanel>
   )
 }
@@ -102,16 +108,16 @@ export function PageHero({
     <ViewSection
       tone="hero"
       title={
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           {eyebrow ? (
             <div className="text-[10px] uppercase tracking-[0.2em] text-zinc-500">{eyebrow}</div>
           ) : null}
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             <div className="min-w-0 text-xl font-semibold tracking-tight text-zinc-100">{title}</div>
             {badges}
           </div>
           {subtitle ? <div className="text-[11px] text-zinc-400">{subtitle}</div> : null}
-          {meta ? <div className="flex flex-wrap gap-1.5 text-[11px] text-zinc-400">{meta}</div> : null}
+          {meta ? <div className="flex flex-wrap gap-1 text-[11px] text-zinc-400">{meta}</div> : null}
         </div>
       }
       aside={aside}
@@ -141,7 +147,7 @@ export function Notice({
   className?: string
 }): React.JSX.Element {
   return (
-    <div className={cx('rounded-xl border px-3 py-2 text-xs', NOTICE_TONE_CLASS[tone], className)}>
+    <div className={cx('rounded-xl border px-2.5 py-1.5 text-xs', NOTICE_TONE_CLASS[tone], className)}>
       {children}
     </div>
   )
@@ -168,7 +174,7 @@ export function StatGrid({
   children: ReactNode
   className?: string
 }): React.JSX.Element {
-  return <div className={cx('grid min-w-[220px] grid-cols-2 gap-2 text-xs', className)}>{children}</div>
+  return <div className={cx('grid min-w-[220px] grid-cols-2 gap-1.5 text-xs', className)}>{children}</div>
 }
 
 export function StatCard({
@@ -189,6 +195,35 @@ export function StatCard({
       {detail ? <div className="mt-0.5 text-[11px] text-zinc-500">{detail}</div> : null}
     </ViewPanel>
   )
+}
+
+export function MiniStat({
+  label,
+  value,
+  title,
+  className
+}: {
+  label: ReactNode
+  value: ReactNode
+  title?: string
+  className?: string
+}): React.JSX.Element {
+  return (
+    <div className={cx('rounded-lg border border-zinc-800 bg-zinc-950/40 px-2 py-1.5', className)} title={title}>
+      <div className="text-[9px] uppercase tracking-[0.18em] text-zinc-500">{label}</div>
+      <div className="mt-0.5 text-xs font-medium text-zinc-100">{value}</div>
+    </div>
+  )
+}
+
+export function SectionKicker({
+  children,
+  className
+}: {
+  children: ReactNode
+  className?: string
+}): React.JSX.Element {
+  return <div className={cx('text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500', className)}>{children}</div>
 }
 
 type ButtonTone = 'default' | 'primary' | 'success' | 'danger'
@@ -296,16 +331,68 @@ export function LabeledInput({
   inputClassName?: string
 }): React.JSX.Element {
   return (
-    <label className={cx('space-y-1', className)}>
+    <label className={cx('space-y-0.5', className)}>
       <div className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">{label}</div>
       <input
         {...props}
         className={cx(
-          'w-full rounded-lg border border-zinc-700 bg-zinc-950/50 px-2.5 py-1.5 text-xs text-zinc-100 outline-none transition focus:border-amber-700/60',
+          'w-full rounded-lg border border-zinc-700 bg-zinc-950/50 px-2.5 py-1 text-xs text-zinc-100 outline-none transition focus:border-amber-700/60',
           inputClassName
         )}
       />
     </label>
+  )
+}
+
+export function CompactInput({
+  label,
+  className,
+  inputClassName,
+  ...props
+}: InputHTMLAttributes<HTMLInputElement> & {
+  label: ReactNode
+  className?: string
+  inputClassName?: string
+}): React.JSX.Element {
+  return (
+    <label className={cx('space-y-1', className)}>
+      <div className="text-[9px] uppercase tracking-wide text-zinc-500">{label}</div>
+      <input
+        {...props}
+        className={cx(
+          'w-full rounded-lg border border-zinc-800 bg-zinc-950/50 px-2 py-1 text-xs text-zinc-100 outline-none transition focus:border-amber-700/60',
+          inputClassName
+        )}
+      />
+    </label>
+  )
+}
+
+export function SourceIconLink({
+  url,
+  label,
+  className
+}: {
+  url: string | null | undefined
+  label: string
+  className?: string
+}): React.JSX.Element {
+  return url ? (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      onClick={(event) => event.stopPropagation()}
+      className={cx(
+        'inline-flex h-5 w-5 items-center justify-center rounded border border-zinc-700 bg-zinc-950/50 text-zinc-100 hover:border-amber-700/60 hover:text-amber-200',
+        className
+      )}
+      title={`${label}: ${url}`}
+    >
+      <ExternalLinkIcon className="h-3 w-3" />
+    </a>
+  ) : (
+    <span className={cx('text-zinc-600', className)}>—</span>
   )
 }
 
@@ -329,7 +416,7 @@ export function QueryBar({
   className?: string
 }): React.JSX.Element {
   return (
-    <div className={cx('flex flex-wrap items-end gap-3', className)}>
+    <div className={cx('flex flex-wrap items-end gap-2', className)}>
       <LabeledInput
         label={label}
         value={value}
@@ -362,17 +449,17 @@ export function ItemRow({
 }): React.JSX.Element {
   return (
     <ViewPanel tone="muted" padding="sm" className={className}>
-      <div className="flex flex-wrap items-start gap-2">
+      <div className="flex flex-wrap items-start gap-1.5">
         {prefix ? <div className="shrink-0">{prefix}</div> : null}
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             <div className="min-w-0 flex-1 text-xs font-medium text-zinc-100">{title}</div>
             {badges}
           </div>
-          {subtitle ? <div className="mt-1 text-[11px] text-zinc-500">{subtitle}</div> : null}
-          {detail ? <div className="mt-1 text-[11px] text-zinc-400">{detail}</div> : null}
+          {subtitle ? <div className="mt-0.5 text-[11px] text-zinc-500">{subtitle}</div> : null}
+          {detail ? <div className="mt-0.5 text-[11px] text-zinc-400">{detail}</div> : null}
         </div>
-        {actions ? <div className="flex shrink-0 flex-wrap gap-2">{actions}</div> : null}
+        {actions ? <div className="flex shrink-0 flex-wrap gap-1.5">{actions}</div> : null}
       </div>
     </ViewPanel>
   )
@@ -390,23 +477,27 @@ export function DataTable<Row>({
   columns,
   rows,
   getRowKey,
+  getRowTitle,
   loading = false,
   loadingMessage = 'Loading…',
   emptyMessage = 'No rows.',
   rowClassName,
   onRowClick,
   tableClassName,
+  borderless = false,
   className
 }: {
   columns: DataTableColumn<Row>[]
   rows: Row[]
   getRowKey: (row: Row, index: number) => string
+  getRowTitle?: (row: Row, index: number) => string | undefined
   loading?: boolean
   loadingMessage?: ReactNode
   emptyMessage?: ReactNode
   rowClassName?: string | ((row: Row, index: number) => string)
   onRowClick?: (row: Row, index: number) => void
   tableClassName?: string
+  borderless?: boolean
   className?: string
 }): React.JSX.Element {
   const rowBaseClass = onRowClick
@@ -414,7 +505,7 @@ export function DataTable<Row>({
     : 'border-t border-zinc-800 text-[11px] text-zinc-200'
 
   return (
-    <div className={cx('overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-900/30', className)}>
+    <div className={cx('overflow-x-auto rounded-xl bg-zinc-900/30', !borderless && 'border border-zinc-800', className)}>
       <table className={cx('w-full border-collapse text-left', tableClassName)}>
         <thead>
           <tr className="bg-zinc-950/50 text-[10px] uppercase tracking-wide text-zinc-500">
@@ -458,6 +549,7 @@ export function DataTable<Row>({
                 <tr
                   key={getRowKey(row, index)}
                   {...interactiveProps}
+                  title={getRowTitle?.(row, index)}
                   className={cx(
                     rowBaseClass,
                     typeof rowClassName === 'function' ? rowClassName(row, index) : rowClassName

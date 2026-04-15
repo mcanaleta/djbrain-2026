@@ -60,14 +60,14 @@ export class FileAnalysisService {
 
   async get(filename: string, absolutePath: string): Promise<AudioAnalysis | null> {
     const collectionService = this.deps.getCollectionService()
-    const snapshot = collectionService.readFileSnapshot(filename)
+    const snapshot = await collectionService.readFileSnapshot(filename)
     if (!snapshot) return this.deps.audioAnalysisService.analyze(absolutePath).catch(() => null)
     try {
       const audioHash = await this.getAudioHash(filename, absolutePath, snapshot.filesize, snapshot.mtimeMs)
-      const cached = collectionService.readStoredAudioAnalysis(audioHash)
+      const cached = await collectionService.readStoredAudioAnalysis(audioHash)
       if (cached) return JSON.parse(cached) as AudioAnalysis
       const analysis = await this.deps.audioAnalysisService.analyze(absolutePath)
-      collectionService.saveStoredAudioAnalysis(audioHash, JSON.stringify(analysis))
+      await collectionService.saveStoredAudioAnalysis(audioHash, JSON.stringify(analysis))
       return analysis
     } catch {
       return null
@@ -76,20 +76,20 @@ export class FileAnalysisService {
 
   private async getAudioHash(filename: string, absolutePath: string, filesize: number, mtimeMs: number): Promise<string> {
     const collectionService = this.deps.getCollectionService()
-    const cached = collectionService.readStoredAudioHash(filename)
+    const cached = await collectionService.readStoredAudioHash(filename)
     if (cached) return cached
     const cacheKey = `${filename}:${filesize}:${mtimeMs}`
     const pending = this.hashCache.get(cacheKey)
     if (pending) return pending
     const created = hashAudioData(absolutePath)
-      .then((audioHash) => {
+      .then(async (audioHash) => {
         this.hashCache.delete(cacheKey)
-        collectionService.saveStoredAudioHash(filename, { filesize, mtimeMs, audioHash })
+        await collectionService.saveStoredAudioHash(filename, { filesize, mtimeMs, audioHash })
         return audioHash
       })
-      .catch((error) => {
+      .catch(async (error) => {
         this.hashCache.delete(cacheKey)
-        collectionService.saveStoredAudioHashError(filename, {
+        await collectionService.saveStoredAudioHashError(filename, {
           filesize,
           mtimeMs,
           errorMessage: error instanceof Error ? error.message : 'Audio hash failed.'

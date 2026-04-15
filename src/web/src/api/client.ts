@@ -1,10 +1,16 @@
 import type {
+  FileIdentificationState,
   ImportCommitInput,
   ImportComparison,
   ImportFileResult,
   ImportReview,
+  RecordingDetails,
+  RecordingSummary,
   DJBrainApi,
   SlskdConnectionTestInput,
+  UpgradeCandidate,
+  UpgradeCase,
+  UpgradeLocalCandidate,
   WantListAddInput,
   WantListItem,
   CollectionSyncStatus
@@ -215,9 +221,19 @@ export const api: DJBrainApi = {
     search: (query: string) => request(`/api/grok-search?query=${encodeURIComponent(query)}`)
   },
   collection: {
-    list: (query?: string) => request(`/api/collection?query=${encodeURIComponent(query ?? '')}`),
+    list: (query?: string, limit?: number) =>
+      request(
+        `/api/collection?query=${encodeURIComponent(query ?? '')}${typeof limit === 'number' ? `&limit=${encodeURIComponent(String(limit))}` : ''}`
+      ),
+    get: (filename: string) => request(`/api/collection/item?filename=${encodeURIComponent(filename)}`),
     listDownloads: (query?: string) =>
       request(`/api/collection/downloads?query=${encodeURIComponent(query ?? '')}`),
+    reanalyze: (filename: string) =>
+      request('/api/collection/reanalyze', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ filename })
+      }),
     async syncNow() {
       const status = await request<CollectionSyncStatus>('/api/collection/sync', { method: 'POST' })
       emitCollectionStatus(status)
@@ -254,6 +270,45 @@ export const api: DJBrainApi = {
         headers: JSON_HEADERS,
         body: JSON.stringify({ filenames, force })
       }),
+    queueIdentificationProcessing: (filenames?: string[], force?: boolean) =>
+      request<{ queued: number }>('/api/collection/identify/process', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ filenames, force })
+      }),
+    async reviewIdentification(input) {
+      const result = await request<FileIdentificationState | null>('/api/collection/identify/review', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify(input)
+      })
+      invalidateCollectionSnapshot()
+      void syncCollectionSnapshot()
+      return result
+    },
+    listRecordings: (query?: string) =>
+      request<RecordingSummary[]>(`/api/collection/recordings?query=${encodeURIComponent(query ?? '')}`),
+    getRecording: (id: number) => request<RecordingDetails | null>(`/api/collection/recordings/${id}`),
+    async assignRecording(input) {
+      const result = await request<RecordingDetails | null>('/api/collection/recordings/assign', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify(input)
+      })
+      invalidateCollectionSnapshot()
+      void syncCollectionSnapshot()
+      return result
+    },
+    async mergeRecordings(sourceRecordingId: number, targetRecordingId: number) {
+      const result = await request<RecordingDetails | null>('/api/collection/recordings/merge', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ sourceRecordingId, targetRecordingId })
+      })
+      invalidateCollectionSnapshot()
+      void syncCollectionSnapshot()
+      return result
+    },
     async commitImport(input: ImportCommitInput) {
       const result = await request<ImportFileResult>('/api/collection/import', {
         method: 'POST',
@@ -302,6 +357,61 @@ export const api: DJBrainApi = {
         method: 'POST',
         headers: JSON_HEADERS,
         body: JSON.stringify({ filename })
+      })
+  },
+  upgrades: {
+    list: () => request<UpgradeCase[]>('/api/upgrades'),
+    open: (collectionFilename: string) =>
+      request<UpgradeCase>('/api/upgrades', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ collectionFilename })
+      }),
+    get: (id: number) => request<UpgradeCase | null>(`/api/upgrades/${id}`),
+    search: (id: number, search) =>
+      request<UpgradeCase | null>(`/api/upgrades/${id}/search`, {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify(search ?? {})
+      }),
+    setReference: (id: number, input) =>
+      request<UpgradeCase | null>(`/api/upgrades/${id}/reference`, {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify(input)
+      }),
+    getCandidates: (id: number) => request<UpgradeCandidate[]>(`/api/upgrades/${id}/candidates`),
+    getLocalCandidates: (id: number) =>
+      request<UpgradeLocalCandidate[]>(`/api/upgrades/${id}/local-candidates`),
+    download: (id: number, username: string, filename: string, size: number) =>
+      request<UpgradeCase | null>(`/api/upgrades/${id}/download`, {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ username, filename, size })
+      }),
+    addLocalCandidate: (id: number, filename: string) =>
+      request<UpgradeCase | null>(`/api/upgrades/${id}/local-candidates`, {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ filename })
+      }),
+    selectLocalCandidate: (id: number, filename: string) =>
+      request<UpgradeCase | null>(`/api/upgrades/${id}/select-local`, {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ filename })
+      }),
+    async replace(id: number) {
+      const result = await request<UpgradeCase | null>(`/api/upgrades/${id}/replace`, {
+        method: 'POST'
+      })
+      invalidateCollectionSnapshot()
+      void syncCollectionSnapshot()
+      return result
+    },
+    markReanalyzed: (id: number) =>
+      request<UpgradeCase | null>(`/api/upgrades/${id}/reanalyze-complete`, {
+        method: 'POST'
       })
   }
 }

@@ -59,28 +59,29 @@ export function registerWantListRoutes(app: Express, deps: WantListRouteDeps): v
     startDownloadPipeline
   } = deps
 
-  app.get('/api/want-list', (_request, response) => {
-    sendJson(response, 200, requireCollectionService().wantListList())
-  })
+  app.get('/api/want-list', asyncHandler(async (_request, response) => {
+    sendJson(response, 200, await requireCollectionService().wantListList())
+  }))
 
-  app.get('/api/want-list/:id', (request, response) => {
-    const item = requireCollectionService().wantListGet(Number(request.params['id']))
+  app.get('/api/want-list/:id', asyncHandler(async (request, response) => {
+    const item = await requireCollectionService().wantListGet(Number(request.params['id']))
     sendJson(response, item ? 200 : 404, item ?? { message: 'Want list item not found' })
-  })
+  }))
 
   app.post(
     '/api/want-list',
     asyncHandler(async (request, response) => {
       const item = requireCollectionService().wantListAdd((request.body ?? null) as WantListAddInput)
-      void runSearchPipeline(item)
-      sendJson(response, 201, item)
+      const added = await item
+      void runSearchPipeline(added)
+      sendJson(response, 201, added)
     })
   )
 
   app.put(
     '/api/want-list/:id',
     asyncHandler(async (request, response) => {
-      const updated = requireCollectionService().wantListUpdate(
+      const updated = await requireCollectionService().wantListUpdate(
         Number(request.params['id']),
         (request.body ?? null) as WantListAddInput
       )
@@ -88,15 +89,15 @@ export function registerWantListRoutes(app: Express, deps: WantListRouteDeps): v
     })
   )
 
-  app.delete('/api/want-list/:id', (request, response) => {
-    requireCollectionService().wantListRemove(Number(request.params['id']))
+  app.delete('/api/want-list/:id', asyncHandler(async (request, response) => {
+    await requireCollectionService().wantListRemove(Number(request.params['id']))
     sendEmpty(response, 204)
-  })
+  }))
 
-  app.post('/api/want-list/:id/search', (request, response) => {
+  app.post('/api/want-list/:id/search', asyncHandler(async (request, response) => {
     const id = Number(request.params['id'])
     const service = requireCollectionService()
-    const item = service.wantListGet(id)
+    const item = await service.wantListGet(id)
     if (!item) {
       sendJson(response, 404, { message: 'Want list item not found' })
       return
@@ -104,7 +105,7 @@ export function registerWantListRoutes(app: Express, deps: WantListRouteDeps): v
 
     const body = (request.body ?? null) as { query?: string } | null
     const query = typeof body?.query === 'string' ? body.query : ''
-    const updated = service.wantListUpdatePipeline(id, {
+    const updated = await service.wantListUpdatePipeline(id, {
       pipelineStatus: 'searching',
       searchId: null,
       searchResultCount: 0,
@@ -114,12 +115,12 @@ export function registerWantListRoutes(app: Express, deps: WantListRouteDeps): v
 
     void runSearchPipeline(item, query)
     sendJson(response, 200, updated)
-  })
+  }))
 
-  app.get('/api/want-list/:id/candidates', (request, response) => {
-    const item = requireCollectionService().wantListGet(Number(request.params['id']))
+  app.get('/api/want-list/:id/candidates', asyncHandler(async (request, response) => {
+    const item = await requireCollectionService().wantListGet(Number(request.params['id']))
     sendJson(response, 200, parseStoredCandidates(item?.bestCandidatesJson ?? null))
-  })
+  }))
 
   app.post(
     '/api/want-list/:id/download',
@@ -146,7 +147,7 @@ export function registerWantListRoutes(app: Express, deps: WantListRouteDeps): v
     })
   )
 
-  app.post('/api/want-list/:id/import', (request, response) => {
+  app.post('/api/want-list/:id/import', asyncHandler(async (request, response) => {
     const id = Number(request.params['id'])
     const body = (request.body ?? null) as { localFilePath?: string; filename?: string } | null
     const localFilePath = normalizeSearchText(body?.localFilePath ?? '')
@@ -157,11 +158,11 @@ export function registerWantListRoutes(app: Express, deps: WantListRouteDeps): v
         : resolveMusicRelativePath(filename || localFilePath)
 
     void runImportPipeline(id, fileToImport)
-    sendJson(response, 202, requireCollectionService().wantListGet(id))
-  })
+    sendJson(response, 202, await requireCollectionService().wantListGet(id))
+  }))
 
-  app.post('/api/want-list/:id/reset', (request, response) => {
-    const updated = requireCollectionService().wantListUpdatePipeline(Number(request.params['id']), {
+  app.post('/api/want-list/:id/reset', asyncHandler(async (request, response) => {
+    const updated = await requireCollectionService().wantListUpdatePipeline(Number(request.params['id']), {
       pipelineStatus: 'idle',
       searchId: null,
       searchResultCount: 0,
@@ -171,5 +172,5 @@ export function registerWantListRoutes(app: Express, deps: WantListRouteDeps): v
       pipelineError: null
     })
     sendJson(response, 200, updated)
-  })
+  }))
 }

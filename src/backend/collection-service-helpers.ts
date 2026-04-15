@@ -17,13 +17,38 @@ export const AUDIO_EXTENSIONS = new Set([
 type CollectionRow = {
   filename: string
   filesize: number | bigint
+  duration?: number | null
   score?: number | null
+  isDownload?: boolean
+  bitrateKbps?: number | null
+  qualityScore?: number | null
+  recordingId?: number | bigint | null
+  recordingDiscogsUrl?: string | null
+  recordingMusicBrainzUrl?: string | null
+  identificationStatus?: CollectionItem['identificationStatus']
+  identificationConfidence?: number | null
+  assignmentMethod?: CollectionItem['assignmentMethod']
+  recordingCanonicalArtist?: string | null
+  recordingCanonicalTitle?: string | null
+  recordingCanonicalVersion?: string | null
+  recordingCanonicalYear?: string | null
   importStatus?: CollectionItem['importStatus']
   importArtist?: string | null
   importTitle?: string | null
   importVersion?: string | null
   importYear?: string | null
   importError?: string | null
+  importTrackKey?: string | null
+  importMatchArtist?: string | null
+  importMatchTitle?: string | null
+  importMatchVersion?: string | null
+  importMatchYear?: string | null
+  importReleaseTitle?: string | null
+  importTrackPosition?: string | null
+  importExactExistingFilename?: string | null
+  importBetterThanExisting?: boolean | null
+  importExistingQualityScore?: number | null
+  importQualityScore?: number | null
 }
 
 export function formatError(error: unknown): string {
@@ -143,15 +168,54 @@ export function toListResult(rows: CollectionRow[]): CollectionListResult {
   const items = rows.map((row) => ({
     filename: row.filename,
     filesize: toNumber(row.filesize),
+    duration: row.duration ?? null,
     score: typeof row.score === 'number' ? row.score : null,
+    isDownload: row.isDownload ?? false,
+    bitrateKbps: row.bitrateKbps ?? null,
+    qualityScore: row.qualityScore ?? null,
+    recordingId: row.recordingId == null ? null : toNumber(row.recordingId),
+    recordingDiscogsUrl: row.recordingDiscogsUrl ?? null,
+    recordingMusicBrainzUrl: row.recordingMusicBrainzUrl ?? null,
+    identificationStatus: row.identificationStatus ?? null,
+    identificationConfidence: row.identificationConfidence ?? null,
+    assignmentMethod: row.assignmentMethod ?? null,
+    recordingCanonical:
+      row.recordingCanonicalArtist || row.recordingCanonicalTitle || row.recordingCanonicalVersion || row.recordingCanonicalYear
+        ? {
+            artist: row.recordingCanonicalArtist ?? null,
+            title: row.recordingCanonicalTitle ?? null,
+            version: row.recordingCanonicalVersion ?? null,
+            year: row.recordingCanonicalYear ?? null
+          }
+        : null,
     importStatus: row.importStatus ?? null,
     importArtist: row.importArtist ?? null,
     importTitle: row.importTitle ?? null,
     importVersion: row.importVersion ?? null,
     importYear: row.importYear ?? null,
-    importError: row.importError ?? null
+    importError: row.importError ?? null,
+    importTrackKey: row.importTrackKey ?? null,
+    importMatchArtist: row.importMatchArtist ?? null,
+    importMatchTitle: row.importMatchTitle ?? null,
+    importMatchVersion: row.importMatchVersion ?? null,
+    importMatchYear: row.importMatchYear ?? null,
+    importReleaseTitle: row.importReleaseTitle ?? null,
+    importTrackPosition: row.importTrackPosition ?? null,
+    importExactExistingFilename: row.importExactExistingFilename ?? null,
+    importBetterThanExisting: row.importBetterThanExisting ?? null,
+    importExistingQualityScore: row.importExistingQualityScore ?? null,
+    importQualityScore: row.importQualityScore ?? null
   }))
   return { items, total: items.length }
+}
+
+export function recordingSourceUrlFromExternalKey(externalKey: string | null | undefined): string | null {
+  if (!externalKey) return null
+  const discogs = externalKey.match(/^discogs:release:(\d+)/i)
+  if (discogs?.[1]) return `https://www.discogs.com/release/${discogs[1]}`
+  const musicbrainz = externalKey.match(/^musicbrainz:recording:([0-9a-f-]+)/i)
+  if (musicbrainz?.[1]) return `https://musicbrainz.org/recording/${musicbrainz[1].toLowerCase()}`
+  return null
 }
 
 function getSearchTermWeight(term: string): number {

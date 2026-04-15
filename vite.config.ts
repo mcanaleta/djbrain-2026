@@ -6,13 +6,14 @@ export default defineConfig({
   root: 'src/web',
   plugins: [react()],
   server: {
-    port: 5178,
+    port: 5180,
+    strictPort: true,
     proxy: {
-      '/api': 'http://localhost:5179'
+      '/api': 'http://localhost:5181'
     }
   },
   preview: {
-    port: 4178
+    port: 5182
   },
   build: {
     outDir: '../../dist',

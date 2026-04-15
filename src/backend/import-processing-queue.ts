@@ -39,6 +39,15 @@ export class ImportProcessingQueue {
     this.client = null
   }
 
+  async clear(): Promise<void> {
+    if (!this.client) {
+      this.memoryQueue.length = 0
+      this.memoryQueued.clear()
+      return
+    }
+    await this.client.del([this.queueKey, this.queuedKey])
+  }
+
   async enqueue(filenames: string[]): Promise<number> {
     const unique = [...new Set(filenames.filter(Boolean))]
     if (!this.client) return this.enqueueMemory(unique)

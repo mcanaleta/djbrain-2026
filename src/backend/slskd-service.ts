@@ -11,6 +11,7 @@ type SlskdFile = {
   filename: string
   size: number
   bitRate?: number
+  length?: number
   isLocked?: boolean
   attributes?: SlskdFileAttribute[]
 }
@@ -50,6 +51,7 @@ export type SlskdCandidate = {
   size: number
   score: number
   bitrate: number | null
+  durationSeconds: number | null
   queueLength: number | null
   hasFreeUploadSlot: boolean | null
   uploadSpeed: number | null
@@ -330,6 +332,8 @@ export class SlskdService {
 
     const bitrateAttr = file.attributes?.find((a) => a.attribute === 'BitRate')
     const bitrate = file.bitRate ?? (bitrateAttr ? bitrateAttr.value : null)
+    const lengthAttr = file.attributes?.find((a) => a.attribute === 'Length')
+    const durationSeconds = file.length ?? (lengthAttr ? lengthAttr.value : null)
 
     // High bitrate bonus
     if (bitrate && bitrate >= 320) score += 5
@@ -346,6 +350,7 @@ export class SlskdService {
       size: file.size,
       score: Math.max(0, score),
       bitrate,
+      durationSeconds,
       queueLength: typeof response.queueLength === 'number' ? response.queueLength : null,
       hasFreeUploadSlot:
         typeof response.hasFreeUploadSlot === 'boolean' ? response.hasFreeUploadSlot : null,

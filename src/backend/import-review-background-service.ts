@@ -26,8 +26,10 @@ export class ImportReviewBackgroundService {
   }
 
   start(): void {
-    this.deps.collectionService.resetImportReviewProcessing()
-    void this.syncQueue()
+    void (async () => {
+      await this.deps.collectionService.resetImportReviewProcessing()
+      await this.syncQueue()
+    })()
   }
 
   kick(): void {
@@ -36,7 +38,7 @@ export class ImportReviewBackgroundService {
   }
 
   async syncQueue(): Promise<number> {
-    const queued = await this.deps.queue.enqueue(this.deps.collectionService.listPendingImportReviewFilenames())
+    const queued = await this.deps.queue.enqueue(await this.deps.collectionService.listPendingImportReviewFilenames())
     if (queued > 0) this.kick()
     return queued
   }
@@ -48,13 +50,15 @@ export class ImportReviewBackgroundService {
       for (;;) {
         const filename = await this.deps.queue.take(1)
         if (!filename) return
-        const next = this.deps.collectionService.claimImportReviewFile(filename)
+        const next = await this.deps.collectionService.claimImportReviewFile(filename)
         if (!next) continue
         await this.process(next)
       }
     } finally {
       this.running = false
-      if (this.deps.collectionService.getStatus().importPendingCount) void this.syncQueue()
+      if (this.deps.collectionService.getStatus().importPendingCount) {
+        void this.syncQueue()
+      }
     }
   }
 
@@ -74,7 +78,7 @@ export class ImportReviewBackgroundService {
         ? { artist: next.parsedArtist ?? '', title: next.parsedTitle, version: next.parsedVersion ?? null }
         : null)
     if (!parsed) {
-      this.deps.collectionService.saveImportReviewError(next.filename, {
+      await this.deps.collectionService.saveImportReviewError(next.filename, {
         filesize: next.filesize,
         mtimeMs: next.mtimeMs,
         parsedArtist: next.parsedArtist,
@@ -94,7 +98,7 @@ export class ImportReviewBackgroundService {
         settings: this.deps.getSettings(),
         sourceAnalysis
       })
-      this.deps.collectionService.saveImportReviewCache(next.filename, {
+      await this.deps.collectionService.saveImportReviewCache(next.filename, {
         filesize: next.filesize,
         mtimeMs: next.mtimeMs,
         parsedArtist: review.parsed?.artist ?? next.parsedArtist,
@@ -104,7 +108,7 @@ export class ImportReviewBackgroundService {
         reviewJson: JSON.stringify({ ...review, sourceAnalysis: null })
       })
     } catch (error) {
-      this.deps.collectionService.saveImportReviewError(next.filename, {
+      await this.deps.collectionService.saveImportReviewError(next.filename, {
         filesize: next.filesize,
         mtimeMs: next.mtimeMs,
         parsedArtist: next.parsedArtist,

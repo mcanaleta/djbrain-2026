@@ -49,7 +49,7 @@ Every step allows manual intervention. You can inspect results, pick the best fi
 | Icons | Radix UI Icons |
 | UI primitives | Radix UI (Switch, Separator, Dropdown) |
 | Build | Vite 7 |
-| Database | SQLite via Node.js built-in `node:sqlite` (`DatabaseSync`) |
+| Database | SQLite (`node:sqlite`) + optional Postgres read model via `DJBRAIN_POSTGRES_URL` |
 | Music search | slskd REST API (Soulseek daemon) |
 | Metadata | Discogs API, Serper (Google), Grok AI (xAI) |
 | Testing | Node.js built-in `node:test` + `node:assert/strict` |

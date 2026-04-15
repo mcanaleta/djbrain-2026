@@ -16,6 +16,20 @@ function norm(s: string): string {
     .trim()
 }
 
+function tokens(value: string): string[] {
+  return norm(value)
+    .split(/\s+/)
+    .filter((token) => token && token.length >= 2 && !['and', 'version'].includes(token))
+}
+
+function recall(queryTokens: string[], candidateTokens: string[]): number {
+  if (queryTokens.length === 0 || candidateTokens.length === 0) return 0
+  const candidateSet = new Set(candidateTokens)
+  let hits = 0
+  for (const token of queryTokens) if (candidateSet.has(token)) hits += 1
+  return hits / queryTokens.length
+}
+
 // Loose substring containment score (0–1)
 function containsScore(haystack: string, needle: string): number {
   if (!needle) return 0
@@ -33,7 +47,7 @@ function scoreTrackTitle(
   targetVersion: string | null
 ): number {
   const parsedTrack = parseTrackTitle(trackTitle)
-  const normTrack = norm(parsedTrack.title || trackTitle)
+  const normTrack = norm((parsedTrack.title || trackTitle).replace(/\s*\[[^\]]+\]/g, '').trim())
   const normTarget = norm(targetTitle)
 
   let score = 0
@@ -51,6 +65,7 @@ function scoreTrackTitle(
     else if (normTrackVersion && (normTrackVersion.includes(normVersion) || normVersion.includes(normTrackVersion)))
       score += 12
     else if (trackTitle.toLowerCase().includes(normVersion)) score += 15
+    else score += Math.round(recall(tokens(targetVersion), tokens(parsedTrack.version ?? '')) * 18)
   }
 
   return score
@@ -94,6 +109,20 @@ function resolveArtist(entity: TrackableEntity, fallback: string): string {
   return fallback
 }
 
+function scoreRelease(entity: TrackableEntity, title: string): number {
+  const releaseTitle = norm(entity.title)
+  const format = entity.type === 'release' ? norm(entity.formats.join(' ')) : ''
+  let score = 0
+  if (releaseTitle === norm(title)) score += 8
+  else if (releaseTitle.includes(norm(title))) score += 4
+  if (/\b(compilation|sessions|greatest|hits|best|collection|archive|vol|volume|mixed)\b/.test(releaseTitle)) score -= 12
+  if (format.includes('compilation')) score -= 12
+  if (format.includes('file')) score -= 8
+  if (format.includes('single')) score += 6
+  if (format.includes('maxi')) score += 4
+  return score
+}
+
 function isTrackable(entity: DiscogsEntity): entity is TrackableEntity {
   return entity.type === 'release' || entity.type === 'master'
 }
@@ -130,7 +159,7 @@ export class DiscogsMatchService {
 
     for (const result of results.slice(0, 5)) {
       const type = this.normalizeType(result.type)
-      if (type !== 'release' && type !== 'master') continue
+      if (type !== 'release') continue
       if (!result.id) continue
 
       let entity: DiscogsEntity
@@ -160,7 +189,7 @@ export class DiscogsMatchService {
 
       if (!bestTrack || bestTrackScore === 0) continue
 
-      const totalScore = artistScore + bestTrackScore
+      const totalScore = artistScore + bestTrackScore + scoreRelease(entity, title)
       console.log(
         `[discogs-match] ${type}/${result.id} "${entity.title}": artistScore=${artistScore} trackScore=${bestTrackScore} total=${totalScore} track="${bestTrack.title}"`
       )

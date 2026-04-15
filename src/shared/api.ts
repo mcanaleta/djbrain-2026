@@ -20,12 +20,33 @@ export type CollectionItem = {
   filesize: number
   duration: number | null
   score: number | null
+  isDownload?: boolean
+  bitrateKbps?: number | null
+  qualityScore?: number | null
+  recordingId?: number | null
+  recordingDiscogsUrl?: string | null
+  recordingMusicBrainzUrl?: string | null
+  identificationStatus?: IdentificationStatus | null
+  identificationConfidence?: number | null
+  assignmentMethod?: IdentificationAssignmentMethod | null
+  recordingCanonical?: RecordingCanonical | null
   importStatus?: 'pending' | 'processing' | 'ready' | 'error' | null
   importArtist?: string | null
   importTitle?: string | null
   importVersion?: string | null
   importYear?: string | null
   importError?: string | null
+  importTrackKey?: string | null
+  importMatchArtist?: string | null
+  importMatchTitle?: string | null
+  importMatchVersion?: string | null
+  importMatchYear?: string | null
+  importReleaseTitle?: string | null
+  importTrackPosition?: string | null
+  importExactExistingFilename?: string | null
+  importBetterThanExisting?: boolean | null
+  importExistingQualityScore?: number | null
+  importQualityScore?: number | null
 }
 
 export type CollectionSyncStatus = {
@@ -33,6 +54,11 @@ export type CollectionSyncStatus = {
   lastSyncedAt: string | null
   itemCount: number
   lastError: string | null
+  automationEnabled?: boolean
+  identificationPendingCount?: number
+  identificationProcessingCount?: number
+  identificationNeedsReviewCount?: number
+  identificationErrorCount?: number
   importPendingCount?: number
   importProcessingCount?: number
   importErrorCount?: number
@@ -46,6 +72,145 @@ export type CollectionSyncStatus = {
 export type CollectionListResult = {
   items: CollectionItem[]
   total: number
+}
+
+export type CollectionItemDetails = {
+  filename: string
+  filesize: number
+  mtimeMs: number | null
+  isDownload: boolean
+  recordingId: number | null
+  identificationStatus: IdentificationStatus | null
+  identificationConfidence: number | null
+  assignmentMethod: IdentificationAssignmentMethod | null
+  recordingCanonical: RecordingCanonical | null
+  tags: {
+    source: string
+    artist: string | null
+    title: string | null
+    version: string | null
+    album: string | null
+    year: string | null
+    label: string | null
+    catalogNumber: string | null
+    trackPosition: string | null
+    discogsReleaseId: number | null
+    discogsTrackPosition: string | null
+  } | null
+  importReview: {
+    filesize: number
+    mtimeMs: number
+    reviewVersion: number
+    status: 'pending' | 'processing' | 'ready' | 'error'
+    parsedArtist: string | null
+    parsedTitle: string | null
+    parsedVersion: string | null
+    parsedYear: string | null
+    reviewJson: string | null
+    errorMessage: string | null
+    processedAt: string | null
+  } | null
+  fileAudioState: {
+    filesize: number
+    mtimeMs: number
+    hashVersion: number
+    audioHash: string | null
+    status: 'pending' | 'ready' | 'error'
+    errorMessage: string | null
+    processedAt: string | null
+  } | null
+  audioAnalysisCache: {
+    audioHash: string
+    analysisVersion: number
+    analysisJson: string | null
+    errorMessage: string | null
+    processedAt: string | null
+  } | null
+  parsedAudioAnalysis: AudioAnalysis | null
+  identification: FileIdentificationState | null
+  upgradeCase: UpgradeCase | null
+}
+
+export type IdentificationStatus = 'pending' | 'processing' | 'ready' | 'needs_review' | 'error'
+
+export type IdentificationAssignmentMethod = 'audio_hash' | 'source_claim' | 'heuristic' | 'manual'
+
+export type RecordingCanonical = {
+  artist: string | null
+  title: string | null
+  version: string | null
+  year: string | null
+}
+
+export type IdentificationCandidate = {
+  id: number
+  filename: string
+  provider: 'discogs' | 'musicbrainz' | 'tags' | 'filename' | 'manual'
+  entityType: 'recording' | 'release_track' | 'release' | 'file_parse'
+  externalKey: string
+  proposedRecordingId: number | null
+  score: number
+  disposition: 'candidate' | 'accepted' | 'rejected'
+  payloadJson: string | null
+  recordingCanonical: RecordingCanonical | null
+}
+
+export type FileIdentificationState = {
+  filename: string
+  recordingId: number | null
+  audioHash: string | null
+  status: IdentificationStatus
+  assignmentMethod: IdentificationAssignmentMethod | null
+  confidence: number | null
+  parsedArtist: string | null
+  parsedTitle: string | null
+  parsedVersion: string | null
+  parsedYear: string | null
+  tagArtist: string | null
+  tagTitle: string | null
+  tagVersion: string | null
+  chosenClaimId: number | null
+  identifyVersion: number
+  explanationJson: string | null
+  processedAt: string | null
+  errorMessage: string | null
+  recordingCanonical: RecordingCanonical | null
+  candidates: IdentificationCandidate[]
+}
+
+export type RecordingSummary = {
+  id: number
+  canonical: RecordingCanonical
+  confidence: number
+  reviewState: 'auto' | 'confirmed' | 'merged'
+  metadataLocked: boolean
+  mergedIntoRecordingId: number | null
+  fileCount: number
+  claimCount: number
+}
+
+export type RecordingDetails = RecordingSummary & {
+  sourceClaims: Array<{
+    id: number
+    provider: 'discogs' | 'musicbrainz' | 'tags' | 'filename' | 'manual'
+    entityType: 'recording' | 'release_track' | 'release' | 'file_parse'
+    externalKey: string
+    artist: string | null
+    title: string | null
+    version: string | null
+    releaseTitle: string | null
+    trackPosition: string | null
+    year: string | null
+    durationSeconds: number | null
+    confidence: number
+    rawJson: string | null
+  }>
+  files: Array<{
+    filename: string
+    status: IdentificationStatus
+    confidence: number | null
+    assignmentMethod: IdentificationAssignmentMethod | null
+  }>
 }
 
 export type WantListPipelineStatus =
@@ -104,11 +269,69 @@ export type SlskdCandidate = {
   size: number
   score: number
   bitrate: number | null
+  durationSeconds: number | null
   queueLength: number | null
   hasFreeUploadSlot: boolean | null
   uploadSpeed: number | null
   isLocked: boolean
   extension: string
+}
+
+export type UpgradeCaseStatus =
+  | 'idle'
+  | 'searching'
+  | 'results_ready'
+  | 'no_results'
+  | 'downloading'
+  | 'downloaded'
+  | 'pending_reanalyze'
+  | 'completed'
+  | 'error'
+
+export type UpgradeReferenceSource = 'discogs' | 'current_file'
+
+export type UpgradeCandidateSpeedClass =
+  | 'same_track_likely'
+  | 'different_edit_likely'
+  | 'unknown'
+
+export type UpgradeCandidate = SlskdCandidate & {
+  durationDeltaSeconds: number | null
+  durationDeltaPercent: number | null
+  speedClass: UpgradeCandidateSpeedClass
+}
+
+export type UpgradeLocalCandidate = {
+  filename: string
+  filesize: number
+  durationSeconds: number | null
+  source: 'auto_download' | 'import_folder'
+  sourceUsername: string | null
+  sourceFilename: string | null
+}
+
+export type UpgradeCase = {
+  id: number
+  collectionFilename: string
+  status: UpgradeCaseStatus
+  searchArtist: string
+  searchTitle: string
+  searchVersion: string | null
+  currentDurationSeconds: number | null
+  officialDurationSeconds: number | null
+  officialDurationSource: UpgradeReferenceSource | null
+  referenceDurationSeconds: number | null
+  referenceDurationSource: UpgradeReferenceSource | null
+  candidateCount: number
+  localCandidateCount: number
+  selectedCandidate: UpgradeCandidate | null
+  selectedLocalFilename: string | null
+  archiveFilename: string | null
+  replacementFilename: string | null
+  lastError: string | null
+  createdAt: string
+  updatedAt: string
+  completedAt: string | null
 }
 
 export type SlskdConnectionTestInput = {
@@ -249,19 +472,53 @@ export type DJBrainApi = {
     search: (query: string) => Promise<GrokSearchResponse>
   }
   collection: {
-    list: (query?: string) => Promise<CollectionListResult>
+    list: (query?: string, limit?: number) => Promise<CollectionListResult>
+    get: (filename: string) => Promise<CollectionItemDetails | null>
     listDownloads: (query?: string) => Promise<CollectionListResult>
+    reanalyze: (filename: string) => Promise<void>
     syncNow: () => Promise<CollectionSyncStatus>
     getStatus: () => Promise<CollectionSyncStatus>
     onUpdated: (listener: (status: CollectionSyncStatus) => void) => () => void
     getImportReview: (filename: string, search?: Partial<ImportReviewSearch>, force?: boolean) => Promise<ImportReview>
     compareImport: (filename: string, existingFilename: string) => Promise<ImportComparison>
     queueImportProcessing: (filenames?: string[], force?: boolean) => Promise<{ queued: number }>
+    queueIdentificationProcessing: (filenames?: string[], force?: boolean) => Promise<{ queued: number }>
+    reviewIdentification: (input: {
+      filename: string
+      action: 'accept' | 'reject' | 'create_recording'
+      candidateId?: number | null
+    }) => Promise<FileIdentificationState | null>
+    listRecordings: (query?: string) => Promise<RecordingSummary[]>
+    getRecording: (id: number) => Promise<RecordingDetails | null>
+    assignRecording: (input: {
+      recordingId?: number | null
+      filenames: string[]
+      create?: boolean
+      canonical?: Partial<RecordingCanonical> | null
+    }) => Promise<RecordingDetails | null>
+    mergeRecordings: (sourceRecordingId: number, targetRecordingId: number) => Promise<RecordingDetails | null>
     commitImport: (input: ImportCommitInput) => Promise<ImportFileResult>
     importFile: (filename: string) => Promise<ImportFileResult>
     deleteFile: (filename: string) => Promise<void>
     clearEmptyFolders: () => Promise<number>
     showInFinder: (filename: string) => Promise<void>
     openInPlayer: (filename: string) => Promise<void>
+  }
+  upgrades: {
+    list: () => Promise<UpgradeCase[]>
+    open: (collectionFilename: string) => Promise<UpgradeCase>
+    get: (id: number) => Promise<UpgradeCase | null>
+    search: (id: number, search?: Partial<ImportReviewSearch>) => Promise<UpgradeCase | null>
+    setReference: (
+      id: number,
+      input: { artist?: string; title?: string; version?: string | null; durationSeconds?: number | null }
+    ) => Promise<UpgradeCase | null>
+    getCandidates: (id: number) => Promise<UpgradeCandidate[]>
+    getLocalCandidates: (id: number) => Promise<UpgradeLocalCandidate[]>
+    download: (id: number, username: string, filename: string, size: number) => Promise<UpgradeCase | null>
+    addLocalCandidate: (id: number, filename: string) => Promise<UpgradeCase | null>
+    selectLocalCandidate: (id: number, filename: string) => Promise<UpgradeCase | null>
+    replace: (id: number) => Promise<UpgradeCase | null>
+    markReanalyzed: (id: number) => Promise<UpgradeCase | null>
   }
 }

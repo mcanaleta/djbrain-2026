@@ -16,6 +16,9 @@ import { ImportService } from '../backend/import-service.ts'
 import { ImportProcessingQueue } from '../backend/import-processing-queue.ts'
 import { ImportReviewService } from '../backend/import-review-service.ts'
 import { ImportReviewBackgroundService } from '../backend/import-review-background-service.ts'
+import { IdentificationBackgroundService } from '../backend/identification-background-service.ts'
+import { MusicBrainzService } from '../backend/musicbrainz-service.ts'
+import { RecordingIdentityService } from '../backend/recording-identity-service.ts'
 import { YouTubeApiService } from '../backend/youtube-api-service.ts'
 import type { DiscogsTrackMatch } from '../shared/discogs-match.ts'
 import type { ImportTagPreview } from '../shared/api.ts'
@@ -23,8 +26,9 @@ import { formatError, HttpError, sendJson } from './http.ts'
 import { registerCollectionRoutes } from './routes/collection.ts'
 import { registerMediaRoutes } from './routes/media.ts'
 import { registerSearchRoutes } from './routes/search.ts'
+import { registerUpgradeRoutes } from './routes/upgrades.ts'
 import { registerWantListRoutes } from './routes/want-list.ts'
-import { createCollectionActions, createWantListPipelines } from './workflows.ts'
+import { createCollectionActions, createUpgradeActions, createWantListPipelines } from './workflows.ts'
 
 const execFileAsync = promisify(execFile)
 
@@ -42,19 +46,25 @@ type SlskdConnectionTestResult = {
 
 const EMPTY_DIR_IGNORED_FILES = new Set(['.DS_Store', 'Thumbs.db', 'desktop.ini'])
 
-const port = Number(readArgValue('--port') ?? '5179')
+const port = Number(readArgValue('--port') ?? '5181')
 const staticDirArg = readArgValue('--static')
 const staticDir = staticDirArg ? resolve(process.cwd(), staticDirArg) : null
 const dataDirArg = readArgValue('--data-dir') ?? process.env['DJBRAIN_DATA_DIR'] ?? null
+const automationEnabled = readBooleanEnv(process.env['DJBRAIN_ENABLE_AUTOMATION'], !process.execArgv.includes('--watch'))
 
 const onlineSearchService = new OnlineSearchService()
 const youtubeApiService = new YouTubeApiService()
 const grokSearchService = new GrokSearchService()
 const slskdService = new SlskdService()
 const discogsMatchService = new DiscogsMatchService()
+const musicbrainzService = new MusicBrainzService()
 const taggerService = new TaggerService()
 const audioAnalysisService = new AudioAnalysisService()
 const importProcessingQueue = new ImportProcessingQueue(process.env['DJBRAIN_REDIS_URL']?.trim() || null)
+const identificationProcessingQueue = new ImportProcessingQueue(
+  process.env['DJBRAIN_REDIS_URL']?.trim() || null,
+  'djbrain:identification-processing'
+)
 const importService = new ImportService(discogsMatchService, taggerService, onlineSearchService)
 const importReviewService = new ImportReviewService({
   getCollectionService: () => requireCollectionService(),
@@ -86,9 +96,23 @@ const wantListPipelines = createWantListPipelines({
   slskdService,
   importService
 })
+const upgradeActions = createUpgradeActions({
+  currentSettings,
+  requireCollectionService,
+  resolveMusicRelativePath,
+  fileAnalysisService,
+  getAudioDuration,
+  normalizeSearchText,
+  slskdService,
+  importService,
+  discogsMatchService,
+  onlineSearchService
+})
 
 let collectionService: CollectionService | null = null
+let recordingIdentityService: RecordingIdentityService | null = null
 let importReviewBackgroundService: ImportReviewBackgroundService | null = null
+let identificationBackgroundService: IdentificationBackgroundService | null = null
 let settings: AppSettings | null = null
 
 function readArgValue(name: string): string | null {
@@ -114,6 +138,14 @@ function normalizeApiKey(value: unknown): string {
 
 function normalizeFilename(value: string): string {
   return value.replace(/\\/g, '/').replace(/^\/+/, '')
+}
+
+function readBooleanEnv(value: string | undefined, fallback: boolean): boolean {
+  if (!value) return fallback
+  const normalized = value.trim().toLowerCase()
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true
+  return fallback
 }
 
 function normalizeRelativeFolderPath(value: string): string {
@@ -395,6 +427,20 @@ function applyTagOverrides(match: DiscogsTrackMatch, tags: ImportTagPreview | nu
 
 const { buildImportReview, readCollectionStatus, showInFolder, openInSystemPlayer } = collectionActions
 const { runSearchPipeline, runImportPipeline, startDownloadPipeline } = wantListPipelines
+const {
+  listCases,
+  getCase,
+  openCase,
+  searchCase,
+  setReference,
+  getCandidates,
+  getLocalCandidates,
+  startDownloadPipeline: startUpgradeDownloadPipeline,
+  addLocalCandidate,
+  selectLocalCandidate,
+  replaceCase,
+  markReanalyzed
+} = upgradeActions
 
 export function createApp(): express.Express {
   const app = express()
@@ -413,13 +459,17 @@ export function createApp(): express.Express {
 
   registerCollectionRoutes(app, {
     requireCollectionService,
+    automationEnabled,
     currentSettings,
-    readCollectionStatus,
+    readCollectionStatus: async () => ({ ...(await readCollectionStatus()), automationEnabled }),
     buildImportReview,
     fileAnalysisService,
     importService,
     syncImportReviewQueue: async () => {
       await importReviewBackgroundService?.syncQueue()
+    },
+    syncIdentificationQueue: async () => {
+      await identificationBackgroundService?.syncQueue()
     },
     resolveMusicRelativePath,
     normalizeFilename,
@@ -439,6 +489,21 @@ export function createApp(): express.Express {
     runSearchPipeline,
     runImportPipeline,
     startDownloadPipeline
+  })
+
+  registerUpgradeRoutes(app, {
+    openCase,
+    listCases,
+    getCase,
+    searchCase,
+    setReference,
+    getCandidates,
+    getLocalCandidates,
+    startDownloadPipeline: startUpgradeDownloadPipeline,
+    addLocalCandidate,
+    selectLocalCandidate,
+    replaceCase,
+    markReanalyzed
   })
 
   if (staticDir) {
@@ -486,14 +551,35 @@ export async function start(): Promise<void> {
     mkdir(join(appDataDir, 'logs'), { recursive: true })
   ])
   await importProcessingQueue.start()
+  await identificationProcessingQueue.start()
 
   collectionService = new CollectionService({
-    databaseFilePath: join(dataDir, 'djbrain.sqlite'),
-    onImportQueueChanged: () => {
-      void importReviewBackgroundService?.syncQueue()
-    }
+    connectionString: process.env['DJBRAIN_POSTGRES_URL']?.trim() || '',
+    onImportQueueChanged: automationEnabled
+      ? () => {
+        void importReviewBackgroundService?.syncQueue()
+      }
+      : undefined,
+    onIdentificationQueueChanged: automationEnabled
+      ? () => {
+        void identificationBackgroundService?.syncQueue()
+      }
+      : undefined
   })
+  if (!process.env['DJBRAIN_POSTGRES_URL']?.trim()) {
+    throw new Error('DJBRAIN_POSTGRES_URL is required. SQLite has been removed.')
+  }
   await collectionService.reconfigure(currentSettings())
+  recordingIdentityService = new RecordingIdentityService({
+    collectionService,
+    fileAnalysisService,
+    taggerService,
+    discogsMatchService,
+    musicbrainzService,
+    onlineSearchService,
+    resolveMusicRelativePath,
+    getSettings: currentSettings
+  })
   importReviewBackgroundService = new ImportReviewBackgroundService({
     collectionService,
     fileAnalysisService,
@@ -502,9 +588,28 @@ export async function start(): Promise<void> {
     resolveMusicRelativePath,
     getSettings: currentSettings
   })
-  importReviewBackgroundService.start()
-  void collectionService.syncNow().then(() => {
-    if (collectionService?.queueImportReviewFiles()) void importReviewBackgroundService?.syncQueue()
+  identificationBackgroundService = new IdentificationBackgroundService({
+    collectionService,
+    identityService: recordingIdentityService,
+    queue: identificationProcessingQueue
+  })
+  if (!automationEnabled) {
+    await Promise.all([
+      importProcessingQueue.clear(),
+      identificationProcessingQueue.clear(),
+      collectionService.resetImportReviewProcessing(),
+      collectionService.resetIdentificationProcessing()
+    ])
+  } else {
+    importReviewBackgroundService.start()
+    identificationBackgroundService.start()
+  }
+  void collectionService.syncNow().then(async () => {
+    if (!automationEnabled) return
+    await Promise.all([
+      importReviewBackgroundService?.syncQueue(),
+      identificationBackgroundService?.syncQueue()
+    ])
   })
 
   const app = createApp()
@@ -513,12 +618,14 @@ export async function start(): Promise<void> {
       `[djbrain-server] listening on http://localhost:${port}${staticDir ? ` serving ${staticDir}` : ''}`
     )
     console.log(`[djbrain-server] using data dir ${appDataDir}`)
+    console.log(`[djbrain-server] background automation ${automationEnabled ? 'enabled' : 'disabled'}`)
   })
 
   const shutdown = (): void => {
     server.close(() => {
       collectionService?.dispose()
       void importProcessingQueue.stop()
+      void identificationProcessingQueue.stop()
       process.exit(0)
     })
   }

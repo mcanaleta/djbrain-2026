@@ -35,7 +35,7 @@
 
 ## Persistence
 - Most of the persistence is the music library itself, which is in dropbox
-- For other data (wantlist, search history, predictions, recommendations, ...) we'll use a simple sqlite database.
+- Other app data (wantlist, search history, predictions, recommendations, import state, ...) lives in postgres. local dev currently points to the production postgres instance.
 - (long) running processes also should be persisted. For example wantlist item has a lifecycle, searches to soulseek, etc, this must be persisted.
 
 # FEATURES
@@ -75,3 +75,15 @@ Sometimes somebody sends us a lot of music files. We need a bulk import feature 
 ## Collection management:
 - Edit song metadata (tags, title, artist, album, etc.)
 - Find duplicates.
+
+BACKLOG
+- store metadata tags  (versioned) from files (collection and imports) in the db. provide UI to enqueue songs for metadata extraction
+- store audio analysis results (versioned) from files (collection and imports) in the db. provide UI to enqueue songs for metadata extraction
+
+WANT
+- I want my collection to be organized
+- I want my songs to be correctly tagged
+- I want to have good quality versions of my songs
+- I don't want to have duplicates
+- I want to be able to use discogs to search for music and add it to my wantlist. Also to tag my songs.
+- For songs in download folders, the steps should be: 1. analyze. 2. identify in discogs, store in the db clean artist, title, ... but do not modify or rename the file yet. 3. check if we have this version, replace if its better, delete if its worse, delete if we don't want it, or import if we want it (rename + tag + relocate).
