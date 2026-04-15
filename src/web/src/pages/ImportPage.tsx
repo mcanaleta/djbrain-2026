@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { PauseIcon, PlayIcon, TrashIcon } from '@radix-ui/react-icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
@@ -111,76 +112,61 @@ function normalizeGroupTitle(value: string): string {
 export default function ImportPage(): React.JSX.Element {
   const player = usePlayer()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [routeSearchParams] = useSearchParams()
   const initialQuery = routeSearchParams.get('query') ?? ''
-  const [musicFolderPath, setMusicFolderPath] = useState<string>('')
-  const [downloadFolderPaths, setDownloadFolderPaths] = useState<string[]>([])
-
   const [query, setQuery] = useState(initialQuery)
   const [groupByTrack, setGroupByTrack] = useState(false)
-  const [submittedSearch, setSubmittedSearch] = useState({ query: initialQuery, submittedAt: 0 })
-  const [items, setItems] = useState<CollectionItem[]>([])
-  const [total, setTotal] = useState(0)
-  const [isLoading, setIsLoading] = useState(true)
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [status, setStatus] = useState<CollectionSyncStatus>(EMPTY_STATUS)
+  const [submittedQuery, setSubmittedQuery] = useState(initialQuery)
+  const [actionError, setActionError] = useState<string | null>(null)
   const [isClearingFolders, setIsClearingFolders] = useState(false)
   const [clearFoldersResult, setClearFoldersResult] = useState<string | null>(null)
   const [queueMessage, setQueueMessage] = useState<string | null>(null)
   const [queueLoading, setQueueLoading] = useState<'process' | 'refresh' | null>(null)
 
-  const latestQueryRef = useRef(submittedSearch.query)
-  const requestIdRef = useRef(0)
   const autoQueuedRef = useRef<Set<string>>(new Set())
-  latestQueryRef.current = submittedSearch.query
+  const { data: settings, error: settingsError } = useQuery({
+    queryKey: ['settings'],
+    queryFn: api.settings.get
+  })
+  const { data: status = EMPTY_STATUS, error: statusError } = useQuery({
+    queryKey: ['collection', 'status'],
+    queryFn: api.collection.getStatus
+  })
+  const {
+    data: listResult,
+    error: listError,
+    isPending: isLoading,
+    refetch
+  } = useQuery({
+    queryKey: ['collection', 'downloads', submittedQuery],
+    queryFn: () => api.collection.listDownloads(submittedQuery)
+  })
 
   useEffect(() => {
-    api.settings.get().then((settings) => {
-      setMusicFolderPath(settings.musicFolderPath)
-      setDownloadFolderPaths(settings.downloadFolderPaths)
-    }).catch(() => {})
-  }, [])
-
-  const loadItems = useCallback(async (searchQuery: string, silent: boolean = false): Promise<void> => {
-    const requestId = ++requestIdRef.current
-    if (!silent) setIsLoading(true)
-    try {
-      const result = await api.collection.listDownloads(searchQuery)
-      if (requestIdRef.current !== requestId) return
-      setItems(result.items)
-      setTotal(result.total)
-      setErrorMessage(null)
-    } catch (error) {
-      if (requestIdRef.current !== requestId) return
-      setErrorMessage(formatError(error))
-    } finally {
-      if (requestIdRef.current === requestId) setIsLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    let active = true
-    api.collection.getStatus().then((s) => { if (active) setStatus(s) }).catch(() => {})
     const unsub = api.collection.onUpdated((s) => {
-      if (!active) return
-      setStatus(s)
-      void loadItems(latestQueryRef.current, true)
+      queryClient.setQueryData(['collection', 'status'], s)
+      void queryClient.invalidateQueries({ queryKey: ['collection', 'downloads'] })
     })
-    return () => { active = false; unsub() }
-  }, [loadItems])
-
-  useEffect(() => {
-    void loadItems(submittedSearch.query)
-  }, [loadItems, submittedSearch.query, submittedSearch.submittedAt])
+    return unsub
+  }, [queryClient])
 
   const handleSyncNow = async (): Promise<void> => {
+    setActionError(null)
     try {
-      setStatus(await api.collection.syncNow())
-      await loadItems(latestQueryRef.current)
+      await api.collection.syncNow()
     } catch (error) {
-      setErrorMessage(formatError(error))
+      setActionError(formatError(error))
     }
   }
+
+  const items = listResult?.items ?? []
+  const total = listResult?.total ?? 0
+  const musicFolderPath = settings?.musicFolderPath ?? ''
+  const downloadFolderPaths = settings?.downloadFolderPaths ?? []
+  const errorMessage =
+    actionError ??
+    (listError ? formatError(listError) : statusError ? formatError(statusError) : settingsError ? formatError(settingsError) : null)
 
   const handlePlay = (item: ImportRow): void => {
     if (!musicFolderPath) return
@@ -193,13 +179,12 @@ export default function ImportPage(): React.JSX.Element {
   }
 
   const handleDeleteFile = async (filename: string): Promise<void> => {
+    setActionError(null)
     try {
       await api.collection.deleteFile(filename)
-      // Optimistically remove from local list; sync will confirm
-      setItems((prev) => prev.filter((i) => i.filename !== filename))
-      setTotal((prev) => prev - 1)
+      await refetch()
     } catch (error) {
-      setErrorMessage(formatError(error))
+      setActionError(formatError(error))
     }
   }
 
@@ -316,13 +301,14 @@ export default function ImportPage(): React.JSX.Element {
   }
 
   const reviewHref = useCallback(
-    (nextFilename: string): string => buildImportReviewHref(nextFilename, submittedSearch.query),
-    [submittedSearch.query]
+    (nextFilename: string): string => buildImportReviewHref(nextFilename, submittedQuery),
+    [submittedQuery]
   )
 
   const handleQueueProcessing = async (force: boolean): Promise<void> => {
     if (rows.length === 0) return
     setQueueLoading(force ? 'refresh' : 'process')
+    setActionError(null)
     try {
       const result = await api.collection.queueImportProcessing(rows.map((row) => row.filename), force)
       setQueueMessage(
@@ -332,9 +318,9 @@ export default function ImportPage(): React.JSX.Element {
             : 'Nothing pending to process.'
           : `${force ? 'Refreshing' : 'Processing'} ${result.queued} file${result.queued === 1 ? '' : 's'} in background.`
       )
-      await loadItems(latestQueryRef.current)
+      await refetch()
     } catch (error) {
-      setErrorMessage(formatError(error))
+      setActionError(formatError(error))
     } finally {
       setQueueLoading(null)
     }
@@ -571,7 +557,9 @@ export default function ImportPage(): React.JSX.Element {
             onKeyDown={(event) => {
               if (event.key !== 'Enter') return
               event.preventDefault()
-              setSubmittedSearch({ query: query.trim(), submittedAt: Date.now() })
+              const nextQuery = query.trim()
+              if (nextQuery === submittedQuery) void refetch()
+              else setSubmittedQuery(nextQuery)
             }}
             placeholder="Search download items…"
             className="flex-1"
@@ -582,9 +570,10 @@ export default function ImportPage(): React.JSX.Element {
           </div>
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
-          <ActionButton size="xs" tone={submittedSearch.query ? 'default' : 'primary'} onClick={() => {
+          <ActionButton size="xs" tone={submittedQuery ? 'default' : 'primary'} onClick={() => {
             setQuery('')
-            setSubmittedSearch({ query: '', submittedAt: Date.now() })
+            if (submittedQuery === '') void refetch()
+            else setSubmittedQuery('')
           }}>
             All
           </ActionButton>
@@ -598,9 +587,10 @@ export default function ImportPage(): React.JSX.Element {
             {groupByTrack ? 'Grouped By Track' : 'Group By Track'}
           </ActionButton>
           {downloadFolderPaths.map((folder) => (
-            <ActionButton key={folder} size="xs" tone={submittedSearch.query === folder ? 'primary' : 'default'} onClick={() => {
+            <ActionButton key={folder} size="xs" tone={submittedQuery === folder ? 'primary' : 'default'} onClick={() => {
               setQuery(folder)
-              setSubmittedSearch({ query: folder, submittedAt: Date.now() })
+              if (submittedQuery === folder) void refetch()
+              else setSubmittedQuery(folder)
             }}>
               {folder}
             </ActionButton>

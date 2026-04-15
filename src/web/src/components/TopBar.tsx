@@ -1,8 +1,8 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { DotsHorizontalIcon, InfoCircledIcon, ReloadIcon } from '@radix-ui/react-icons'
 import { useEffect, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'react-router-dom'
-import type { CollectionSyncStatus } from '../../../shared/api'
 import { api } from '../api/client'
 import { resolveNavTitle } from '../app/nav'
 
@@ -18,52 +18,30 @@ const menuItemClassName =
 
 export default function TopBar(): React.JSX.Element {
   const location = useLocation()
-  const [isSyncing, setIsSyncing] = useState(false)
-  const [syncError, setSyncError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
+  const [actionError, setActionError] = useState<string | null>(null)
 
   const title = resolveNavTitle(location.pathname)
+  const { data: status, error } = useQuery({
+    queryKey: ['collection', 'status'],
+    queryFn: api.collection.getStatus
+  })
+  const isSyncing = status?.isSyncing ?? false
+  const syncError = actionError ?? status?.lastError ?? (error ? formatError(error) : null)
 
   useEffect(() => {
-    let active = true
-
-    const loadStatus = async (): Promise<void> => {
-      try {
-        const status = (await api.collection.getStatus()) as CollectionSyncStatus
-        if (!active) {
-          return
-        }
-        setIsSyncing(status.isSyncing)
-        setSyncError(status.lastError)
-      } catch (error) {
-        if (!active) {
-          return
-        }
-        setSyncError(formatError(error))
-      }
-    }
-
-    void loadStatus()
-    const unsubscribe = api.collection.onUpdated((status) => {
-      if (!active) {
-        return
-      }
-      setIsSyncing(status.isSyncing)
-      setSyncError(status.lastError)
+    const unsubscribe = api.collection.onUpdated((nextStatus) => {
+      queryClient.setQueryData(['collection', 'status'], nextStatus)
     })
-
-    return () => {
-      active = false
-      unsubscribe()
-    }
-  }, [])
+    return unsubscribe
+  }, [queryClient])
 
   const handleSyncNow = async (): Promise<void> => {
+    setActionError(null)
     try {
-      const status = await api.collection.syncNow()
-      setIsSyncing(status.isSyncing)
-      setSyncError(status.lastError)
+      await api.collection.syncNow()
     } catch (error) {
-      setSyncError(formatError(error))
+      setActionError(formatError(error))
     }
   }
 

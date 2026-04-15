@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import type { CollectionItem, CollectionListResult, CollectionSyncStatus } from '../../../shared/api'
+import type { CollectionItem, CollectionSyncStatus } from '../../../shared/api'
 import { api } from '../api/client'
 import { ActionButton } from '../components/view/ActionButton'
 import { DataTable, type DataTableColumn } from '../components/view/DataTable'
@@ -105,18 +106,10 @@ function makeColumns(): DataTableColumn<CollectionRow>[] {
 
 export default function CollectionPage(): React.JSX.Element {
   const navigate = useNavigate()
-  const [items, setItems] = useState<CollectionItem[]>([])
-  const [filteredTotal, setFilteredTotal] = useState(0)
-  const [status, setStatus] = useState<CollectionSyncStatus>(EMPTY_STATUS)
-  const [musicFolderPath, setMusicFolderPath] = useState('')
-  const [isLoading, setIsLoading] = useState(true)
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const queryClient = useQueryClient()
   const [searchDraft, setSearchDraft] = useState('')
   const [submittedQuery, setSubmittedQuery] = useState('')
-  const requestIdRef = useRef(0)
-  const latestQueryRef = useRef(submittedQuery)
-
-  latestQueryRef.current = submittedQuery
+  const [actionError, setActionError] = useState<string | null>(null)
 
   const handleOpenItem = useCallback(
     (row: CollectionRow): void => {
@@ -127,58 +120,46 @@ export default function CollectionPage(): React.JSX.Element {
 
   const columns = useMemo(() => makeColumns(), [])
 
-  const loadItems = useCallback(async (query: string): Promise<void> => {
-    const requestId = requestIdRef.current + 1
-    requestIdRef.current = requestId
-    setIsLoading(true)
-    try {
-      const result = (await api.collection.list(query, COLLECTION_VIEW_LIMIT)) as CollectionListResult
-      if (requestIdRef.current !== requestId) return
-      setItems(result.items)
-      setFilteredTotal(result.total)
-      setErrorMessage(null)
-    } catch (error) {
-      if (requestIdRef.current !== requestId) return
-      setErrorMessage(formatError(error))
-    } finally {
-      if (requestIdRef.current === requestId) setIsLoading(false)
-    }
-  }, [])
+  const { data: settings } = useQuery({
+    queryKey: ['settings'],
+    queryFn: api.settings.get
+  })
+
+  const { data: status = EMPTY_STATUS, error: statusError } = useQuery({
+    queryKey: ['collection', 'status'],
+    queryFn: api.collection.getStatus
+  })
+
+  const {
+    data: listResult,
+    error: listError,
+    isPending: isLoading
+  } = useQuery({
+    queryKey: ['collection', 'list', submittedQuery, COLLECTION_VIEW_LIMIT],
+    queryFn: () => api.collection.list(submittedQuery, COLLECTION_VIEW_LIMIT)
+  })
 
   useEffect(() => {
-    let active = true
-    void api.settings.get().then((settings) => {
-      if (active) setMusicFolderPath(settings.musicFolderPath)
-    }).catch(() => {})
-    void api.collection.getStatus().then((nextStatus) => {
-      if (active) setStatus(nextStatus)
-    }).catch((error) => {
-      if (active) setErrorMessage(formatError(error))
-    })
     const unsubscribe = api.collection.onUpdated((nextStatus) => {
-      if (!active) return
-      setStatus(nextStatus)
-      void loadItems(latestQueryRef.current)
+      queryClient.setQueryData(['collection', 'status'], nextStatus)
+      void queryClient.invalidateQueries({ queryKey: ['collection', 'list'] })
     })
-    return () => {
-      active = false
-      unsubscribe()
-    }
-  }, [loadItems])
-
-  useEffect(() => {
-    void loadItems(submittedQuery)
-  }, [loadItems, submittedQuery])
+    return unsubscribe
+  }, [queryClient])
 
   const handleSyncNow = async (): Promise<void> => {
+    setActionError(null)
     try {
-      const nextStatus = await api.collection.syncNow()
-      setStatus(nextStatus)
-      await loadItems(latestQueryRef.current)
+      await api.collection.syncNow()
     } catch (error) {
-      setErrorMessage(formatError(error))
+      setActionError(formatError(error))
     }
   }
+
+  const items = listResult?.items ?? []
+  const filteredTotal = listResult?.total ?? 0
+  const musicFolderPath = settings?.musicFolderPath ?? ''
+  const errorMessage = actionError ?? (listError ? formatError(listError) : statusError ? formatError(statusError) : null)
 
   const rows = useMemo(
     () =>

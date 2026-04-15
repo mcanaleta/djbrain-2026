@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import type { CollectionItemDetails } from '../../../shared/api'
 import { api } from '../api/client'
 import { ActionButton } from '../components/view/ActionButton'
 import { KV } from '../components/view/KV'
@@ -33,34 +33,21 @@ export default function CollectionItemPage(): React.JSX.Element {
   const player = usePlayer()
   const [params] = useSearchParams()
   const filename = (params.get('filename') ?? '').trim()
-  const [item, setItem] = useState<CollectionItemDetails | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<'sync' | 'reanalyze' | 'mark-reanalyzed' | 'identify' | null>(null)
   const [busyCandidateId, setBusyCandidateId] = useState<number | 'create' | null>(null)
   const [actionMessage, setActionMessage] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
-
-  const loadItem = useCallback(async (): Promise<void> => {
-    if (!filename) {
-      setItem(null)
-      return
-    }
-    setIsLoading(true)
-    try {
-      setItem(await api.collection.get(filename))
-      setErrorMessage(null)
-    } catch (error) {
-      setErrorMessage(getErrorMessage(error, 'Failed to load collection item'))
-      setItem(null)
-    } finally {
-      setIsLoading(false)
-    }
-  }, [filename])
-
-  useEffect(() => {
-    void loadItem()
-  }, [loadItem])
+  const {
+    data: item,
+    error: itemError,
+    isPending: isLoading,
+    refetch
+  } = useQuery({
+    queryKey: ['collection', 'item', filename],
+    queryFn: () => api.collection.get(filename),
+    enabled: Boolean(filename)
+  })
+  const errorMessage = itemError ? getErrorMessage(itemError, 'Failed to load collection item') : null
 
   const summary = useMemo(
     () =>
@@ -83,14 +70,14 @@ export default function CollectionItemPage(): React.JSX.Element {
     setActionError(null)
     try {
       await api.collection.syncNow()
-      await loadItem()
+      await refetch()
       setActionMessage('Collection synced.')
     } catch (error) {
       setActionError(getErrorMessage(error, 'Failed to sync collection'))
     } finally {
       setBusyAction(null)
     }
-  }, [loadItem])
+  }, [refetch])
 
   const handleReanalyze = useCallback(async (): Promise<void> => {
     if (!item) return
@@ -99,14 +86,14 @@ export default function CollectionItemPage(): React.JSX.Element {
     setActionError(null)
     try {
       await api.collection.reanalyze(item.filename)
-      await loadItem()
+      await refetch()
       setActionMessage('Reanalysis completed.')
     } catch (error) {
       setActionError(getErrorMessage(error, 'Failed to reanalyze'))
     } finally {
       setBusyAction(null)
     }
-  }, [item, loadItem])
+  }, [item, refetch])
 
   const handleMarkReanalyzed = useCallback(async (): Promise<void> => {
     if (!item?.upgradeCase) return
@@ -115,14 +102,14 @@ export default function CollectionItemPage(): React.JSX.Element {
     setActionError(null)
     try {
       await api.upgrades.markReanalyzed(item.upgradeCase.id)
-      await loadItem()
+      await refetch()
       setActionMessage('Upgrade marked as reanalyzed.')
     } catch (error) {
       setActionError(getErrorMessage(error, 'Failed to mark reanalyzed'))
     } finally {
       setBusyAction(null)
     }
-  }, [item, loadItem])
+  }, [item, refetch])
 
   const handleIdentify = useCallback(async (): Promise<void> => {
     if (!item) return
@@ -131,14 +118,14 @@ export default function CollectionItemPage(): React.JSX.Element {
     setActionError(null)
     try {
       await api.collection.queueIdentificationProcessing([item.filename], true)
-      await loadItem()
+      await refetch()
       setActionMessage('Identification refresh queued.')
     } catch (error) {
       setActionError(getErrorMessage(error, 'Failed to queue identification'))
     } finally {
       setBusyAction(null)
     }
-  }, [item, loadItem])
+  }, [item, refetch])
 
   const handleReviewIdentification = useCallback(
     async (action: 'accept' | 'reject' | 'create_recording', candidateId?: number | null): Promise<void> => {
@@ -152,7 +139,7 @@ export default function CollectionItemPage(): React.JSX.Element {
           action,
           candidateId: typeof candidateId === 'number' ? candidateId : undefined
         })
-        await loadItem()
+        await refetch()
         setActionMessage(action === 'reject' ? 'Candidate rejected.' : 'Identification updated.')
       } catch (error) {
         setActionError(getErrorMessage(error, 'Failed to update identification'))
@@ -160,7 +147,7 @@ export default function CollectionItemPage(): React.JSX.Element {
         setBusyCandidateId(null)
       }
     },
-    [item, loadItem]
+    [item, refetch]
   )
 
   return (

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import type { CollectionItem } from '../../../shared/api'
 import { api } from '../api/client'
 import { ImportReviewDialog } from '../components/ImportReviewDialog'
 import { buildImportHref, buildImportReviewHref } from '../lib/urls'
@@ -10,19 +10,11 @@ export default function ImportReviewPage(): React.JSX.Element {
   const [searchParams] = useSearchParams()
   const filename = searchParams.get('filename')
   const query = searchParams.get('query') ?? ''
-  const [items, setItems] = useState<CollectionItem[]>([])
-
-  useEffect(() => {
-    let active = true
-    void api.collection.listDownloads(query).then((result) => {
-      if (active) setItems(result.items)
-    }).catch(() => {
-      if (active) setItems([])
-    })
-    return () => {
-      active = false
-    }
-  }, [query, filename])
+  const { data: listResult } = useQuery({
+    queryKey: ['collection', 'downloads', query],
+    queryFn: () => api.collection.listDownloads(query)
+  })
+  const items = listResult?.items ?? []
 
   const currentIndex = useMemo(
     () => (filename ? items.findIndex((item) => item.filename === filename) : -1),

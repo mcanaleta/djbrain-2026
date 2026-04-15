@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import type { CollectionItem } from '../../../shared/api'
 import { api } from '../api/client'
@@ -45,9 +46,6 @@ export default function IdentifyPage(): React.JSX.Element {
   const scope = readScope(params.get('scope'))
   const query = params.get('query') ?? ''
   const filename = (params.get('filename') ?? '').trim()
-  const [rows, setRows] = useState<CollectionItem[]>([])
-  const [loading, setLoading] = useState(false)
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const setRoute = useCallback(
     (next: Partial<{ scope: Scope; query: string; filename: string | null }>) => {
@@ -63,32 +61,34 @@ export default function IdentifyPage(): React.JSX.Element {
     [params, setParams]
   )
 
-  const loadRows = useCallback(async (): Promise<void> => {
-    setLoading(true)
-    setErrorMessage(null)
-    try {
-      const result = scope === 'downloads' ? await api.collection.listDownloads(query) : await api.collection.list(query, 400)
-      const next = result.items
+  const {
+    data: listResult,
+    error,
+    isPending,
+    isFetching,
+    refetch
+  } = useQuery({
+    queryKey: ['identify', scope, query],
+    queryFn: () => (scope === 'downloads' ? api.collection.listDownloads(query) : api.collection.list(query, 400))
+  })
+
+  const rows = useMemo(
+    () =>
+      (listResult?.items ?? [])
         .filter((row) => row.identificationStatus)
         .filter((row) => (scope === 'downloads' ? Boolean(row.isDownload) : !row.isDownload))
         .sort((left, right) => {
           const statusDelta = (STATUS_RANK[left.identificationStatus ?? ''] ?? 9) - (STATUS_RANK[right.identificationStatus ?? ''] ?? 9)
           if (statusDelta !== 0) return statusDelta
           return (right.identificationConfidence ?? -1) - (left.identificationConfidence ?? -1)
-        })
-      setRows(next)
-      if (!filename && next[0]?.filename) setRoute({ filename: next[0].filename })
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Failed to load identification queue')
-      setRows([])
-    } finally {
-      setLoading(false)
-    }
-  }, [filename, query, scope, setRoute])
+        }),
+    [listResult, scope]
+  )
+  const errorMessage = error instanceof Error ? error.message : error ? 'Failed to load identification queue' : null
 
   useEffect(() => {
-    void loadRows()
-  }, [loadRows])
+    if (!filename && rows[0]?.filename) setRoute({ filename: rows[0].filename })
+  }, [filename, rows, setRoute])
 
   const columns = useMemo<DataTableColumn<CollectionItem>[]>(
     () => [
@@ -141,16 +141,16 @@ export default function IdentifyPage(): React.JSX.Element {
             label="Search"
             value={query}
             onChange={(value) => setRoute({ query: value })}
-            onSubmit={() => void loadRows()}
+            onSubmit={() => void refetch()}
             buttonLabel="Refresh"
             busyLabel="Loading…"
-            isBusy={loading}
+            isBusy={isFetching}
           />
           {errorMessage ? <Notice tone="error">{errorMessage}</Notice> : null}
           <DataTable
             columns={columns}
             rows={rows}
-            loading={loading}
+            loading={isPending}
             emptyMessage="No identified files."
             getRowKey={(row) => row.filename}
             getRowTitle={(row) => row.filename}
@@ -161,7 +161,7 @@ export default function IdentifyPage(): React.JSX.Element {
       </ViewSection>
 
       {filename ? (
-        <IdentificationReviewPanel filename={filename} onChanged={loadRows} />
+        <IdentificationReviewPanel filename={filename} onChanged={async () => { await refetch() }} />
       ) : (
         <ViewSection padding="sm" title="Identification Review">
           <div className="text-xs text-zinc-500">Select a file from the queue.</div>

@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import type { OnlineSearchItem, OnlineSearchResponse } from '../../../shared/online-search'
+import type { OnlineSearchItem } from '../../../shared/online-search'
 import { api } from '../api/client'
 import { EmptyState } from '../components/view/EmptyState'
 import { Notice } from '../components/view/Notice'
@@ -66,56 +67,21 @@ export default function SearchOnlinePage(): React.JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams()
   const submittedQuery = searchParams.get('q') ?? ''
   const [inputValue, setInputValue] = useState(submittedQuery)
-  const [hasDiscogsToken, setHasDiscogsToken] = useState(true)
-  const [isLoadingSettings, setIsLoadingSettings] = useState(true)
-  const [results, setResults] = useState<OnlineSearchResponse | null>(null)
-  const [isSearching, setIsSearching] = useState(false)
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const requestIdRef = useRef(0)
-
-  useEffect(() => {
-    const load = async (): Promise<void> => {
-      try {
-        const settings = await api.settings.get()
-        setHasDiscogsToken(Boolean(settings.discogsUserToken.trim()))
-      } catch (error) {
-        setErrorMessage(formatError(error))
-      } finally {
-        setIsLoadingSettings(false)
-      }
-    }
-    void load()
-  }, [])
-
-  useEffect(() => {
-    const trimmed = submittedQuery
-    if (!trimmed || isLoadingSettings) {
-      setResults(null)
-      setErrorMessage(null)
-      setIsSearching(false)
-      return
-    }
-
-    const requestId = requestIdRef.current + 1
-    requestIdRef.current = requestId
-    setIsSearching(true)
-    setErrorMessage(null)
-
-    void api.onlineSearch
-      .search(trimmed, 'discogs')
-      .then((response) => {
-        if (requestIdRef.current !== requestId) return
-        setResults(response)
-      })
-      .catch((error) => {
-        if (requestIdRef.current !== requestId) return
-        setResults(null)
-        setErrorMessage(formatError(error))
-      })
-      .finally(() => {
-        if (requestIdRef.current === requestId) setIsSearching(false)
-      })
-  }, [submittedQuery, isLoadingSettings])
+  const { data: settings, error: settingsError, isPending: isLoadingSettings } = useQuery({
+    queryKey: ['settings'],
+    queryFn: api.settings.get
+  })
+  const {
+    data: results,
+    error: searchError,
+    isPending: isSearching
+  } = useQuery({
+    queryKey: ['online-search', 'discogs', submittedQuery],
+    queryFn: () => api.onlineSearch.search(submittedQuery, 'discogs'),
+    enabled: Boolean(submittedQuery) && !isLoadingSettings
+  })
+  const hasDiscogsToken = Boolean(settings?.discogsUserToken.trim())
+  const errorMessage = settingsError ? formatError(settingsError) : searchError ? formatError(searchError) : null
 
   const handleSubmit = (e: React.FormEvent): void => {
     e.preventDefault()

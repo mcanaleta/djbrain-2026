@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import type { UpgradeCase, UpgradeCaseStatus } from '../../../shared/api'
 import { api } from '../api/client'
@@ -85,32 +86,23 @@ function makeColumns(navigate: (path: string) => void): DataTableColumn<UpgradeR
 
 export default function UpgradesPage(): React.JSX.Element {
   const navigate = useNavigate()
-  const [cases, setCases] = useState<UpgradeCase[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
-
-  const loadCases = useCallback(async (): Promise<void> => {
-    try {
-      setCases(await api.upgrades.list())
-      setErrorMessage(null)
-    } catch (error) {
-      setErrorMessage(formatError(error))
-    } finally {
-      setIsLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    void loadCases()
-  }, [loadCases])
+  const {
+    data: cases = [],
+    error,
+    isPending: isLoading,
+    refetch
+  } = useQuery({
+    queryKey: ['upgrades'],
+    queryFn: api.upgrades.list
+  })
 
   useEffect(() => {
     if (!cases.some((item) => ['searching', 'downloading'].includes(item.status))) return
     const poll = window.setInterval(() => {
-      void loadCases()
+      void refetch()
     }, 2000)
     return () => window.clearInterval(poll)
-  }, [cases, loadCases])
+  }, [cases, refetch])
 
   const rows = useMemo(
     () =>
@@ -123,6 +115,7 @@ export default function UpgradesPage(): React.JSX.Element {
   const replacementRows = rows.filter((item) => item.replacementFilename || item.archiveFilename)
   const activeRows = rows.filter((item) => !item.replacementFilename && !item.archiveFilename)
   const columns = useMemo(() => makeColumns(navigate), [navigate])
+  const errorMessage = error ? formatError(error) : null
 
   return (
     <div className="space-y-4">
@@ -138,7 +131,7 @@ export default function UpgradesPage(): React.JSX.Element {
           </>
         }
         aside={
-          <ActionButton size="xs" onClick={() => void loadCases()}>
+          <ActionButton size="xs" onClick={() => void refetch()}>
             Refresh
           </ActionButton>
         }

@@ -1,19 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { GrokSearchResponse, GrokTrackResult } from '../../../shared/grok-search'
+import { useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import type { GrokTrackResult } from '../../../shared/grok-search'
 import { api } from '../api/client'
 import { ActionButton } from '../components/view/ActionButton'
 import { DataTable, type DataTableColumn } from '../components/view/DataTable'
 import { LabeledInput } from '../components/view/LabeledInput'
 import { Notice } from '../components/view/Notice'
 import { ViewSection } from '../components/view/ViewSection'
-
-type AppSettings = {
-  grokApiKey: string
-}
-
-const EMPTY_SETTINGS: AppSettings = {
-  grokApiKey: ''
-}
 
 const GROK_COLUMNS: DataTableColumn<GrokTrackResult>[] = [
   {
@@ -50,54 +43,36 @@ function formatError(error: unknown): string {
 }
 
 export default function GrokSearchPage(): React.JSX.Element {
-  const [settings, setSettings] = useState<AppSettings>(EMPTY_SETTINGS)
   const [query, setQuery] = useState('')
-  const [results, setResults] = useState<GrokSearchResponse | null>(null)
-  const [isLoadingSettings, setIsLoadingSettings] = useState(true)
-  const [isSearching, setIsSearching] = useState(false)
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [submittedQuery, setSubmittedQuery] = useState('')
+  const [actionError, setActionError] = useState<string | null>(null)
+  const { data: settings, error: settingsError, isPending: isLoadingSettings } = useQuery({
+    queryKey: ['settings'],
+    queryFn: api.settings.get
+  })
+  const hasConfig = Boolean(settings?.grokApiKey.trim())
+  const {
+    data: results,
+    error: searchError,
+    isFetching: isSearching,
+    refetch
+  } = useQuery({
+    queryKey: ['grok-search', submittedQuery],
+    queryFn: () => api.grokSearch.search(submittedQuery),
+    enabled: Boolean(submittedQuery) && hasConfig
+  })
+  const errorMessage = actionError ?? (settingsError ? formatError(settingsError) : searchError ? formatError(searchError) : null)
 
-  useEffect(() => {
-    const loadSettings = async (): Promise<void> => {
-      setIsLoadingSettings(true)
-      try {
-        const settings = await api.settings.get()
-        setSettings({
-          grokApiKey: settings.grokApiKey
-        })
-      } catch (error) {
-        setErrorMessage(formatError(error))
-      } finally {
-        setIsLoadingSettings(false)
-      }
-    }
-
-    void loadSettings()
-  }, [])
-
-  const hasConfig = Boolean(settings.grokApiKey.trim())
-
-  const submitSearch = async (): Promise<void> => {
+  const submitSearch = (): void => {
     const trimmedQuery = query.trim()
-    if (!trimmedQuery) {
-      return
-    }
+    if (!trimmedQuery) return
     if (!hasConfig) {
-      setErrorMessage('Set DJBRAIN_GROK_API_KEY before searching.')
+      setActionError('Set DJBRAIN_GROK_API_KEY before searching.')
       return
     }
-
-    setIsSearching(true)
-    setErrorMessage(null)
-    try {
-      const response = await api.grokSearch.search(trimmedQuery)
-      setResults(response)
-    } catch (error) {
-      setResults(null)
-      setErrorMessage(formatError(error))
-    } finally {
-      setIsSearching(false)
-    }
+    setActionError(null)
+    if (trimmedQuery === submittedQuery) void refetch()
+    else setSubmittedQuery(trimmedQuery)
   }
 
   const rows = useMemo(() => results?.tracks ?? [], [results])
@@ -116,7 +91,7 @@ export default function GrokSearchPage(): React.JSX.Element {
                 return
               }
               event.preventDefault()
-              void submitSearch()
+              submitSearch()
             }}
             placeholder="Search tracks (artist, label, genre, era)..."
             className="flex-1"
@@ -125,7 +100,7 @@ export default function GrokSearchPage(): React.JSX.Element {
           <ActionButton
             type="button"
             onClick={() => {
-              void submitSearch()
+              submitSearch()
             }}
             disabled={isSearching || isLoadingSettings || !query.trim()}
           >

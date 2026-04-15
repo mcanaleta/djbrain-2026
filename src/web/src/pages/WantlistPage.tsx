@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
 import type { WantListItem } from '../../../shared/api'
 import { api } from '../api/client'
@@ -15,27 +16,20 @@ import { WantListStatusBadge } from '../features/wantlist/WantListStatusBadge'
 
 export default function WantlistPage(): React.JSX.Element {
   const navigate = useNavigate()
-  const [items, setItems] = useState<WantListItem[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const unsubRef = useRef<(() => void) | null>(null)
-
-  const load = useCallback(() => {
-    setIsLoading(true)
-    setErrorMessage(null)
-    void api.wantList
-      .list()
-      .then((result) => setItems(result))
-      .catch((error) => {
-        setErrorMessage(formatWantListError(error, 'Failed to load want list'))
-      })
-      .finally(() => setIsLoading(false))
-  }, [])
+  const queryClient = useQueryClient()
+  const {
+    data: items = [],
+    error,
+    isPending: isLoading
+  } = useQuery({
+    queryKey: ['want-list'],
+    queryFn: api.wantList.list
+  })
+  const errorMessage = error ? formatWantListError(error, 'Failed to load want list') : null
 
   useEffect(() => {
-    load()
     const unsub = api.wantList.onItemUpdated((updated) => {
-      setItems((prev) => {
+      queryClient.setQueryData(['want-list'], (prev: WantListItem[] = []) => {
         const existing = prev.some((item) => item.id === updated.id)
         if (!existing) {
           return [updated, ...prev]
@@ -43,22 +37,22 @@ export default function WantlistPage(): React.JSX.Element {
         return prev.map((item) => (item.id === updated.id ? updated : item))
       })
     })
-    unsubRef.current = unsub
-    return () => {
-      unsub()
-      unsubRef.current = null
-    }
-  }, [load])
+    return unsub
+  }, [queryClient])
 
   const handleUpdated = useCallback((updated: WantListItem) => {
-    setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
-  }, [])
+    queryClient.setQueryData(['want-list'], (prev: WantListItem[] = []) =>
+      prev.map((item) => (item.id === updated.id ? updated : item))
+    )
+  }, [queryClient])
 
   const handleRemoved = useCallback((id: number) => {
     void api.wantList.remove(id).then(() => {
-      setItems((prev) => prev.filter((item) => item.id !== id))
+      queryClient.setQueryData(['want-list'], (prev: WantListItem[] = []) =>
+        prev.filter((item) => item.id !== id)
+      )
     })
-  }, [])
+  }, [queryClient])
 
   const columns = useMemo<DataTableColumn<WantListItem>[]>(
     () => [
