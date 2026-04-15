@@ -7,28 +7,19 @@ import type { MatchCandidate, ScoredCandidate } from '../../../shared/track-matc
 import { rankCandidates, parseDurationString } from '../../../shared/track-matcher'
 import type { CollectionItem } from '../../../shared/api'
 import { api } from '../api/client'
-import { ActionButton, ViewSection } from '../components/view'
+import { ActionButton } from '../components/view/ActionButton'
+import { ViewSection } from '../components/view/ViewSection'
 import { getErrorMessage } from '../lib/error-utils'
 import { extractYouTubeId } from '../lib/youtube'
 import { deriveTrackSummaryFromFilename, fileBasename, stripExtension } from '../lib/music-file'
+import { formatDuration } from '../lib/duration'
 import { useYoutubePlayer } from '../context/YoutubePlayerContext'
 import { usePlayer } from '../context/PlayerContext'
-
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60)
-  const s = Math.round(seconds % 60)
-  return `${m}:${String(s).padStart(2, '0')}`
-}
 
 // ── Score badge ───────────────────────────────────────────────────────────────
 
 function ScoreBadge({ score }: { score: number }): React.JSX.Element {
-  const cls =
-    score >= 70
-      ? 'text-emerald-400'
-      : score >= 40
-        ? 'text-amber-400'
-        : 'text-zinc-500'
+  const cls = score >= 70 ? 'text-emerald-400' : score >= 40 ? 'text-amber-400' : 'text-zinc-500'
   return <span className={`w-6 shrink-0 text-right font-mono text-[10px] ${cls}`}>{score}</span>
 }
 
@@ -154,7 +145,9 @@ function MatchList({
   if (items.length === 0) return null
   return (
     <div>
-      <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-600">{label}</div>
+      <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-600">
+        {label}
+      </div>
       <div className="space-y-0.5">
         {items.slice(0, MAX_SHOW).map((item, idx) => (
           <div key={`${item.id}-${idx}`} className="flex items-center gap-1.5">
@@ -167,7 +160,9 @@ function MatchList({
             ) : null}
             <span className="min-w-0 truncate text-zinc-400">{item.title}</span>
             {item.duration != null ? (
-              <span className="ml-auto shrink-0 text-zinc-600">{formatDuration(item.duration)}</span>
+              <span className="ml-auto shrink-0 text-zinc-600">
+                {formatDuration(item.duration)}
+              </span>
             ) : null}
           </div>
         ))}
@@ -222,8 +217,9 @@ export function Tracklist({
 
   const allMatches = useMemo(() => {
     return tracklist.map((track) => {
-      const durationSeconds =
-        track.duration ? (parseDurationString(track.duration) ?? undefined) : undefined
+      const durationSeconds = track.duration
+        ? (parseDurationString(track.duration) ?? undefined)
+        : undefined
       const query = { title: track.title, artist: artistStr, durationSeconds }
       return {
         rankedVideos: rankCandidates(query, videoCandidates),
@@ -245,7 +241,9 @@ export function Tracklist({
 
   return (
     <div>
-      <div className="mb-1 text-xs font-medium uppercase tracking-wide text-zinc-500">Tracklist</div>
+      <div className="mb-1 text-xs font-medium uppercase tracking-wide text-zinc-500">
+        Tracklist
+      </div>
       <div className="divide-y divide-zinc-800/60">
         {tracklist.map((track, index) => {
           const { rankedVideos, rankedCollection } = allMatches[index]
@@ -314,10 +312,7 @@ export function Tracklist({
                     renderAction={(item) => (
                       <button
                         onClick={() =>
-                          setActiveVideo(
-                            activeVideoId === item.id ? null : item.id,
-                            item.title
-                          )
+                          setActiveVideo(activeVideoId === item.id ? null : item.id, item.title)
                         }
                         className={`shrink-0 text-[10px] ${
                           activeVideoId === item.id

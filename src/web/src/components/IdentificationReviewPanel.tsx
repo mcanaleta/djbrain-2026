@@ -1,25 +1,30 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useAsyncAction } from '../hooks/useAsyncAction'
 import type { CollectionItem, CollectionItemDetails, RecordingCanonical, RecordingDetails } from '../../../shared/api'
 import type { OnlineSearchItem } from '../../../shared/online-search'
 import { api } from '../api/client'
 import { AudioCompareControls } from './AudioCompareControls'
-import {
-  ActionButton,
-  CompactInput,
-  DataTable,
-  Notice,
-  Pill,
-  QueryBar,
-  SectionKicker,
-  SourceIconLink,
-  ViewPanel,
-  ViewSection,
-  type DataTableColumn
-} from './view'
+import { ActionButton } from './view/ActionButton'
+import { CompactInput } from './view/CompactInput'
+import { DataTable, type DataTableColumn } from './view/DataTable'
+import { KV } from './view/KV'
+import { Notice } from './view/Notice'
+import { Pill } from './view/Pill'
+import { QueryBar } from './view/QueryBar'
+import { SectionKicker } from './view/SectionKicker'
+import { SourceIconLink } from './view/SourceIconLink'
+import { ViewPanel } from './view/ViewPanel'
+import { ViewSection } from './view/ViewSection'
 import { localFileUrl } from '../context/PlayerContext'
 import { useAudioCompare } from '../hooks/useAudioCompare'
 import { getErrorMessage } from '../lib/error-utils'
 import { withVersion } from '../lib/importReview'
+import {
+  buildDiscogsSearchUrl,
+  buildMusicBrainzSearchUrl,
+  discogsReleaseUrlFromExternalKey,
+  musicBrainzRecordingUrlFromExternalKey
+} from '../lib/urls'
 import { extractYouTubeId } from '../lib/youtube'
 import { deriveTrackSummaryFromFilename, formatCompactDuration } from '../lib/music-file'
 
@@ -49,26 +54,6 @@ function toCanonical(draft: Draft): Partial<RecordingCanonical> {
 
 function buildSearchText(draft: Draft): string {
   return [draft.artist, draft.title, draft.version].map((value) => value.trim()).filter(Boolean).join(' ')
-}
-
-function buildDiscogsSearchUrl(query: string): string {
-  return `https://www.discogs.com/search/?q=${encodeURIComponent(query)}&type=all`
-}
-
-function buildMusicBrainzSearchUrl(query: string): string {
-  return `https://musicbrainz.org/search?query=${encodeURIComponent(query)}&type=recording&method=indexed`
-}
-
-function discogsReleaseUrl(claim: RecordingDetails['sourceClaims'][number] | null): string | null {
-  if (!claim) return null
-  const match = claim.externalKey.match(/discogs:release:(\d+)/i)
-  return match ? `https://www.discogs.com/release/${match[1]}` : null
-}
-
-function musicBrainzRecordingUrl(claim: RecordingDetails['sourceClaims'][number] | null): string | null {
-  if (!claim) return null
-  const match = claim.externalKey.match(/musicbrainz:recording:([a-f0-9-]+)/i)
-  return match ? `https://musicbrainz.org/recording/${match[1]}` : null
 }
 
 function ClaimCard({
@@ -105,22 +90,6 @@ function ClaimCard({
   )
 }
 
-function FieldGrid({
-  rows
-}: {
-  rows: Array<{ label: string; value: React.ReactNode }>
-}): React.JSX.Element {
-  return (
-    <div className="grid grid-cols-[110px_1fr] gap-x-2 gap-y-1 text-xs">
-      {rows.map((row) => (
-        <div key={row.label} className="contents">
-          <div className="text-zinc-500">{row.label}</div>
-          <div className="min-w-0 break-all text-zinc-200">{row.value}</div>
-        </div>
-      ))}
-    </div>
-  )
-}
 
 export function IdentificationReviewPanel({
   filename,
@@ -143,14 +112,13 @@ export function IdentificationReviewPanel({
   const [selectedSimilarFilename, setSelectedSimilarFilename] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [youtubeLoading, setYoutubeLoading] = useState(false)
-  const [busyAction, setBusyAction] = useState<string | null>(null)
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [actionMessage, setActionMessage] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const actions = useAsyncAction()
 
   const loadItem = useCallback(async (): Promise<void> => {
     setLoading(true)
-    setErrorMessage(null)
-    setActionMessage(null)
+    setLoadError(null)
+    actions.clearMessages()
     try {
       const next = await api.collection.get(filename)
       setItem(next)
@@ -168,7 +136,7 @@ export function IdentificationReviewPanel({
         await Promise.all([loadSimilarItems(query, next.filename), loadRecordingResults(query), loadYoutube(query)])
       }
     } catch (error) {
-      setErrorMessage(getErrorMessage(error, 'Failed to load identification review'))
+      setLoadError(getErrorMessage(error, 'Failed to load identification review'))
       setItem(null)
       setRecording(null)
     } finally {
@@ -187,7 +155,7 @@ export function IdentificationReviewPanel({
       const details = await Promise.all(rows.slice(0, 8).map((row) => api.collection.getRecording(row.id)))
       setRecordingResults(details.filter((row): row is RecordingDetails => Boolean(row)))
     } catch (error) {
-      setErrorMessage(getErrorMessage(error, 'Failed to search recordings'))
+      setLoadError(getErrorMessage(error, 'Failed to search recordings'))
       setRecordingResults([])
     } finally {
       setRecordingSearchLoading(false)
@@ -207,7 +175,7 @@ export function IdentificationReviewPanel({
       setSimilarItems(next)
       setSelectedSimilarFilename((current) => (current && next.some((row) => row.filename === current) ? current : next[0]?.filename ?? null))
     } catch (error) {
-      setErrorMessage(getErrorMessage(error, 'Failed to load similar collection files'))
+      setLoadError(getErrorMessage(error, 'Failed to load similar collection files'))
       setSimilarItems([])
       setSelectedSimilarFilename(null)
     } finally {
@@ -228,7 +196,7 @@ export function IdentificationReviewPanel({
       setYoutubeItems(next)
       setActiveVideoId((current) => (current && next.some((row) => extractYouTubeId(row.link) === current) ? current : extractYouTubeId(next[0]?.link ?? '') ?? null))
     } catch (error) {
-      setErrorMessage(getErrorMessage(error, 'Failed to search YouTube'))
+      setLoadError(getErrorMessage(error, 'Failed to search YouTube'))
       setYoutubeItems([])
       setActiveVideoId(null)
     } finally {
@@ -280,10 +248,10 @@ export function IdentificationReviewPanel({
       cellClassName: 'w-[1%] whitespace-nowrap',
       render: (row) => (
         <div className="flex gap-1">
-          <ActionButton size="xs" tone="primary" disabled={busyAction === `accept:${row.id}`} onClick={() => void handleAccept(row.id)}>
-            {busyAction === `accept:${row.id}` ? 'Saving…' : 'Accept'}
+          <ActionButton size="xs" tone="primary" disabled={actions.busyAction === `accept:${row.id}`} onClick={() => void handleAccept(row.id)}>
+            {actions.busyAction === `accept:${row.id}` ? 'Saving…' : 'Accept'}
           </ActionButton>
-          <ActionButton size="xs" disabled={busyAction === `reject:${row.id}`} onClick={() => void handleReject(row.id)}>
+          <ActionButton size="xs" disabled={actions.busyAction === `reject:${row.id}`} onClick={() => void handleReject(row.id)}>
             Reject
           </ActionButton>
         </div>
@@ -335,111 +303,78 @@ export function IdentificationReviewPanel({
       header: '',
       cellClassName: 'w-[1%] whitespace-nowrap',
       render: (row) => (
-        <ActionButton size="xs" tone="primary" disabled={busyAction === `assign:${row.id}`} onClick={() => void handleAssign(row.id)}>
-          {busyAction === `assign:${row.id}` ? 'Saving…' : 'Use'}
+        <ActionButton size="xs" tone="primary" disabled={actions.busyAction === `assign:${row.id}`} onClick={() => void handleAssign(row.id)}>
+          {actions.busyAction === `assign:${row.id}` ? 'Saving…' : 'Use'}
         </ActionButton>
       )
     }
   ]
 
-  async function reloadAll(message?: string): Promise<void> {
+  async function reloadAll(): Promise<void> {
     await loadItem()
     await onChanged?.()
-    if (message) setActionMessage(message)
   }
 
-  async function handleAccept(candidateId: number): Promise<void> {
-    setBusyAction(`accept:${candidateId}`)
-    setErrorMessage(null)
-    try {
-      await api.collection.reviewIdentification({ filename, action: 'accept', candidateId })
-      await reloadAll('Identification confirmed.')
-    } catch (error) {
-      setErrorMessage(getErrorMessage(error, 'Failed to accept identification'))
-    } finally {
-      setBusyAction(null)
-    }
+  const handleAccept = (candidateId: number): void => {
+    void actions.run({
+      key: `accept:${candidateId}`,
+      action: async () => { await api.collection.reviewIdentification({ filename, action: 'accept', candidateId }); await reloadAll() },
+      successMessage: 'Identification confirmed.',
+      errorFallback: 'Failed to accept identification'
+    })
   }
 
-  async function handleReject(candidateId: number): Promise<void> {
-    setBusyAction(`reject:${candidateId}`)
-    setErrorMessage(null)
-    try {
-      await api.collection.reviewIdentification({ filename, action: 'reject', candidateId })
-      await reloadAll('Candidate rejected.')
-    } catch (error) {
-      setErrorMessage(getErrorMessage(error, 'Failed to reject candidate'))
-    } finally {
-      setBusyAction(null)
-    }
+  const handleReject = (candidateId: number): void => {
+    void actions.run({
+      key: `reject:${candidateId}`,
+      action: async () => { await api.collection.reviewIdentification({ filename, action: 'reject', candidateId }); await reloadAll() },
+      successMessage: 'Candidate rejected.',
+      errorFallback: 'Failed to reject candidate'
+    })
   }
 
-  async function handleAssign(recordingId: number): Promise<void> {
-    setBusyAction(`assign:${recordingId}`)
-    setErrorMessage(null)
-    try {
-      await api.collection.assignRecording({ recordingId, filenames: [filename] })
-      await reloadAll('Recording assigned.')
-    } catch (error) {
-      setErrorMessage(getErrorMessage(error, 'Failed to assign recording'))
-    } finally {
-      setBusyAction(null)
-    }
+  const handleAssign = (recordingId: number): void => {
+    void actions.run({
+      key: `assign:${recordingId}`,
+      action: async () => { await api.collection.assignRecording({ recordingId, filenames: [filename] }); await reloadAll() },
+      successMessage: 'Recording assigned.',
+      errorFallback: 'Failed to assign recording'
+    })
   }
 
-  async function handleSaveCurrent(): Promise<void> {
+  const handleSaveCurrent = (): void => {
     if (!item?.identification?.recordingId) return
-    setBusyAction('save-current')
-    setErrorMessage(null)
-    try {
-      await api.collection.assignRecording({
-        recordingId: item.identification.recordingId,
-        filenames: [filename],
-        canonical: toCanonical(draft)
-      })
-      await reloadAll('Identification saved.')
-    } catch (error) {
-      setErrorMessage(getErrorMessage(error, 'Failed to save canonical recording'))
-    } finally {
-      setBusyAction(null)
-    }
+    void actions.run({
+      key: 'save-current',
+      action: async () => { await api.collection.assignRecording({ recordingId: item.identification!.recordingId!, filenames: [filename], canonical: toCanonical(draft) }); await reloadAll() },
+      successMessage: 'Identification saved.',
+      errorFallback: 'Failed to save canonical recording'
+    })
   }
 
-  async function handleCreateRecording(): Promise<void> {
-    setBusyAction('create')
-    setErrorMessage(null)
-    try {
-      await api.collection.assignRecording({
-        filenames: [filename],
-        create: true,
-        canonical: toCanonical(draft)
-      })
-      await reloadAll('New recording created.')
-    } catch (error) {
-      setErrorMessage(getErrorMessage(error, 'Failed to create recording'))
-    } finally {
-      setBusyAction(null)
-    }
+  const handleCreateRecording = (): void => {
+    void actions.run({
+      key: 'create',
+      action: async () => { await api.collection.assignRecording({ filenames: [filename], create: true, canonical: toCanonical(draft) }); await reloadAll() },
+      successMessage: 'New recording created.',
+      errorFallback: 'Failed to create recording'
+    })
   }
 
-  async function handleReidentify(): Promise<void> {
-    setBusyAction('identify')
-    setErrorMessage(null)
-    try {
-      await api.collection.queueIdentificationProcessing([filename], true)
-      await reloadAll('Identification queued.')
-    } catch (error) {
-      setErrorMessage(getErrorMessage(error, 'Failed to queue identification'))
-    } finally {
-      setBusyAction(null)
-    }
+  const handleReidentify = (): void => {
+    void actions.run({
+      key: 'identify',
+      action: async () => { await api.collection.queueIdentificationProcessing([filename], true); await reloadAll() },
+      successMessage: 'Identification queued.',
+      errorFallback: 'Failed to queue identification'
+    })
   }
 
   return (
     <div className="space-y-3">
       {loading ? <Notice>Loading identification…</Notice> : null}
-      {errorMessage ? <Notice tone="error">{errorMessage}</Notice> : null}
-      {actionMessage ? <Notice tone="success">{actionMessage}</Notice> : null}
+      {(loadError || actions.errorMessage) ? <Notice tone="error">{loadError ?? actions.errorMessage}</Notice> : null}
+      {actions.actionMessage ? <Notice tone="success">{actions.actionMessage}</Notice> : null}
       {!item ? null : (
         <>
           <ViewSection
@@ -452,13 +387,14 @@ export function IdentificationReviewPanel({
                 {item.identification?.status ? <Pill>{item.identification.status}</Pill> : null}
                 <ActionButton size="xs" onClick={() => void api.collection.showInFinder(item.filename)}>Finder</ActionButton>
                 <ActionButton size="xs" onClick={() => void api.collection.openInPlayer(item.filename)}>Open Player</ActionButton>
-                <ActionButton size="xs" disabled={busyAction === 'identify'} onClick={() => void handleReidentify()}>
-                  {busyAction === 'identify' ? 'Queuing…' : 'Reidentify'}
+                <ActionButton size="xs" disabled={actions.busyAction === 'identify'} onClick={() => void handleReidentify()}>
+                  {actions.busyAction === 'identify' ? 'Queuing…' : 'Reidentify'}
                 </ActionButton>
               </div>
             }
           >
-            <FieldGrid
+            <KV
+              labelWidth="110px"
               rows={[
                 { label: 'Path', value: item.filename },
                 { label: 'Recording', value: item.identification?.recordingId ?? '—' },
@@ -479,13 +415,13 @@ export function IdentificationReviewPanel({
               <ActionButton
                 size="xs"
                 tone="primary"
-                disabled={!item.identification?.recordingId || busyAction === 'save-current'}
+                disabled={!item.identification?.recordingId || actions.busyAction === 'save-current'}
                 onClick={() => void handleSaveCurrent()}
               >
-                {busyAction === 'save-current' ? 'Saving…' : 'Confirm Current'}
+                {actions.busyAction === 'save-current' ? 'Saving…' : 'Confirm Current'}
               </ActionButton>
-              <ActionButton size="xs" disabled={busyAction === 'create'} onClick={() => void handleCreateRecording()}>
-                {busyAction === 'create' ? 'Creating…' : 'Create New'}
+              <ActionButton size="xs" disabled={actions.busyAction === 'create'} onClick={() => void handleCreateRecording()}>
+                {actions.busyAction === 'create' ? 'Creating…' : 'Create New'}
               </ActionButton>
               <ActionButton size="xs" disabled={recordingSearchLoading} onClick={() => void loadRecordingResults(recordingQuery)}>
                 {recordingSearchLoading ? 'Searching…' : 'Search Recordings'}
@@ -546,7 +482,7 @@ export function IdentificationReviewPanel({
                       : 'No stored Discogs release'
                   }
                   line2={discogsClaim ? `${discogsClaim.releaseTitle || '—'}${discogsClaim.trackPosition ? ` · ${discogsClaim.trackPosition}` : ''}` : undefined}
-                  storedUrl={discogsReleaseUrl(discogsClaim)}
+                  storedUrl={discogsReleaseUrlFromExternalKey(discogsClaim?.externalKey)}
                   searchUrl={buildDiscogsSearchUrl(searchText)}
                   storedLabel="Discogs release"
                   searchLabel="Discogs search"
@@ -562,7 +498,7 @@ export function IdentificationReviewPanel({
                       : 'No stored MusicBrainz recording'
                   }
                   line2={musicBrainzClaim ? `${musicBrainzClaim.releaseTitle || '—'}${musicBrainzClaim.trackPosition ? ` · ${musicBrainzClaim.trackPosition}` : ''}` : undefined}
-                  storedUrl={musicBrainzRecordingUrl(musicBrainzClaim)}
+                  storedUrl={musicBrainzRecordingUrlFromExternalKey(musicBrainzClaim?.externalKey)}
                   searchUrl={buildMusicBrainzSearchUrl(searchText)}
                   storedLabel="MusicBrainz recording"
                   searchLabel="MusicBrainz search"

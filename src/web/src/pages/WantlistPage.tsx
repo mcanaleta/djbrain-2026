@@ -2,26 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import type { WantListItem } from '../../../shared/api'
 import { api } from '../api/client'
-import { ActionButton, DataTable, Notice, Pill, ViewSection, type DataTableColumn } from '../components/view'
+import { ActionButton } from '../components/view/ActionButton'
+import { DataTable, type DataTableColumn } from '../components/view/DataTable'
+import { Notice } from '../components/view/Notice'
+import { ViewSection } from '../components/view/ViewSection'
 import {
   canResetWantListItem,
   formatWantListError,
-  isWantListItemBusy,
-  WANT_LIST_STATUS_CLASS,
-  WANT_LIST_STATUS_LABEL,
-  type WantListPipelineStatus
+  isWantListItemBusy
 } from '../features/wantlist/view-model'
-
-function WantListStatusBadge({ status }: { status: WantListPipelineStatus }): React.JSX.Element {
-  return (
-    <Pill
-      className={WANT_LIST_STATUS_CLASS[status]}
-      pulse={(['searching', 'downloading', 'identifying', 'importing'] as WantListPipelineStatus[]).includes(status)}
-    >
-      {WANT_LIST_STATUS_LABEL[status]}
-    </Pill>
-  )
-}
+import { WantListStatusBadge } from '../features/wantlist/WantListStatusBadge'
 
 export default function WantlistPage(): React.JSX.Element {
   const navigate = useNavigate()

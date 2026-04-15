@@ -2,8 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { UpgradeCase, UpgradeCaseStatus } from '../../../shared/api'
 import { api } from '../api/client'
-import { ActionButton, DataTable, Notice, PageHero, Pill, ViewSection, type DataTableColumn } from '../components/view'
+import { ActionButton } from '../components/view/ActionButton'
+import { DataTable, type DataTableColumn } from '../components/view/DataTable'
+import { Notice } from '../components/view/Notice'
+import { PageHero } from '../components/view/PageHero'
+import { Pill } from '../components/view/Pill'
+import { ViewSection } from '../components/view/ViewSection'
 import { deriveTrackSummaryFromFilename, formatCompactDuration } from '../lib/music-file'
+import { getErrorMessage } from '../lib/error-utils'
 
 const STATUS_TONE: Record<UpgradeCaseStatus, 'muted' | 'primary' | 'success' | 'danger'> = {
   idle: 'muted',
@@ -23,7 +29,7 @@ type UpgradeRow = UpgradeCase & {
 }
 
 function formatError(error: unknown): string {
-  return error instanceof Error ? error.message : 'Unexpected upgrades error'
+  return getErrorMessage(error, 'Unexpected upgrades error')
 }
 
 function makeColumns(navigate: (path: string) => void): DataTableColumn<UpgradeRow>[] {

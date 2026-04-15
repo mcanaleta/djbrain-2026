@@ -1,14 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { GrokSearchResponse, GrokTrackResult } from '../../../shared/grok-search'
 import { api } from '../api/client'
-import {
-  ActionButton,
-  DataTable,
-  LabeledInput,
-  Notice,
-  ViewSection,
-  type DataTableColumn
-} from '../components/view'
+import { ActionButton } from '../components/view/ActionButton'
+import { DataTable, type DataTableColumn } from '../components/view/DataTable'
+import { LabeledInput } from '../components/view/LabeledInput'
+import { Notice } from '../components/view/Notice'
+import { ViewSection } from '../components/view/ViewSection'
 
 type AppSettings = {
   grokApiKey: string

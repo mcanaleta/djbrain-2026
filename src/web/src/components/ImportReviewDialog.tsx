@@ -32,20 +32,18 @@ import {
   withVersion
 } from '../lib/importReview'
 import { formatCompactDuration } from '../lib/music-file'
+import { buildDiscogsReleaseUrl } from '../lib/urls'
 import { useAudioCompare } from '../hooks/useAudioCompare'
 import { AudioCompareControls } from './AudioCompareControls'
 import { ImportReviewOverviewTable } from './ImportReviewOverviewTable'
-import {
-  ActionButton,
-  CompactInput,
-  DataTable,
-  MiniStat,
-  Notice,
-  Pill,
-  SectionKicker,
-  SourceIconLink,
-  type DataTableColumn
-} from './view'
+import { ActionButton } from './view/ActionButton'
+import { CompactInput } from './view/CompactInput'
+import { DataTable, type DataTableColumn } from './view/DataTable'
+import { MiniStat } from './view/MiniStat'
+import { Notice } from './view/Notice'
+import { Pill } from './view/Pill'
+import { SectionKicker } from './view/SectionKicker'
+import { SourceIconLink } from './view/SourceIconLink'
 
 type LoadReviewOptions = { preserveTagDraft?: boolean; force?: boolean }
 
@@ -171,7 +169,7 @@ export function ImportReviewDialog({
   const sourceQualityTitle = formatQualityTitle(sourceQualityScore, comparison?.sourceAnalysis ?? review?.sourceAnalysis)
   const selectedExistingQualityScore = selectedCompareItem?.qualityScore ?? currentItem?.importExistingQualityScore ?? null
   const selectedExistingQualityTitle = formatQualityTitle(selectedExistingQualityScore, comparison?.existingAnalysis ?? null)
-  const selectedReleaseUrl = selectedCandidate ? `https://www.discogs.com/release/${selectedCandidate.match.releaseId}` : null
+  const selectedReleaseUrl = selectedCandidate ? buildDiscogsReleaseUrl(selectedCandidate.match.releaseId) : null
   const selectedReleaseLabel = selectedCandidate
     ? `${selectedCandidate.match.releaseTitle} · ${summarizeMediaType(selectedCandidate.match.format)}`
     : null
@@ -228,7 +226,7 @@ export function ImportReviewDialog({
     { key: 'len', header: 'Len', cellClassName: 'w-[1%] whitespace-nowrap text-zinc-400', render: (row) => formatCompactDuration(row.match.durationSeconds) },
     { key: 'type', header: 'Type', cellClassName: 'w-[1%] whitespace-nowrap text-zinc-400', render: (row) => summarizeMediaType(row.match.format) },
     { key: 'score', header: 'Score', cellClassName: 'w-[1%] whitespace-nowrap text-zinc-400', render: (row) => row.match.score.toFixed(0) },
-    { key: 'link', header: 'D', cellClassName: 'w-[1%] whitespace-nowrap', render: (row) => <SourceIconLink url={`https://www.discogs.com/release/${row.match.releaseId}`} label="Discogs release" /> },
+    { key: 'link', header: 'D', cellClassName: 'w-[1%] whitespace-nowrap', render: (row) => <SourceIconLink url={buildDiscogsReleaseUrl(row.match.releaseId)} label="Discogs release" /> },
     { key: 'flags', header: '', cellClassName: 'w-[1%]', render: (row) => row.exactExistingFilename ? <Pill className="border-violet-700/50 bg-violet-950/30 text-violet-100">existing</Pill> : null }
   ]
 

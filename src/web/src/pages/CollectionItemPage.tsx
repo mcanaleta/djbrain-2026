@@ -2,10 +2,15 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import type { CollectionItemDetails } from '../../../shared/api'
 import { api } from '../api/client'
-import { ActionButton, Notice, ViewSection } from '../components/view'
+import { ActionButton } from '../components/view/ActionButton'
+import { KV } from '../components/view/KV'
+import { Notice } from '../components/view/Notice'
+import { ViewSection } from '../components/view/ViewSection'
 import { usePlayer } from '../context/PlayerContext'
+import { useAsyncAction } from '../hooks/useAsyncAction'
 import { getErrorMessage } from '../lib/error-utils'
 import { deriveTrackSummaryFromFilename, formatFileSize } from '../lib/music-file'
+import { buildIdentifyReviewHref } from '../lib/urls'
 
 function fmtDate(value: string | number | null | undefined): string {
   if (value == null) return '—'
@@ -20,23 +25,6 @@ function JsonBlock({ value }: { value: string | null | undefined }): React.JSX.E
       <summary className="cursor-pointer px-2 py-1 text-[11px] text-zinc-400">Show JSON</summary>
       <pre className="max-h-64 overflow-auto border-t border-zinc-800 p-2 text-[10px] leading-4 text-zinc-300">{value}</pre>
     </details>
-  )
-}
-
-function KV({
-  rows
-}: {
-  rows: Array<{ label: string; value: React.ReactNode }>
-}): React.JSX.Element {
-  return (
-    <div className="grid grid-cols-[130px_1fr] gap-x-2 gap-y-1 text-xs">
-      {rows.map((row) => (
-        <div key={row.label} className="contents">
-          <div className="text-zinc-500">{row.label}</div>
-          <div className="min-w-0 break-all text-zinc-200">{row.value}</div>
-        </div>
-      ))}
-    </div>
   )
 }
 
@@ -218,7 +206,7 @@ export default function CollectionItemPage(): React.JSX.Element {
                 <ActionButton size="xs" disabled={busyAction === 'identify'} onClick={() => void handleIdentify()}>
                   {busyAction === 'identify' ? 'Queuing…' : 'Reidentify'}
                 </ActionButton>
-                <ActionButton size="xs" onClick={() => navigate(`/identify?scope=${item.isDownload ? 'downloads' : 'collection'}&filename=${encodeURIComponent(item.filename)}`)}>
+                <ActionButton size="xs" onClick={() => navigate(buildIdentifyReviewHref(item.filename, item.isDownload ? 'downloads' : 'collection'))}>
                   Review Identify
                 </ActionButton>
                 <ActionButton size="xs" disabled={busyAction === 'sync'} onClick={() => void handleSync()}>

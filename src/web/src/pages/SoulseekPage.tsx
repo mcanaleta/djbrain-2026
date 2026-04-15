@@ -1,4 +1,6 @@
-import { EmptyState, ViewPanel, ViewSection } from '../components/view'
+import { EmptyState } from '../components/view/EmptyState'
+import { ViewPanel } from '../components/view/ViewPanel'
+import { ViewSection } from '../components/view/ViewSection'
 
 export default function SoulseekPage(): React.JSX.Element {
   return (

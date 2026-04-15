@@ -1,4 +1,5 @@
-import { ActionButton, ViewSection } from '../components/view'
+import { ActionButton } from '../components/view/ActionButton'
+import { ViewSection } from '../components/view/ViewSection'
 
 export default function DropboxPage(): React.JSX.Element {
   return (

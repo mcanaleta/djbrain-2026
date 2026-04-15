@@ -2,19 +2,16 @@ import { DownloadIcon, LockClosedIcon } from '@radix-ui/react-icons'
 import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import type { SlskdCandidate } from '../../../shared/api'
-import {
-  ActionButton,
-  DataTable,
-  EmptyState,
-  IconButton,
-  LabeledInput,
-  Notice,
-  Pill,
-  QueryBar,
-  ViewPanel,
-  ViewSection,
-  type DataTableColumn
-} from '../components/view'
+import { ActionButton } from '../components/view/ActionButton'
+import { DataTable, type DataTableColumn } from '../components/view/DataTable'
+import { EmptyState } from '../components/view/EmptyState'
+import { IconButton } from '../components/view/IconButton'
+import { LabeledInput } from '../components/view/LabeledInput'
+import { Notice } from '../components/view/Notice'
+import { Pill } from '../components/view/Pill'
+import { QueryBar } from '../components/view/QueryBar'
+import { ViewPanel } from '../components/view/ViewPanel'
+import { ViewSection } from '../components/view/ViewSection'
 import { localFileUrl, usePlayer } from '../context/PlayerContext'
 import {
   deriveTrackSummaryFromFilename,
@@ -25,27 +22,14 @@ import {
 import {
   getSoulseekActionKey,
   updateWantListEditState,
-  WANT_LIST_STATUS_CLASS,
-  WANT_LIST_STATUS_LABEL,
-  type WantListEditState,
-  type WantListPipelineStatus
+  type WantListEditState
 } from '../features/wantlist/view-model'
+import { WantListStatusBadge } from '../features/wantlist/WantListStatusBadge'
 import {
   useWantListItemPage,
   type WantListLocalResult,
   type WantListVideoResult
 } from '../features/wantlist/useWantListItemPage'
-
-function WantListStatusBadge({ status }: { status: WantListPipelineStatus }): React.JSX.Element {
-  return (
-    <Pill
-      className={WANT_LIST_STATUS_CLASS[status]}
-      pulse={(['searching', 'downloading', 'identifying', 'importing'] as WantListPipelineStatus[]).includes(status)}
-    >
-      {WANT_LIST_STATUS_LABEL[status]}
-    </Pill>
-  )
-}
 
 function LocalResultRow({
   item,

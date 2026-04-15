@@ -1,16 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ExternalLinkIcon, PauseIcon, PlayIcon, TrashIcon } from '@radix-ui/react-icons'
+import { PauseIcon, PlayIcon, TrashIcon } from '@radix-ui/react-icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
-import { ActionButton, DataTable, LabeledInput, Notice, Pill, SourceIconLink, ViewSection, type DataTableColumn } from '../components/view'
+import { ActionButton } from '../components/view/ActionButton'
+import { DataTable, type DataTableColumn } from '../components/view/DataTable'
+import { FormatBadge } from '../components/view/FormatBadge'
+import { LabeledInput } from '../components/view/LabeledInput'
+import { Notice } from '../components/view/Notice'
+import { Pill } from '../components/view/Pill'
+import { QualityBadge } from '../components/view/QualityBadge'
+import { SourceIconLink } from '../components/view/SourceIconLink'
+import { SourceLinks } from '../components/view/SourceLinks'
+import { ViewSection } from '../components/view/ViewSection'
 import { usePlayer, localFileUrl } from '../context/PlayerContext'
 import type { CollectionItem, CollectionSyncStatus } from '../../../shared/api'
 import {
   deriveTrackSummaryFromFilename,
   fileBasename,
   formatCompactDuration,
-  formatFileSize
+  formatExtensionName,
+  formatFileSize,
+  formatQualityScore,
+  joinPath
 } from '../lib/music-file'
+import { getErrorMessage } from '../lib/error-utils'
+import { buildImportReviewHref } from '../lib/urls'
 
 const EMPTY_STATUS: CollectionSyncStatus = {
   isSyncing: false,
@@ -29,8 +43,7 @@ const EMPTY_STATUS: CollectionSyncStatus = {
 }
 
 function formatError(error: unknown): string {
-  if (error instanceof Error) return error.message
-  return 'Unexpected import list error'
+  return getErrorMessage(error, 'Unexpected import list error')
 }
 
 type ImportRow = CollectionItem & {
@@ -59,99 +72,6 @@ type ImportTrackRow = {
   bestFile: ImportRow
 }
 
-function renderSourceLinks(row: Pick<CollectionItem, 'recordingDiscogsUrl' | 'recordingMusicBrainzUrl'>): React.JSX.Element | null {
-  if (!row.recordingDiscogsUrl && !row.recordingMusicBrainzUrl) return null
-  return (
-    <div className="mt-0.5 flex flex-wrap gap-1 text-[10px]">
-      {row.recordingDiscogsUrl ? (
-        <a
-          href={row.recordingDiscogsUrl}
-          target="_blank"
-          rel="noreferrer"
-          onClick={(event) => event.stopPropagation()}
-          className="inline-flex items-center gap-1 rounded border border-zinc-700 px-1 text-zinc-400 hover:border-amber-700/60 hover:text-amber-200"
-        >
-          Discogs
-          <ExternalLinkIcon className="h-2.5 w-2.5" />
-        </a>
-      ) : null}
-      {row.recordingMusicBrainzUrl ? (
-        <a
-          href={row.recordingMusicBrainzUrl}
-          target="_blank"
-          rel="noreferrer"
-          onClick={(event) => event.stopPropagation()}
-          className="inline-flex items-center gap-1 rounded border border-zinc-700 px-1 text-zinc-400 hover:border-amber-700/60 hover:text-amber-200"
-        >
-          MB
-          <ExternalLinkIcon className="h-2.5 w-2.5" />
-        </a>
-      ) : null}
-    </div>
-  )
-}
-
-function readExtension(filename: string): string {
-  const match = filename.match(/(\.[^.\/]+)$/)
-  return match?.[1]?.toLowerCase() ?? ''
-}
-
-function formatName(filename: string): string {
-  const ext = readExtension(filename)
-  return ext ? ext.slice(1).toUpperCase() : '—'
-}
-
-function joinPath(root: string, filename: string): string {
-  return root ? `${root.replace(/\/+$/, '')}/${filename.replace(/^\/+/, '')}` : filename
-}
-
-function formatQuality(item: Pick<CollectionItem, 'qualityScore' | 'bitrateKbps'>): { label: string; title: string } {
-  const score = item.qualityScore == null ? null : Math.round(item.qualityScore)
-  const label = score == null ? '—' : String(score)
-  const title =
-    score == null
-      ? 'No audio analysis score yet'
-      : `Analysis score ${score}/100${item.bitrateKbps != null ? ` · ${Math.round(item.bitrateKbps)}kbps` : ''}`
-  return { label, title }
-}
-
-function renderBadge(label: string, className: string, title?: string): React.JSX.Element {
-  return (
-    <span
-      title={title}
-      className={`inline-flex min-w-[3.25rem] items-center justify-center rounded-md px-1.5 py-0.5 text-[10px] font-medium ${className}`}
-    >
-      {label}
-    </span>
-  )
-}
-
-function renderFormatBadge(format: string): React.JSX.Element {
-  const normalized = format.toLowerCase()
-  return renderBadge(
-    format,
-    ['wav', 'flac', 'aiff', 'aif', 'alac'].includes(normalized)
-      ? 'bg-sky-400 text-sky-950'
-      : ['mp3', 'aac', 'm4a', 'ogg', 'opus'].includes(normalized)
-        ? 'bg-fuchsia-400 text-fuchsia-950'
-        : 'bg-zinc-700 text-zinc-100'
-  )
-}
-
-function renderQualityBadge(quality: string, title: string): React.JSX.Element {
-  const score = Number(quality)
-  return renderBadge(
-    quality,
-    !Number.isFinite(score)
-      ? 'bg-zinc-700 text-zinc-100'
-      : score >= 85
-        ? 'bg-emerald-400 text-emerald-950'
-        : score >= 70
-          ? 'bg-amber-300 text-amber-950'
-          : 'bg-rose-400 text-rose-950',
-    title
-  )
-}
 
 function compareImportRows(left: ImportRow, right: ImportRow): number {
   const leftBetter = left.importBetterThanExisting === true ? 1 : 0
@@ -301,7 +221,7 @@ export default function ImportPage(): React.JSX.Element {
       items.map((item) => {
         const fallback = deriveTrackSummaryFromFilename(item.filename)
         const canonical = item.recordingCanonical
-        const quality = formatQuality(item)
+        const quality = formatQualityScore(item.qualityScore, item.bitrateKbps)
         return {
           ...item,
           artist: canonical?.artist || item.importArtist || fallback.artist,
@@ -311,7 +231,7 @@ export default function ImportPage(): React.JSX.Element {
               ? `${item.importTitle}${item.importVersion ? ` (${item.importVersion})` : ''}`
               : fallback.title,
           year: canonical?.year || item.importYear || fallback.year,
-          format: formatName(item.filename),
+          format: formatExtensionName(item.filename),
           quality: quality.label,
           qualityTitle: quality.title,
           existingQuality:
@@ -396,8 +316,7 @@ export default function ImportPage(): React.JSX.Element {
   }
 
   const reviewHref = useCallback(
-    (nextFilename: string): string =>
-      `/import/review?filename=${encodeURIComponent(nextFilename)}${submittedSearch.query ? `&query=${encodeURIComponent(submittedSearch.query)}` : ''}`,
+    (nextFilename: string): string => buildImportReviewHref(nextFilename, submittedSearch.query),
     [submittedSearch.query]
   )
 
@@ -456,19 +375,19 @@ export default function ImportPage(): React.JSX.Element {
       key: 'format',
       header: 'Format',
       cellClassName: 'w-[1%] whitespace-nowrap',
-      render: (row) => renderFormatBadge(row.format)
+      render: (row) => <FormatBadge format={row.format} />
     },
     {
       key: 'quality',
       header: 'Quality',
       cellClassName: 'w-[1%] whitespace-nowrap',
-      render: (row) => renderQualityBadge(row.quality, row.qualityTitle)
+      render: (row) => <QualityBadge quality={row.quality} title={row.qualityTitle} />
     },
     {
       key: 'existing',
       header: 'Existing',
       cellClassName: 'w-[1%] whitespace-nowrap',
-      render: (row) => renderQualityBadge(row.existingQuality, row.existingQualityTitle)
+      render: (row) => <QualityBadge quality={row.existingQuality} title={row.existingQualityTitle} />
     },
     {
       key: 'discogs',
@@ -555,7 +474,7 @@ export default function ImportPage(): React.JSX.Element {
           <div className="truncate text-zinc-500" title={row.releaseTitle ?? row.bestFile.filename}>
             {row.releaseTitle ?? fileBasename(row.bestFile.filename)}
           </div>
-          {renderSourceLinks(row.bestFile)}
+          <SourceLinks discogsUrl={row.bestFile.recordingDiscogsUrl} musicBrainzUrl={row.bestFile.recordingMusicBrainzUrl} />
         </div>
       )
     },

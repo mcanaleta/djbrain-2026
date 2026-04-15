@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import type { OnlineSearchItem, OnlineSearchResponse } from '../../../shared/online-search'
 import { api } from '../api/client'
-import { EmptyState, Notice, ViewSection } from '../components/view'
+import { EmptyState } from '../components/view/EmptyState'
+import { Notice } from '../components/view/Notice'
+import { ViewSection } from '../components/view/ViewSection'
 import { getDiscogsRoute } from '../lib/online-search'
 
 function formatError(error: unknown): string {

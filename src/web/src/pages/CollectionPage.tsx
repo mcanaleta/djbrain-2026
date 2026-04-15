@@ -2,9 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { CollectionItem, CollectionListResult, CollectionSyncStatus } from '../../../shared/api'
 import { api } from '../api/client'
-import { ActionButton, DataTable, LabeledInput, Notice, SourceIconLink, ViewSection, type DataTableColumn } from '../components/view'
+import { ActionButton } from '../components/view/ActionButton'
+import { DataTable, type DataTableColumn } from '../components/view/DataTable'
+import { FormatBadge } from '../components/view/FormatBadge'
+import { LabeledInput } from '../components/view/LabeledInput'
+import { LocationBadge } from '../components/view/LocationBadge'
+import { Notice } from '../components/view/Notice'
+import { QualityBadge } from '../components/view/QualityBadge'
+import { SourceIconLink } from '../components/view/SourceIconLink'
+import { ViewSection } from '../components/view/ViewSection'
 import { getErrorMessage } from '../lib/error-utils'
-import { deriveTrackSummaryFromFilename, formatCompactDuration, formatFileSize } from '../lib/music-file'
+import { deriveTrackSummaryFromFilename, formatCompactDuration, formatExtensionName, formatFileSize, formatQualityScore, joinPath } from '../lib/music-file'
 
 const EMPTY_STATUS: CollectionSyncStatus = {
   isSyncing: false,
@@ -30,81 +38,13 @@ function formatError(error: unknown): string {
   return getErrorMessage(error, 'Unexpected collection error')
 }
 
-function readExtension(filename: string): string {
-  const match = filename.match(/(\.[^.\/]+)$/)
-  return match?.[1]?.toLowerCase() ?? ''
-}
-
-function formatName(filename: string): string {
-  const ext = readExtension(filename)
-  return ext ? ext.slice(1).toUpperCase() : '—'
-}
-
-function joinPath(root: string, filename: string): string {
-  return root ? `${root.replace(/\/+$/, '')}/${filename.replace(/^\/+/, '')}` : filename
-}
-
-function formatQuality(item: CollectionItem): { label: string; title: string } {
-  const score = item.qualityScore == null ? null : Math.round(item.qualityScore)
-  const label = score == null ? '—' : String(score)
-  const title = score == null ? 'No audio analysis score yet' : `Analysis score ${score}/100${item.bitrateKbps != null ? ` · ${Math.round(item.bitrateKbps)}kbps` : ''}`
-  return { label, title }
-}
-
-function renderBadge(label: string, className: string, title?: string): React.JSX.Element {
-  return (
-    <span
-      title={title}
-      className={`inline-flex min-w-[3.25rem] items-center justify-center rounded-md px-1.5 py-0.5 text-[10px] font-medium ${className}`}
-    >
-      {label}
-    </span>
-  )
-}
-
-function renderLocationBadge(location: CollectionRow['location']): React.JSX.Element {
-  return renderBadge(
-    location,
-    location === 'downloads'
-      ? 'bg-amber-400 text-amber-950'
-      : 'bg-emerald-400 text-emerald-950'
-  )
-}
-
-function renderFormatBadge(format: string): React.JSX.Element {
-  const normalized = format.toLowerCase()
-  return renderBadge(
-    format,
-    ['wav', 'flac', 'aiff', 'aif', 'alac'].includes(normalized)
-      ? 'bg-sky-400 text-sky-950'
-      : ['mp3', 'aac', 'm4a', 'ogg', 'opus'].includes(normalized)
-        ? 'bg-fuchsia-400 text-fuchsia-950'
-        : 'bg-zinc-700 text-zinc-100'
-  )
-}
-
-function renderQualityBadge(quality: string, title: string): React.JSX.Element {
-  const score = Number(quality)
-  return renderBadge(
-    quality,
-    !Number.isFinite(score)
-      ? 'bg-zinc-700 text-zinc-100'
-      : score >= 85
-        ? 'bg-emerald-400 text-emerald-950'
-        : score >= 70
-          ? 'bg-amber-300 text-amber-950'
-          : 'bg-rose-400 text-rose-950',
-    title
-  )
-}
-
 function makeColumns(): DataTableColumn<CollectionRow>[] {
   return [
     {
       key: 'location',
       header: 'Location',
       cellClassName: 'w-[1%] whitespace-nowrap',
-      render: (row) => renderLocationBadge(row.location)
+      render: (row) => <LocationBadge location={row.location} />
     },
     {
       key: 'artist',
@@ -140,13 +80,13 @@ function makeColumns(): DataTableColumn<CollectionRow>[] {
       key: 'format',
       header: 'Format',
       cellClassName: 'w-[1%] whitespace-nowrap',
-      render: (row) => renderFormatBadge(row.format)
+      render: (row) => <FormatBadge format={row.format} />
     },
     {
       key: 'quality',
       header: 'Quality',
       cellClassName: 'w-[1%] whitespace-nowrap',
-      render: (row) => renderQualityBadge(row.quality, row.qualityTitle)
+      render: (row) => <QualityBadge quality={row.quality} title={row.qualityTitle} />
     },
     {
       key: 'discogs',
@@ -249,13 +189,13 @@ export default function CollectionPage(): React.JSX.Element {
           : item.importTitle
             ? `${item.importTitle}${item.importVersion ? ` (${item.importVersion})` : ''}`
             : fallback.title
-        const quality = formatQuality(item)
+        const quality = formatQualityScore(item.qualityScore, item.bitrateKbps)
         return {
           ...item,
           artist: item.recordingCanonical?.artist || item.importArtist || fallback.artist,
           title,
           year: item.recordingCanonical?.year || item.importYear || fallback.year,
-          format: formatName(item.filename),
+          format: formatExtensionName(item.filename),
           location: item.isDownload ? ('downloads' as const) : ('collection' as const),
           quality: quality.label,
           qualityTitle: quality.title,

@@ -1,5 +1,5 @@
 import { Link1Icon, LinkBreak2Icon, PauseIcon, PlayIcon } from '@radix-ui/react-icons'
-import { ActionButton } from './view'
+import { ActionButton } from './view/ActionButton'
 import { formatCompactDuration } from '../lib/music-file'
 
 type DeckProps = {

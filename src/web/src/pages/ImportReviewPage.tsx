@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import type { CollectionItem } from '../../../shared/api'
 import { api } from '../api/client'
 import { ImportReviewDialog } from '../components/ImportReviewDialog'
+import { buildImportHref, buildImportReviewHref } from '../lib/urls'
 
 export default function ImportReviewPage(): React.JSX.Element {
   const navigate = useNavigate()
@@ -30,10 +31,8 @@ export default function ImportReviewPage(): React.JSX.Element {
   const currentItem = currentIndex >= 0 ? items[currentIndex] ?? null : null
   const nextFilename = currentIndex >= 0 ? items[currentIndex + 1]?.filename ?? null : null
 
-  const importHref = query ? `/import?query=${encodeURIComponent(query)}` : '/import'
-  const nextHref = nextFilename
-    ? `/import/review?filename=${encodeURIComponent(nextFilename)}${query ? `&query=${encodeURIComponent(query)}` : ''}`
-    : importHref
+  const importHref = buildImportHref(query)
+  const nextHref = nextFilename ? buildImportReviewHref(nextFilename, query) : importHref
 
   const handleResolved = (): void => {
     navigate(nextHref, { replace: true })

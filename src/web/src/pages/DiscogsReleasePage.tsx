@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
-import { Notice } from '../components/view'
+import { Notice } from '../components/view/Notice'
 import { Tracklist, VideoSection, RelatedLinks, useTrackWantList } from './discogs-shared'
 
 export default function DiscogsReleasePage(): React.JSX.Element {

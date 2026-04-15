@@ -13,11 +13,17 @@ import type {
 } from '../../../shared/api'
 import { api } from '../api/client'
 import { AudioCompareControls } from '../components/AudioCompareControls'
-import { ActionButton, LabeledInput, Notice, Pill, ViewSection } from '../components/view'
+import { ActionButton } from '../components/view/ActionButton'
+import { LabeledInput } from '../components/view/LabeledInput'
+import { Notice } from '../components/view/Notice'
+import { Overlay } from '../components/view/Overlay'
+import { Pill } from '../components/view/Pill'
+import { ViewSection } from '../components/view/ViewSection'
 import { localFileUrl } from '../context/PlayerContext'
 import { useAudioCompare } from '../hooks/useAudioCompare'
+import { getErrorMessage } from '../lib/error-utils'
 import { guessYear, summarizeMediaType, withVersion, type SearchDraft } from '../lib/importReview'
-import { fileBasename, formatCompactDuration, formatFileSize } from '../lib/music-file'
+import { fileBasename, formatBitrate, formatBits, formatCompactDuration, formatDb, formatFileSize, formatHz, formatPercent, formatSignedPercent } from '../lib/music-file'
 
 const STATUS_LABEL: Record<UpgradeCaseStatus, string> = {
   idle: 'Idle',
@@ -59,33 +65,7 @@ const COMPARISON_KEYS = new Set(['artist', 'title', 'year', 'len'])
 const ISSUE_KEYS = new Set(['noise', 'cutoff', 'rumble', 'hum', 'vinyl'])
 
 function formatError(error: unknown): string {
-  return error instanceof Error ? error.message : 'Unexpected upgrade error'
-}
-
-function formatBitrate(value: number | null | undefined): string {
-  return value ? `${value} kbps` : '—'
-}
-
-function formatDb(value: number | null | undefined): string {
-  return typeof value === 'number' ? value.toFixed(1) : '—'
-}
-
-function formatSignedPercent(value: number | null | undefined): string {
-  if (typeof value !== 'number' || !isFinite(value)) return '—'
-  const rounded = Math.round(value * 10) / 10
-  return `${rounded > 0 ? '+' : ''}${rounded}%`
-}
-
-function formatPercent(value: number | null): string {
-  return value === null ? '—' : `${Math.round(value)}%`
-}
-
-function formatHz(value: number | null): string {
-  return value === null ? '—' : value >= 1000 ? `${(value / 1000).toFixed(1)} kHz` : `${value} Hz`
-}
-
-function formatBits(value: number | null): string {
-  return !value ? '—' : `${value}-bit`
+  return getErrorMessage(error, 'Unexpected upgrade error')
 }
 
 function formatReferenceSource(upgradeCase: UpgradeCase): string {
@@ -271,35 +251,6 @@ function Table({
         </thead>
         <tbody>{children}</tbody>
       </table>
-    </div>
-  )
-}
-
-function Overlay({
-  title,
-  aside,
-  onClose,
-  children
-}: {
-  title: string
-  aside?: React.ReactNode
-  onClose: () => void
-  children: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70 p-4">
-      <div className="mx-auto w-full max-w-6xl rounded-xl border border-zinc-800 bg-zinc-950 p-3 shadow-2xl">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="text-[13px] font-semibold text-zinc-100">{title}</div>
-          <div className="flex flex-wrap gap-2">
-            {aside}
-            <ActionButton size="xs" onClick={onClose}>
-              Close
-            </ActionButton>
-          </div>
-        </div>
-        <div className="mt-3">{children}</div>
-      </div>
     </div>
   )
 }
