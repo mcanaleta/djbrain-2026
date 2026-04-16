@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useCallback, useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import type { CollectionItem, CollectionSyncStatus } from '../../../shared/api'
+import type { CollectionItem } from '../../../shared/api'
 import { api } from '../api/client'
 import { ActionButton } from '../components/view/ActionButton'
 import { DataTable, type DataTableColumn } from '../components/view/DataTable'
@@ -12,15 +12,10 @@ import { Notice } from '../components/view/Notice'
 import { QualityBadge } from '../components/view/QualityBadge'
 import { SourceIconLink } from '../components/view/SourceIconLink'
 import { ViewSection } from '../components/view/ViewSection'
+import { COLLECTION_LIST_QUERY_KEY, useCollectionStatusQuery } from '../hooks/useCollectionStatusQuery'
+import { useSettingsQuery } from '../hooks/useSettingsQuery'
 import { getErrorMessage } from '../lib/error-utils'
 import { deriveTrackSummaryFromFilename, formatCompactDuration, formatExtensionName, formatFileSize, formatQualityScore, joinPath } from '../lib/music-file'
-
-const EMPTY_STATUS: CollectionSyncStatus = {
-  isSyncing: false,
-  lastSyncedAt: null,
-  itemCount: 0,
-  lastError: null
-}
 
 const COLLECTION_VIEW_LIMIT = 100
 
@@ -106,7 +101,6 @@ function makeColumns(): DataTableColumn<CollectionRow>[] {
 
 export default function CollectionPage(): React.JSX.Element {
   const navigate = useNavigate()
-  const queryClient = useQueryClient()
   const [searchDraft, setSearchDraft] = useState('')
   const [submittedQuery, setSubmittedQuery] = useState('')
   const [actionError, setActionError] = useState<string | null>(null)
@@ -120,32 +114,17 @@ export default function CollectionPage(): React.JSX.Element {
 
   const columns = useMemo(() => makeColumns(), [])
 
-  const { data: settings } = useQuery({
-    queryKey: ['settings'],
-    queryFn: api.settings.get
-  })
-
-  const { data: status = EMPTY_STATUS, error: statusError } = useQuery({
-    queryKey: ['collection', 'status'],
-    queryFn: api.collection.getStatus
-  })
+  const { data: settings } = useSettingsQuery()
+  const { data: status, error: statusError } = useCollectionStatusQuery(COLLECTION_LIST_QUERY_KEY)
 
   const {
     data: listResult,
     error: listError,
     isPending: isLoading
   } = useQuery({
-    queryKey: ['collection', 'list', submittedQuery, COLLECTION_VIEW_LIMIT],
+    queryKey: [...COLLECTION_LIST_QUERY_KEY, submittedQuery, COLLECTION_VIEW_LIMIT],
     queryFn: () => api.collection.list(submittedQuery, COLLECTION_VIEW_LIMIT)
   })
-
-  useEffect(() => {
-    const unsubscribe = api.collection.onUpdated((nextStatus) => {
-      queryClient.setQueryData(['collection', 'status'], nextStatus)
-      void queryClient.invalidateQueries({ queryKey: ['collection', 'list'] })
-    })
-    return unsubscribe
-  }, [queryClient])
 
   const handleSyncNow = async (): Promise<void> => {
     setActionError(null)

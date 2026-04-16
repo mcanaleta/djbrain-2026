@@ -6,6 +6,7 @@ import { api } from '../api/client'
 import { EmptyState } from '../components/view/EmptyState'
 import { Notice } from '../components/view/Notice'
 import { ViewSection } from '../components/view/ViewSection'
+import { useSettingsQuery } from '../hooks/useSettingsQuery'
 import { getDiscogsRoute } from '../lib/online-search'
 
 function formatError(error: unknown): string {
@@ -67,10 +68,7 @@ export default function SearchOnlinePage(): React.JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams()
   const submittedQuery = searchParams.get('q') ?? ''
   const [inputValue, setInputValue] = useState(submittedQuery)
-  const { data: settings, error: settingsError, isPending: isLoadingSettings } = useQuery({
-    queryKey: ['settings'],
-    queryFn: api.settings.get
-  })
+  const { data: settings, error: settingsError, isPending: isLoadingSettings } = useSettingsQuery()
   const {
     data: results,
     error: searchError,

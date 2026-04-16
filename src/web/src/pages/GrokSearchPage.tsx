@@ -7,6 +7,7 @@ import { DataTable, type DataTableColumn } from '../components/view/DataTable'
 import { LabeledInput } from '../components/view/LabeledInput'
 import { Notice } from '../components/view/Notice'
 import { ViewSection } from '../components/view/ViewSection'
+import { useSettingsQuery } from '../hooks/useSettingsQuery'
 
 const GROK_COLUMNS: DataTableColumn<GrokTrackResult>[] = [
   {
@@ -46,10 +47,7 @@ export default function GrokSearchPage(): React.JSX.Element {
   const [query, setQuery] = useState('')
   const [submittedQuery, setSubmittedQuery] = useState('')
   const [actionError, setActionError] = useState<string | null>(null)
-  const { data: settings, error: settingsError, isPending: isLoadingSettings } = useQuery({
-    queryKey: ['settings'],
-    queryFn: api.settings.get
-  })
+  const { data: settings, error: settingsError, isPending: isLoadingSettings } = useSettingsQuery()
   const hasConfig = Boolean(settings?.grokApiKey.trim())
   const {
     data: results,

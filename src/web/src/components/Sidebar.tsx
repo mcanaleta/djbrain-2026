@@ -1,7 +1,15 @@
 import { NavLink } from 'react-router-dom'
 import * as Separator from '@radix-ui/react-separator'
-import { DoubleArrowLeftIcon, DoubleArrowRightIcon } from '@radix-ui/react-icons'
+import { DoubleArrowLeftIcon, DoubleArrowRightIcon, ReloadIcon } from '@radix-ui/react-icons'
+import { useState } from 'react'
 import { NAV_ITEMS } from '../app/nav'
+import { api } from '../api/client'
+import { useCollectionStatusQuery } from '../hooks/useCollectionStatusQuery'
+
+function formatError(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return 'Unexpected collection action error'
+}
 
 export default function Sidebar({
   collapsed,
@@ -10,6 +18,20 @@ export default function Sidebar({
   collapsed: boolean
   onToggle: () => void
 }): React.JSX.Element {
+  const [actionError, setActionError] = useState<string | null>(null)
+  const { data: status, error } = useCollectionStatusQuery()
+  const isSyncing = status?.isSyncing ?? false
+  const syncError = actionError ?? status?.lastError ?? (error ? formatError(error) : null)
+
+  const handleSyncNow = async (): Promise<void> => {
+    setActionError(null)
+    try {
+      await api.collection.syncNow()
+    } catch (error) {
+      setActionError(formatError(error))
+    }
+  }
+
   return (
     <aside className={`flex shrink-0 flex-col border-r border-zinc-800 bg-zinc-950/80 p-3 transition-all ${collapsed ? 'w-16' : 'w-60'}`}>
       <div className={`mb-4 flex items-center ${collapsed ? 'justify-center' : 'justify-between'}`}>
@@ -50,12 +72,21 @@ export default function Sidebar({
         })}
       </nav>
 
-      {!collapsed ? (
-        <>
-          <Separator.Root className="my-4 h-px w-full bg-zinc-800" />
-          <div className="text-xs text-zinc-500">Browser-first DJ manager with local demo data.</div>
-        </>
-      ) : null}
+      <Separator.Root className="my-4 h-px w-full bg-zinc-800" />
+      <button
+        type="button"
+        onClick={() => {
+          void handleSyncNow()
+        }}
+        disabled={isSyncing}
+        title={collapsed ? (isSyncing ? 'Syncing collection…' : 'Sync Collection') : undefined}
+        className={`inline-flex rounded-md border border-zinc-800 bg-zinc-900/40 text-zinc-300 hover:bg-zinc-900/70 hover:text-zinc-100 disabled:opacity-50 ${collapsed ? 'h-9 w-9 items-center justify-center self-center' : 'items-center gap-2 px-3 py-2 text-sm'}`}
+      >
+        <ReloadIcon className="h-4 w-4 shrink-0" />
+        {!collapsed ? <span>{isSyncing ? 'Syncing collection…' : 'Sync Collection'}</span> : null}
+      </button>
+      {!collapsed && syncError ? <div className="mt-2 text-xs text-red-300">{syncError}</div> : null}
+      {!collapsed ? <div className="mt-3 text-xs text-zinc-500">Browser-first DJ manager with local demo data.</div> : null}
     </aside>
   )
 }
