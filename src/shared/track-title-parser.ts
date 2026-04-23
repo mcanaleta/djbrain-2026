@@ -6,7 +6,7 @@ export type ParsedTrackTitle = {
 const VERSION_HINT_RE =
   /\b(?:mix|edit|version|remix|rmx|dub|vocal|instrumental|radio|club|extended|original|rework|bootleg|vip|live|demo|take|cut|part|pt\.?|short|long|anthem|mixshow|remaster(?:ed)?|mono|stereo|acapella|a cappella)\b/i
 
-function looksLikeVersion(value: string): boolean {
+export function looksLikeVersion(value: string): boolean {
   return VERSION_HINT_RE.test(value.trim())
 }
 

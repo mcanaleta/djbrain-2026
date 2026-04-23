@@ -3,15 +3,18 @@ import type { OnlineSearchService } from './online-search-service.ts'
 import type { DiscogsRelease, DiscogsMaster, DiscogsEntity } from '../shared/discogs.ts'
 import type { DiscogsTrackMatch } from '../shared/discogs-match.ts'
 import { DISCOGS_CONFIDENT_THRESHOLD } from '../shared/discogs-match.ts'
-import { parseTrackTitle } from '../shared/track-title-parser.ts'
+import { looksLikeVersion, parseTrackTitle } from '../shared/track-title-parser.ts'
 import { parseDurationString } from '../shared/track-matcher.ts'
+import type { OnlineSearchItem } from '../shared/online-search.ts'
 
 // ─── Normalisation ────────────────────────────────────────────────────────────
 
 function norm(s: string): string {
   return s
+    .normalize('NFKD')
+    .replace(/\p{M}+/gu, '')
     .toLowerCase()
-    .replace(/[^a-z0-9]/g, ' ')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim()
 }
@@ -39,6 +42,35 @@ function containsScore(haystack: string, needle: string): number {
   return 0
 }
 
+function editDistance(a: string, b: string): number {
+  if (a === b) return 0
+  const dp = Array.from({ length: b.length + 1 }, (_, i) => i)
+  for (let i = 1; i <= a.length; i += 1) {
+    let prev = dp[0]
+    dp[0] = i
+    for (let j = 1; j <= b.length; j += 1) {
+      const next = dp[j]
+      dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1))
+      prev = next
+    }
+  }
+  return dp[b.length]
+}
+
+function splitTargetTitleAndVersion(targetTitle: string, targetVersion: string | null): { title: string; version: string | null } {
+  if (targetVersion) return { title: targetTitle, version: targetVersion }
+  const parsed = parseTrackTitle(targetTitle)
+  if (parsed.version) return parsed
+  const words = targetTitle.trim().split(/\s+/).filter(Boolean)
+  for (let size = Math.min(3, words.length - 1); size >= 1; size -= 1) {
+    const version = words.slice(-size).join(' ')
+    if (!looksLikeVersion(version)) continue
+    const title = words.slice(0, -size).join(' ').trim()
+    if (title) return { title, version }
+  }
+  return { title: targetTitle, version: null }
+}
+
 // ─── Per-track scoring ────────────────────────────────────────────────────────
 
 function scoreTrackTitle(
@@ -46,9 +78,10 @@ function scoreTrackTitle(
   targetTitle: string,
   targetVersion: string | null
 ): number {
+  const target = splitTargetTitleAndVersion(targetTitle, targetVersion)
   const parsedTrack = parseTrackTitle(trackTitle)
   const normTrack = norm((parsedTrack.title || trackTitle).replace(/\s*\[[^\]]+\]/g, '').trim())
-  const normTarget = norm(targetTitle)
+  const normTarget = norm(target.title)
 
   let score = 0
 
@@ -56,16 +89,21 @@ function scoreTrackTitle(
     score += 60
   } else {
     score += Math.round(containsScore(normTrack, normTarget) * 50)
+    const distance = editDistance(normTrack, normTarget)
+    if (distance <= 1) score += 44
+    else if (distance === 2) score += 30
   }
 
-  if (targetVersion) {
-    const normVersion = norm(targetVersion)
+  if (target.version) {
+    const normVersion = norm(target.version)
     const normTrackVersion = norm(parsedTrack.version ?? '')
     if (normTrackVersion === normVersion) score += 20
     else if (normTrackVersion && (normTrackVersion.includes(normVersion) || normVersion.includes(normTrackVersion)))
       score += 12
     else if (trackTitle.toLowerCase().includes(normVersion)) score += 15
-    else score += Math.round(recall(tokens(targetVersion), tokens(parsedTrack.version ?? '')) * 18)
+    else score += Math.round(recall(tokens(target.version), tokens(parsedTrack.version ?? '')) * 18)
+  } else if (norm(parsedTrack.version ?? '')) {
+    score -= 18
   }
 
   return score
@@ -152,12 +190,64 @@ export class DiscogsMatchService {
       console.error('[discogs-match] search failed:', err)
       return { match: null, candidates: [] }
     }
+    if (results.length === 0 && artist.trim() && artist.trim().split(/\s+/).length === 1) {
+      const titleTail = title.trim().split(/\s+/).slice(1).join(' ')
+      if (titleTail) {
+        const fallbackQuery = [artist, titleTail, version].filter(Boolean).join(' ')
+        console.log('[discogs-match] fallback search:', JSON.stringify(fallbackQuery))
+        try {
+          results = await onlineSearch.searchDiscogsReleases(settings, fallbackQuery)
+        } catch (err) {
+          console.error('[discogs-match] fallback search failed:', err)
+        }
+      }
+    }
 
     console.log('[discogs-match] got', results.length, 'results')
 
+    return this.scoreResults(results.map((result) => ({ id: result.id, type: result.type })), settings, artist, title, version, onlineSearch)
+  }
+
+  async findTrackViaWebSearch(
+    settings: AppSettings,
+    artist: string,
+    title: string,
+    version: string | null,
+    onlineSearch: OnlineSearchService
+  ): Promise<DiscogsMatchResult> {
+    const query = [artist, title, version, 'discogs'].filter(Boolean).join(' ')
+    console.log('[discogs-match] web search:', JSON.stringify(query))
+    let items: OnlineSearchItem[] = []
+    try {
+      items = (await onlineSearch.search(settings, query, 'online')).items
+    } catch (err) {
+      console.error('[discogs-match] web search failed:', err)
+      return { match: null, candidates: [] }
+    }
+    return this.scoreResults(
+      items
+        .filter((item) => item.source === 'discogs')
+        .map((item) => ({ id: this.idFromLink(item.link), type: item.sourceType ?? 'release' })),
+      settings,
+      artist,
+      title,
+      version,
+      onlineSearch
+    )
+  }
+
+  private async scoreResults(
+    results: Array<{ id?: number | null; type?: unknown }>,
+    settings: AppSettings,
+    artist: string,
+    title: string,
+    version: string | null,
+    onlineSearch: OnlineSearchService
+  ): Promise<DiscogsMatchResult> {
+
     const candidates: DiscogsTrackMatch[] = []
 
-    for (const result of results.slice(0, 5)) {
+    for (const result of results.slice(0, 10)) {
       const type = this.normalizeType(result.type)
       if (type !== 'release') continue
       if (!result.id) continue
@@ -205,6 +295,7 @@ export class DiscogsMatchService {
         year: entity.year ?? null,
         label: extractLabel(entity),
         catalogNumber: extractCatalogNumber(entity),
+        country: entity.type === 'release' ? entity.country ?? null : null,
         durationSeconds: bestTrack.duration ? parseDurationString(bestTrack.duration) : null,
         score: totalScore
       })
@@ -218,6 +309,11 @@ export class DiscogsMatchService {
         : null
 
     return { match, candidates }
+  }
+
+  private idFromLink(link: string | null | undefined): number | null {
+    const match = link?.match(/discogs\.com\/(?:[^/]+\/)?(?:release|master)\/(\d+)/i)
+    return match?.[1] ? Number(match[1]) : null
   }
 
   private normalizeType(value: unknown): 'release' | 'master' | null {

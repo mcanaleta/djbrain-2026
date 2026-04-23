@@ -1,9 +1,11 @@
 import type {
+  DiscogsReleaseDownloadResult,
   FileIdentificationState,
   ImportCommitInput,
   ImportComparison,
   ImportFileResult,
   ImportReview,
+  RecordingCanonical,
   RecordingDetails,
   RecordingSummary,
   DJBrainApi,
@@ -226,6 +228,7 @@ export const api: DJBrainApi = {
         `/api/collection?query=${encodeURIComponent(query ?? '')}${typeof limit === 'number' ? `&limit=${encodeURIComponent(String(limit))}` : ''}`
       ),
     get: (filename: string) => request(`/api/collection/item?filename=${encodeURIComponent(filename)}`),
+    getById: (id: number) => request(`/api/collection/item/${encodeURIComponent(String(id))}`),
     listDownloads: (query?: string) =>
       request(`/api/collection/downloads?query=${encodeURIComponent(query ?? '')}`),
     reanalyze: (filename: string) =>
@@ -234,6 +237,24 @@ export const api: DJBrainApi = {
         headers: JSON_HEADERS,
         body: JSON.stringify({ filename })
       }),
+    transcodeToMp3320: async (recordingId: number, filename: string) => {
+      await request<void>('/api/collection/transcode-mp3-320', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ recordingId, filename })
+      })
+      invalidateCollectionSnapshot()
+      void syncCollectionSnapshot()
+    },
+    replaceRecordFile: async (recordingId: number, sourceFilename: string, targetFilename: string) => {
+      await request<void>('/api/collection/replace-record-file', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ recordingId, sourceFilename, targetFilename })
+      })
+      invalidateCollectionSnapshot()
+      void syncCollectionSnapshot()
+    },
     async syncNow() {
       const status = await request<CollectionSyncStatus>('/api/collection/sync', { method: 'POST' })
       emitCollectionStatus(status)
@@ -276,6 +297,35 @@ export const api: DJBrainApi = {
         headers: JSON_HEADERS,
         body: JSON.stringify({ filenames, force })
       }),
+    async identifyNow(filename: string, search?: Partial<RecordingCanonical> | null) {
+      const result = await request<FileIdentificationState | null>('/api/collection/identify/now', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ filename, search })
+      })
+      invalidateCollectionSnapshot()
+      void syncCollectionSnapshot()
+      return result
+    },
+    async identifyBetter(filename: string, search?: Partial<RecordingCanonical> | null) {
+      const result = await request<FileIdentificationState | null>('/api/collection/identify/better', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ filename, search })
+      })
+      invalidateCollectionSnapshot()
+      void syncCollectionSnapshot()
+      return result
+    },
+    async downloadDiscogsRelease(releaseId: number) {
+      const result = await request<DiscogsReleaseDownloadResult>(
+        `/api/collection/discogs/release/${encodeURIComponent(String(releaseId))}/download`,
+        { method: 'POST' }
+      )
+      invalidateCollectionSnapshot()
+      void syncCollectionSnapshot()
+      return result
+    },
     async reviewIdentification(input) {
       const result = await request<FileIdentificationState | null>('/api/collection/identify/review', {
         method: 'POST',
@@ -289,6 +339,16 @@ export const api: DJBrainApi = {
     listRecordings: (query?: string) =>
       request<RecordingSummary[]>(`/api/collection/recordings?query=${encodeURIComponent(query ?? '')}`),
     getRecording: (id: number) => request<RecordingDetails | null>(`/api/collection/recordings/${id}`),
+    async updateRecording(recordingId: number, canonical: Partial<RecordingCanonical>, sourceClaimId?: number | null) {
+      const result = await request<RecordingDetails | null>(`/api/collection/recordings/${encodeURIComponent(String(recordingId))}/update`, {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ canonical, sourceClaimId })
+      })
+      invalidateCollectionSnapshot()
+      void syncCollectionSnapshot()
+      return result
+    },
     async assignRecording(input) {
       const result = await request<RecordingDetails | null>('/api/collection/recordings/assign', {
         method: 'POST',

@@ -1,30 +1,34 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { ImportReviewDialog } from '../components/ImportReviewDialog'
 import { buildImportHref, buildImportReviewHref } from '../lib/urls'
 
 export default function ImportReviewPage(): React.JSX.Element {
   const navigate = useNavigate()
+  const { itemId } = useParams<{ itemId: string }>()
+  const id = Number(itemId)
   const [searchParams] = useSearchParams()
-  const filename = searchParams.get('filename')
   const query = searchParams.get('query') ?? ''
+  const { data: item } = useQuery({
+    queryKey: ['collection', 'item', id],
+    queryFn: () => api.collection.getById(id),
+    enabled: Number.isInteger(id) && id > 0
+  })
   const { data: listResult } = useQuery({
     queryKey: ['collection', 'downloads', query],
     queryFn: () => api.collection.listDownloads(query)
   })
   const items = listResult?.items ?? []
-
   const currentIndex = useMemo(
-    () => (filename ? items.findIndex((item) => item.filename === filename) : -1),
-    [filename, items]
+    () => items.findIndex((entry) => entry.id === id),
+    [id, items]
   )
   const currentItem = currentIndex >= 0 ? items[currentIndex] ?? null : null
-  const nextFilename = currentIndex >= 0 ? items[currentIndex + 1]?.filename ?? null : null
-
+  const nextItemId = currentIndex >= 0 ? items[currentIndex + 1]?.id ?? null : null
   const importHref = buildImportHref(query)
-  const nextHref = nextFilename ? buildImportReviewHref(nextFilename, query) : importHref
+  const nextHref = nextItemId != null ? buildImportReviewHref(nextItemId, query) : importHref
 
   const handleResolved = (): void => {
     navigate(nextHref, { replace: true })
@@ -33,7 +37,7 @@ export default function ImportReviewPage(): React.JSX.Element {
   return (
     <div>
       <ImportReviewDialog
-        filename={filename}
+        filename={item?.filename ?? null}
         currentItem={currentItem}
         queuePosition={currentIndex >= 0 ? currentIndex + 1 : null}
         queueTotal={items.length || null}

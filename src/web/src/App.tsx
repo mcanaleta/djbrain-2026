@@ -17,11 +17,15 @@ import DiscogsLabelPage from './pages/DiscogsLabelPage'
 import DropboxPage from './pages/DropboxPage'
 import GrokSearchPage from './pages/GrokSearchPage'
 import ImportPage from './pages/ImportPage'
+import ImportRecordPage from './pages/ImportRecordPage'
 import ImportReviewPage from './pages/ImportReviewPage'
 import IdentifyPage from './pages/IdentifyPage'
+import IdentifyItemPage from './pages/IdentifyItemPage'
 import SearchOnlinePage from './pages/SearchOnlinePage'
 import SoulseekPage from './pages/SoulseekPage'
 import SpotifyPage from './pages/SpotifyPage'
+import RecordingPage from './pages/RecordingPage'
+import RecordingsPage from './pages/RecordingsPage'
 import UpgradesPage from './pages/UpgradesPage'
 import UpgradeCasePage from './pages/UpgradeCasePage'
 
@@ -42,8 +46,12 @@ const router = createBrowserRouter(
       <Route path="/soulseek" element={<SoulseekPage />} />
       <Route path="/spotify" element={<SpotifyPage />} />
       <Route path="/import" element={<ImportPage />} />
-      <Route path="/import/review" element={<ImportReviewPage />} />
+      <Route path="/import/review/:itemId" element={<ImportReviewPage />} />
+      <Route path="/import/:recordingId" element={<ImportRecordPage />} />
       <Route path="/identify" element={<IdentifyPage />} />
+      <Route path="/identify/:itemId" element={<IdentifyItemPage />} />
+      <Route path="/recordings" element={<RecordingsPage />} />
+      <Route path="/recordings/:recordingId" element={<RecordingPage />} />
       <Route path="/upgrades" element={<UpgradesPage />} />
       <Route path="/upgrades/:upgradeId" element={<UpgradeCasePage />} />
       <Route path="/dropbox" element={<DropboxPage />} />

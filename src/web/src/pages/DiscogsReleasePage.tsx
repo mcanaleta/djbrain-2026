@@ -2,7 +2,10 @@ import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
+import { ActionButton } from '../components/view/ActionButton'
 import { Notice } from '../components/view/Notice'
+import { DiscogsReleaseDownloadResults } from '../features/discogs/DiscogsReleaseDownloadResults'
+import { useDiscogsReleaseDownload } from '../features/discogs/useDiscogsReleaseDownload'
 import { Tracklist, VideoSection, RelatedLinks, useTrackWantList } from './discogs-shared'
 
 export default function DiscogsReleasePage(): React.JSX.Element {
@@ -30,17 +33,24 @@ export default function DiscogsReleasePage(): React.JSX.Element {
   const [wantError, setWantError] = useState<string | null>(null)
   const releaseSource = release ? { ...release, discogsEntityId: release.id, discogsEntityType: 'release' } : null
   const { addedTrackIndices, handleAddToWantList } = useTrackWantList(releaseSource, setWantError)
-  const errorMsg = wantError ?? (error instanceof Error ? error.message : null)
+  const releaseDownload = useDiscogsReleaseDownload(Number.isInteger(id) && id > 0 ? id : null)
+  const errorMsg = wantError ?? releaseDownload.errorMessage ?? (error instanceof Error ? error.message : null)
 
   return (
     <div className="space-y-4">
       {errorMsg ? <Notice tone="error" className="text-sm">{errorMsg}</Notice> : null}
+      {releaseDownload.actionMessage ? <Notice className="text-sm">{releaseDownload.actionMessage}</Notice> : null}
       {isLoading ? <Notice className="text-sm">Loading…</Notice> : null}
       {release ? (
         <>
           <div className="flex items-start justify-between gap-2">
             <div className="text-base font-semibold text-zinc-100">{release.artists.join(', ')} – {release.title}</div>
-            <a href={release.externalUrl} target="_blank" rel="noreferrer" className="shrink-0 text-xs text-zinc-500 hover:text-zinc-300">↗ Discogs</a>
+            <div className="flex items-center gap-2">
+              <ActionButton onClick={() => void releaseDownload.run()} disabled={releaseDownload.isRunning}>
+                {releaseDownload.isRunning ? 'Downloading…' : 'Download All & Verify'}
+              </ActionButton>
+              <a href={release.externalUrl} target="_blank" rel="noreferrer" className="shrink-0 text-xs text-zinc-500 hover:text-zinc-300">↗ Discogs</a>
+            </div>
           </div>
           <div className="flex gap-4">
             {release.heroImageUrl ? (
@@ -57,6 +67,7 @@ export default function DiscogsReleasePage(): React.JSX.Element {
               </tbody>
             </table>
           </div>
+          {releaseDownload.result ? <DiscogsReleaseDownloadResults result={releaseDownload.result} /> : null}
           <Tracklist
             tracklist={release.tracklist}
             artists={release.artists}

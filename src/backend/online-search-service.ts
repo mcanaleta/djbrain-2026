@@ -59,6 +59,8 @@ const SERPER_SEARCH_ENDPOINT = 'https://google.serper.dev/search'
 const DISCOGS_SEARCH_ENDPOINT = 'https://api.discogs.com/database/search'
 const DISCOGS_WEB_BASE_URL = 'https://www.discogs.com'
 const DISCOGS_USER_AGENT = 'DJBrain/1.0'
+const DISCOGS_MIN_INTERVAL_MS = 1100
+const DISCOGS_MAX_RETRIES = 4
 
 const DISCOGS_ROUTE_BY_TYPE: Record<string, string> = {
   release: 'release',
@@ -100,6 +102,29 @@ function normalizePositiveInteger(value: unknown): number | undefined {
     return Number(value.trim())
   }
   return undefined
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+let nextDiscogsRequestAt = 0
+
+async function requestDiscogs(url: string, userToken: string, attempt: number = 0): Promise<Response> {
+  const waitMs = Math.max(0, nextDiscogsRequestAt - Date.now())
+  if (waitMs > 0) await delay(waitMs)
+  nextDiscogsRequestAt = Date.now() + DISCOGS_MIN_INTERVAL_MS
+  const response = await fetch(url, {
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Discogs token=${userToken}`,
+      'User-Agent': DISCOGS_USER_AGENT
+    }
+  })
+  if (response.status !== 429 || attempt >= DISCOGS_MAX_RETRIES) return response
+  const retryAfter = Number(response.headers.get('retry-after') ?? '')
+  await delay(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : DISCOGS_MIN_INTERVAL_MS * (attempt + 2))
+  return requestDiscogs(url, userToken, attempt + 1)
 }
 
 function normalizeStringArray(value: unknown): string[] {
@@ -672,13 +697,7 @@ async function requestDiscogsResource(
   userToken: string,
   path: string
 ): Promise<JsonObject> {
-  const response = await fetch(`${DISCOGS_WEB_BASE_URL.replace('www.', 'api.')}/${path}`, {
-    headers: {
-      Accept: 'application/json',
-      Authorization: `Discogs token=${userToken}`,
-      'User-Agent': DISCOGS_USER_AGENT
-    }
-  })
+  const response = await requestDiscogs(`${DISCOGS_WEB_BASE_URL.replace('www.', 'api.')}/${path}`, userToken)
 
   let payload: unknown = null
   try {
@@ -860,13 +879,7 @@ async function requestDiscogsResults(
   url.searchParams.set('q', query)
   url.searchParams.set('per_page', String(MAX_RESULTS))
 
-  const response = await fetch(url, {
-    headers: {
-      Accept: 'application/json',
-      Authorization: `Discogs token=${userToken}`,
-      'User-Agent': DISCOGS_USER_AGENT
-    }
-  })
+  const response = await requestDiscogs(url.toString(), userToken)
 
   let payload: unknown = null
   try {

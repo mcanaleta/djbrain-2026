@@ -9,6 +9,7 @@ export type AudioTags = {
   title: string
   album: string | null
   year: string | null
+  comments: string | null
   label: string | null
   catalogNumber: string | null
   trackPosition: string | null
@@ -25,6 +26,15 @@ type ProbeData = {
   format?: {
     tags?: Record<string, string | undefined>
   }
+}
+
+function readComment(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim()) return value.trim()
+  if (value && typeof value === 'object' && 'text' in value) {
+    const text = (value as { text?: unknown }).text
+    return typeof text === 'string' && text.trim() ? text.trim() : null
+  }
+  return null
 }
 
 // FLAC uses Vorbis comments — not handled by node-id3.
@@ -70,6 +80,7 @@ export class TaggerService {
       title: raw.title?.trim() || '',
       album: raw.album?.trim() || null,
       year: raw.year?.trim() || null,
+      comments: readComment(raw.comment),
       label: raw.publisher?.trim() || null,
       catalogNumber: findUserValue('DISCOGS_CATALOG_NUMBER'),
       trackPosition: raw.trackNumber?.trim() || null,
@@ -99,6 +110,7 @@ export class TaggerService {
         title: findValue('title') ?? '',
         album: findValue('album'),
         year: findValue('year', 'date'),
+        comments: findValue('comment', 'comments', 'description'),
         label: findValue('publisher', 'label'),
         catalogNumber: findValue('DISCOGS_CATALOG_NUMBER'),
         trackPosition: findValue('track', 'tracknumber'),
@@ -153,6 +165,7 @@ export class TaggerService {
       artist: tags.artist,
       ...(tags.album ? { album: tags.album } : {}),
       ...(tags.year ? { year: tags.year } : {}),
+      ...(tags.comments ? { comment: { language: 'eng', text: tags.comments } } : {}),
       ...(tags.label ? { publisher: tags.label } : {}),
       ...(tags.trackPosition ? { trackNumber: tags.trackPosition } : {}),
       ...(userDefinedText.length > 0 ? { userDefinedText } : {})

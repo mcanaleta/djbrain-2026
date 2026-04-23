@@ -51,6 +51,7 @@ const staticDirArg = readArgValue('--static')
 const staticDir = staticDirArg ? resolve(process.cwd(), staticDirArg) : null
 const dataDirArg = readArgValue('--data-dir') ?? process.env['DJBRAIN_DATA_DIR'] ?? null
 const automationEnabled = readBooleanEnv(process.env['DJBRAIN_ENABLE_AUTOMATION'], !process.execArgv.includes('--watch'))
+const backgroundSyncEnabled = readBooleanEnv(process.env['DJBRAIN_ENABLE_BACKGROUND_SYNC'], automationEnabled)
 
 const onlineSearchService = new OnlineSearchService()
 const youtubeApiService = new YouTubeApiService()
@@ -86,12 +87,16 @@ const collectionActions = createCollectionActions({
   resolveMusicRelativePath,
   fileAnalysisService,
   importReviewService,
-  importProcessingQueue
+  importProcessingQueue,
+  slskdService,
+  importService,
+  onlineSearchService
 })
 const wantListPipelines = createWantListPipelines({
   currentSettings,
   requireCollectionService,
   resolveMusicRelativePath,
+  fileAnalysisService,
   normalizeSearchText,
   slskdService,
   importService
@@ -425,7 +430,7 @@ function applyTagOverrides(match: DiscogsTrackMatch, tags: ImportTagPreview | nu
   }
 }
 
-const { buildImportReview, readCollectionStatus, showInFolder, openInSystemPlayer } = collectionActions
+const { buildImportReview, readCollectionStatus, downloadDiscogsRelease, showInFolder, openInSystemPlayer } = collectionActions
 const { runSearchPipeline, runImportPipeline, startDownloadPipeline } = wantListPipelines
 const {
   listCases,
@@ -459,10 +464,12 @@ export function createApp(): express.Express {
 
   registerCollectionRoutes(app, {
     requireCollectionService,
+    requireRecordingIdentityService,
     automationEnabled,
     currentSettings,
     readCollectionStatus: async () => ({ ...(await readCollectionStatus()), automationEnabled }),
     buildImportReview,
+    downloadDiscogsRelease,
     fileAnalysisService,
     importService,
     syncImportReviewQueue: async () => {
@@ -471,6 +478,7 @@ export function createApp(): express.Express {
     syncIdentificationQueue: async () => {
       await identificationBackgroundService?.syncQueue()
     },
+    taggerService,
     resolveMusicRelativePath,
     normalizeFilename,
     getAudioDuration,
@@ -555,6 +563,8 @@ export async function start(): Promise<void> {
 
   collectionService = new CollectionService({
     connectionString: process.env['DJBRAIN_POSTGRES_URL']?.trim() || '',
+    taggerService,
+    enableBackgroundSync: backgroundSyncEnabled,
     onImportQueueChanged: automationEnabled
       ? () => {
         void importReviewBackgroundService?.syncQueue()
@@ -604,7 +614,7 @@ export async function start(): Promise<void> {
     importReviewBackgroundService.start()
     identificationBackgroundService.start()
   }
-  void collectionService.syncNow().then(async () => {
+  if (backgroundSyncEnabled) void collectionService.syncNow().then(async () => {
     if (!automationEnabled) return
     await Promise.all([
       importReviewBackgroundService?.syncQueue(),
@@ -619,6 +629,7 @@ export async function start(): Promise<void> {
     )
     console.log(`[djbrain-server] using data dir ${appDataDir}`)
     console.log(`[djbrain-server] background automation ${automationEnabled ? 'enabled' : 'disabled'}`)
+    console.log(`[djbrain-server] background sync ${backgroundSyncEnabled ? 'enabled' : 'disabled'}`)
   })
 
   const shutdown = (): void => {
@@ -638,4 +649,11 @@ function requireCollectionService(): CollectionService {
     throw new Error('Collection service not initialized')
   }
   return collectionService
+}
+
+function requireRecordingIdentityService(): RecordingIdentityService {
+  if (!recordingIdentityService) {
+    throw new Error('Recording identity service not initialized')
+  }
+  return recordingIdentityService
 }

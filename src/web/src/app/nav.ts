@@ -19,6 +19,7 @@ export type NavItem = {
 
 export const NAV_ITEMS: NavItem[] = [
   { key: 'collection', label: 'Collection', path: '/collection', icon: RowsIcon },
+  { key: 'recordings', label: 'Recordings', path: '/recordings', icon: RowsIcon },
   { key: 'upgrades', label: 'Upgrades', path: '/upgrades', icon: ArchiveIcon },
   { key: 'wantlist', label: 'Want List', path: '/wantlist', icon: BookmarkIcon },
   {
@@ -51,16 +52,28 @@ export function resolveNavTitle(pathname: string): string {
     return 'Wanted Item'
   }
 
-  if (pathname === '/import/review') {
+  if (/^\/import\/review\/\d+$/u.test(pathname)) {
     return 'Import Review'
+  }
+
+  if (/^\/import\/\d+$/u.test(pathname)) {
+    return 'Import Record'
   }
 
   if (pathname === '/identify') {
     return 'Identify'
   }
 
+  if (/^\/identify\/.+$/u.test(pathname)) {
+    return 'Identify Review'
+  }
+
   if (/^\/upgrades\/\d+$/u.test(pathname)) {
     return 'Upgrade'
+  }
+
+  if (/^\/recordings\/\d+$/u.test(pathname)) {
+    return 'Recording'
   }
 
   if (pathname === '/collection/item') {

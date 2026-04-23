@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { copyFile, mkdir, stat, unlink } from 'node:fs/promises'
-import { basename, dirname, extname, join, relative } from 'node:path'
+import { basename, dirname, extname, join } from 'node:path'
 import { promisify } from 'node:util'
 import type { CollectionService, WantListItem } from '../backend/collection-service.ts'
 import type { DiscogsMatchService } from '../backend/discogs-match-service.ts'
@@ -19,14 +19,16 @@ import {
 } from '../shared/analysis-version.ts'
 import { parseImportFilename } from '../shared/import-filename.ts'
 import type {
-  SlskdCandidate,
+  DiscogsReleaseDownloadResult,
   UpgradeCandidate,
   UpgradeCase,
-  UpgradeCaseStatus,
   UpgradeLocalCandidate,
   UpgradeReferenceSource
 } from '../shared/api.ts'
 import { HttpError } from './http.ts'
+import { downloadDiscogsReleaseWorkflow } from './workflow-release-download.ts'
+import { buildUpgradeCandidate, compareUpgradeCandidates, getDownloadFailureStatus, toMusicRelativePath, waitForResolvedLocalPath } from './workflow-download-utils.ts'
+import { continueUpgradeDownloadPipeline } from './workflow-upgrade-download.ts'
 
 const execFileAsync = promisify(execFile)
 
@@ -40,9 +42,13 @@ type CollectionActionDeps = CommonDeps & {
   fileAnalysisService: FileAnalysisService
   importReviewService: ImportReviewService
   importProcessingQueue: ImportProcessingQueue
+  slskdService: SlskdService
+  importService: ImportService
+  onlineSearchService: OnlineSearchService
 }
 
 type WantListPipelineDeps = CommonDeps & {
+  fileAnalysisService: FileAnalysisService
   normalizeSearchText: (value: string | null | undefined) => string
   slskdService: SlskdService
   importService: ImportService
@@ -58,8 +64,6 @@ type UpgradePipelineDeps = CommonDeps & {
   onlineSearchService: OnlineSearchService
 }
 
-const UPGRADE_DURATION_TOLERANCE_PERCENT = 15
-
 export function createCollectionActions(deps: CollectionActionDeps) {
   const {
     currentSettings,
@@ -67,7 +71,10 @@ export function createCollectionActions(deps: CollectionActionDeps) {
     resolveMusicRelativePath,
     fileAnalysisService,
     importReviewService,
-    importProcessingQueue
+    importProcessingQueue,
+    slskdService,
+    importService,
+    onlineSearchService
   } = deps
 
   return {
@@ -125,6 +132,18 @@ export function createCollectionActions(deps: CollectionActionDeps) {
       }
     },
 
+    async downloadDiscogsRelease(releaseId: number): Promise<DiscogsReleaseDownloadResult> {
+      return downloadDiscogsReleaseWorkflow({
+        service: requireCollectionService(),
+        settings: currentSettings(),
+        releaseId,
+        slskdService,
+        importService,
+        onlineSearchService,
+        fileAnalysisService
+      })
+    },
+
     async showInFolder(filePath: string): Promise<void> {
       if (process.platform === 'darwin') {
         await execFileAsync('open', ['-R', filePath])
@@ -155,6 +174,7 @@ export function createWantListPipelines(deps: WantListPipelineDeps) {
   const {
     currentSettings,
     requireCollectionService,
+    fileAnalysisService,
     normalizeSearchText,
     slskdService,
     importService
@@ -301,8 +321,11 @@ export function createWantListPipelines(deps: WantListPipelineDeps) {
 
       await service.wantListUpdatePipeline(itemId, { pipelineStatus: 'downloaded' })
 
-      const localPath = await importService.resolveLocalPath(settings, filename)
+      const localPath = await waitForResolvedLocalPath(settings, importService, filename)
       if (localPath) {
+        const localFilename = toMusicRelativePath(settings, localPath)
+        await service.syncNow()
+        await fileAnalysisService.get(localFilename, localPath).catch(() => null)
         void runImportPipeline(itemId, localPath)
       }
     } catch (error) {
@@ -361,10 +384,6 @@ function findAvailableArchivePath(basePath: string): Promise<string> {
   })()
 }
 
-function toMusicRelativePath(settings: AppSettings, absolutePath: string): string {
-  return normalizeFilename(relative(settings.musicFolderPath, absolutePath))
-}
-
 function buildReplacementRelativePath(collectionFilename: string, downloadFilename: string): string {
   const normalizedCollection = normalizeFilename(collectionFilename)
   const normalizedDownload = normalizeFilename(downloadFilename)
@@ -418,77 +437,18 @@ async function resolveUpgradeReference(
   }
 }
 
-function buildUpgradeCandidate(
-  candidate: SlskdCandidate,
-  referenceDurationSeconds: number | null
-): UpgradeCandidate {
-  const durationSeconds = candidate.durationSeconds ?? null
-  const durationDeltaSeconds =
-    durationSeconds != null && referenceDurationSeconds != null
-      ? durationSeconds - referenceDurationSeconds
-      : null
-  const durationDeltaPercent =
-    durationDeltaSeconds != null && referenceDurationSeconds && referenceDurationSeconds > 0
-      ? (durationDeltaSeconds / referenceDurationSeconds) * 100
-      : null
-
-  return {
-    ...candidate,
-    durationSeconds,
-    durationDeltaSeconds,
-    durationDeltaPercent,
-    speedClass:
-      durationDeltaPercent == null
-        ? 'unknown'
-        : Math.abs(durationDeltaPercent) <= UPGRADE_DURATION_TOLERANCE_PERCENT
-          ? 'same_track_likely'
-          : 'different_edit_likely'
-  }
-}
-
-function compareUpgradeCandidates(left: UpgradeCandidate, right: UpgradeCandidate): number {
-  const leftBand = left.speedClass === 'same_track_likely' ? 0 : left.speedClass === 'unknown' ? 1 : 2
-  const rightBand = right.speedClass === 'same_track_likely' ? 0 : right.speedClass === 'unknown' ? 1 : 2
-  if (leftBand !== rightBand) {
-    return leftBand - rightBand
-  }
-
-  const leftSign = left.durationDeltaPercent == null ? 2 : left.durationDeltaPercent >= 0 ? 0 : 1
-  const rightSign = right.durationDeltaPercent == null ? 2 : right.durationDeltaPercent >= 0 ? 0 : 1
-  if (leftSign !== rightSign) {
-    return leftSign - rightSign
-  }
-
-  const leftDelta = left.durationDeltaPercent == null ? Number.POSITIVE_INFINITY : Math.abs(left.durationDeltaPercent)
-  const rightDelta = right.durationDeltaPercent == null ? Number.POSITIVE_INFINITY : Math.abs(right.durationDeltaPercent)
-  if (leftDelta !== rightDelta) {
-    return leftDelta - rightDelta
-  }
-
-  const leftQuality = scoreUpgradeCandidateQuality(left)
-  const rightQuality = scoreUpgradeCandidateQuality(right)
-  if (leftQuality !== rightQuality) {
-    return rightQuality - leftQuality
-  }
-
-  if (left.isLocked !== right.isLocked) {
-    return left.isLocked ? 1 : -1
-  }
-
-  if ((left.queueLength ?? 9999) !== (right.queueLength ?? 9999)) {
-    return (left.queueLength ?? 9999) - (right.queueLength ?? 9999)
-  }
-
-  if ((right.durationSeconds ?? 0) !== (left.durationSeconds ?? 0)) {
-    return (right.durationSeconds ?? 0) - (left.durationSeconds ?? 0)
-  }
-
-  return right.score - left.score
+function isPreferredUpgradeFormat(candidate: UpgradeCandidate): boolean {
+  const normalized = candidate.extension.trim().toLowerCase()
+  return ['wav', 'aiff', 'aif', 'flac', 'alac'].includes(normalized) || (normalized === 'mp3' && (candidate.bitrate ?? 0) >= 320)
 }
 
 function pickUpgradeAutoDownloads(candidates: UpgradeCandidate[]): UpgradeCandidate[] {
-  const unlocked = candidates.filter((candidate) => !candidate.isLocked)
-  return [...(unlocked.length > 0 ? unlocked : candidates)].sort(compareUpgradeDownloadCandidates).slice(0, 4)
+  const eligible = candidates.filter(
+    (candidate) => isPreferredUpgradeFormat(candidate) && candidate.speedClass !== 'different_edit_likely'
+  )
+  const preferred = eligible.length > 0 ? eligible : candidates
+  const unlocked = preferred.filter((candidate) => !candidate.isLocked)
+  return [...(unlocked.length > 0 ? unlocked : preferred)].sort(compareUpgradeDownloadCandidates).slice(0, 4)
 }
 
 function findSelectedCandidate(
@@ -505,29 +465,6 @@ function findSelectedCandidate(
         candidate.filename === localCandidate.sourceFilename
     ) ?? null
   )
-}
-
-function getDownloadFailureStatus(upgradeCase: UpgradeCase | null | undefined): UpgradeCaseStatus {
-  if (upgradeCase?.localCandidateCount) return 'downloaded'
-  if (upgradeCase?.candidateCount) return 'results_ready'
-  return 'error'
-}
-
-function scoreUpgradeCandidateQuality(candidate: UpgradeCandidate): number {
-  const normalized = candidate.extension.trim().toLowerCase()
-  const formatScore =
-    normalized === 'wav' || normalized === 'aiff' || normalized === 'aif'
-      ? 5
-      : normalized === 'flac' || normalized === 'alac'
-        ? 4
-        : normalized === 'm4a' || normalized === 'aac'
-          ? 3
-          : normalized === 'ogg' || normalized === 'opus'
-            ? 2
-            : normalized === 'mp3'
-              ? 1
-              : 0
-  return formatScore * 1000 + (candidate.bitrate ?? 0)
 }
 
 function getUpgradeQueueRank(candidate: UpgradeCandidate): number {
@@ -638,47 +575,16 @@ export function createUpgradeActions(deps: UpgradePipelineDeps) {
   }
 
   async function continueDownloadPipeline(id: number, candidate: UpgradeCandidate): Promise<void> {
-    const service = requireCollectionService()
-    const settings = currentSettings()
-
-    try {
-      const result = await slskdService.waitForDownload(settings, candidate.username, candidate.filename)
-      if (result !== 'Completed') {
-        const upgradeCase = await service.upgradeCaseGet(id)
-        await service.upgradeCaseUpdate(id, {
-          status: getDownloadFailureStatus(upgradeCase),
-          lastError:
-            result === 'Timeout' ? 'Download timed out.' : 'Download failed or was cancelled.'
-        })
-        return
-      }
-
-      const localPath = await importService.resolveLocalPath(settings, candidate.filename)
-      if (!localPath) {
-        const upgradeCase = await service.upgradeCaseGet(id)
-        await service.upgradeCaseUpdate(id, {
-          status: getDownloadFailureStatus(upgradeCase),
-          lastError: 'Downloaded file was not found in the configured download folders.'
-        })
-        return
-      }
-
-      await appendLocalCandidate(
-        id,
-        await buildLocalCandidate(
-          toMusicRelativePath(settings, localPath),
-          'auto_download',
-          candidate.username,
-          candidate.filename
-        )
-      )
-    } catch (error) {
-      const upgradeCase = await service.upgradeCaseGet(id)
-      await service.upgradeCaseUpdate(id, {
-        status: getDownloadFailureStatus(upgradeCase),
-        lastError: error instanceof Error ? error.message : 'Download failed'
-      })
-    }
+    await continueUpgradeDownloadPipeline({
+      id,
+      candidate,
+      service: requireCollectionService(),
+      settings: currentSettings(),
+      slskdService,
+      importService,
+      buildLocalCandidate,
+      appendLocalCandidate
+    })
   }
 
   async function queueUpgradeDownload(id: number, candidate: UpgradeCandidate): Promise<void> {

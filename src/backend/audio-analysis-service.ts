@@ -57,6 +57,17 @@ function maxValue(...values: Array<number | null>): number | null {
   return present.length ? Math.max(...present) : null
 }
 
+function estimateTopEndHz(bands: Array<[number, number | null]>): number | null {
+  const strongest = maxValue(...bands.map(([, value]) => value))
+  if (strongest === null) return null
+  const threshold = strongest - 14
+  let topEndHz: number | null = null
+  for (const [hz, rmsDb] of bands) {
+    if (rmsDb !== null && rmsDb >= threshold) topEndHz = hz
+  }
+  return topEndHz
+}
+
 async function run(command: string, args: string[]): Promise<string> {
   const { stdout, stderr } = await execFileAsync(command, args, {
     timeout: 30000,
@@ -138,7 +149,7 @@ export class AudioAnalysisService {
   private async readAnalysis(filePath: string, fileSizeBytes: number): Promise<AudioAnalysis> {
     const probe = await readProbe(filePath)
     const audioStream = probe.streams?.find((stream) => stream.codec_type === 'audio') ?? null
-    const [loudness, overall, lowBand, highBand, subBand, airBand, hum50, hum100, introAir, introLowBand, introSubBand, introHum50Low, introHum50, introHum50High, introHum100Low, introHum100, introHum100High] = await Promise.all([
+    const [loudness, overall, lowBand, highBand, subBand, airBand, hum50, hum100, introAir, introTop12, introTop14, introTop16, introTop18, introTop20, introLowBand, introSubBand, introHum50Low, introHum50, introHum50High, introHum100Low, introHum100, introHum100High] = await Promise.all([
       readLoudness(filePath),
       readStats(filePath, '', ['Peak_level', 'RMS_level', 'Noise_floor']),
       readStats(filePath, 'lowpass=f=160,', ['RMS_level']),
@@ -148,6 +159,11 @@ export class AudioAnalysisService {
       readStats(filePath, 'highpass=f=45,lowpass=f=55,', ['RMS_level']),
       readStats(filePath, 'highpass=f=95,lowpass=f=105,', ['RMS_level']),
       readStats(filePath, 'atrim=end=30,highpass=f=9000,', ['RMS_level', 'Entropy']),
+      readStats(filePath, 'atrim=end=30,highpass=f=12000,', ['RMS_level']),
+      readStats(filePath, 'atrim=end=30,highpass=f=14000,', ['RMS_level']),
+      readStats(filePath, 'atrim=end=30,highpass=f=16000,', ['RMS_level']),
+      readStats(filePath, 'atrim=end=30,highpass=f=18000,', ['RMS_level']),
+      readStats(filePath, 'atrim=end=30,highpass=f=20000,', ['RMS_level']),
       readStats(filePath, 'atrim=end=30,lowpass=f=140,', ['RMS_level']),
       readStats(filePath, 'atrim=end=30,lowpass=f=35,', ['RMS_level']),
       readStats(filePath, 'atrim=end=30,highpass=f=35,lowpass=f=45,', ['RMS_level']),
@@ -168,6 +184,13 @@ export class AudioAnalysisService {
     const cutoffDb =
       highBandRmsDb !== null && airBandRmsDb !== null ? round(Math.max(0, highBandRmsDb - airBandRmsDb)) : null
     const introAirRmsDb = introAir['RMS_level'] ?? null
+    const topEndHz = estimateTopEndHz([
+      [12000, introTop12['RMS_level'] ?? null],
+      [14000, introTop14['RMS_level'] ?? null],
+      [16000, introTop16['RMS_level'] ?? null],
+      [18000, introTop18['RMS_level'] ?? null],
+      [20000, introTop20['RMS_level'] ?? null]
+    ])
     const introAirEntropy = introAir['Entropy'] ?? null
     const introLowBandRmsDb = introLowBand['RMS_level'] ?? null
     const introSubBassRmsDb = introSubBand['RMS_level'] ?? null
@@ -230,6 +253,7 @@ export class AudioAnalysisService {
       highBandRmsDb,
       subBassRmsDb,
       airBandRmsDb,
+      topEndHz,
       humRmsDb,
       cutoffDb,
       rumbleScore,

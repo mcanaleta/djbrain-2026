@@ -128,8 +128,8 @@ export function formatPercent(value: number | null): string {
   return value === null ? '—' : `${Math.round(value)}%`
 }
 
-export function formatHz(value: number | null): string {
-  return value === null ? '—' : value >= 1000 ? `${(value / 1000).toFixed(1)} kHz` : `${value} Hz`
+export function formatHz(value: number | null | undefined): string {
+  return typeof value !== 'number' ? '—' : value >= 1000 ? `${(value / 1000).toFixed(1)} kHz` : `${value} Hz`
 }
 
 export function formatBits(value: number | null): string {

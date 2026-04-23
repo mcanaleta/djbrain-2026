@@ -10,6 +10,7 @@ export type ImportRow = CollectionItem & {
 
 export type ImportTracksTableRow = {
   key: string
+  recordingId: number | null
   artist: string
   title: string
   year: string
@@ -19,6 +20,7 @@ export type ImportTracksTableRow = {
   fileCount: number
   prep: string
   bestFile: {
+    id: number
     filename: string
     title: string
     artist: string
@@ -94,13 +96,17 @@ export function groupImportRows(rows: ImportRow[]): ImportTracksTableRow[] {
   return [...groups.entries()]
     .map(([key, group]) => {
       const bestFile = [...group].sort(compareImportRows)[0]
+      const canonical = bestFile.recordingCanonical
       return {
         key,
-        artist: bestFile.importMatchArtist || bestFile.artist,
-        title: bestFile.importMatchTitle
-          ? `${bestFile.importMatchTitle}${bestFile.importMatchVersion ? ` (${bestFile.importMatchVersion})` : ''}`
-          : bestFile.title,
-        year: bestFile.importMatchYear || bestFile.year,
+        recordingId: bestFile.recordingId ?? null,
+        artist: canonical?.artist || bestFile.importMatchArtist || bestFile.artist,
+        title: canonical?.title
+          ? `${canonical.title}${canonical.version ? ` (${canonical.version})` : ''}`
+          : bestFile.importMatchTitle
+            ? `${bestFile.importMatchTitle}${bestFile.importMatchVersion ? ` (${bestFile.importMatchVersion})` : ''}`
+            : bestFile.title,
+        year: canonical?.year || bestFile.importMatchYear || bestFile.year,
         releaseTitle: bestFile.importReleaseTitle ?? null,
         replacementFilename:
           group.find((row) => row.importExactExistingFilename)?.importExactExistingFilename ?? null,

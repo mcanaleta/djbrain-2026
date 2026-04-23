@@ -114,6 +114,7 @@ function deriveTags(details: CollectionItemDetails): MediaTags | null {
     version,
     album: selected.album,
     year,
+    comments: null,
     label: selected.label,
     catalogNumber: selected.catalogNumber,
     trackPosition: selected.trackPosition,
@@ -185,6 +186,7 @@ export class PostgresMediaStore {
 
       CREATE TABLE IF NOT EXISTS media_items (
         file_id BIGINT PRIMARY KEY REFERENCES media_files(id) ON DELETE CASCADE,
+        collection_file_id BIGINT,
         path TEXT NOT NULL,
         scope TEXT NOT NULL,
         filesize BIGINT NOT NULL,
@@ -225,6 +227,17 @@ export class PostgresMediaStore {
       CREATE INDEX IF NOT EXISTS media_items_path_idx
       ON media_items(path);
     `)
+
+    await this.pool.query(`
+      ALTER TABLE media_items
+      ADD COLUMN IF NOT EXISTS collection_file_id BIGINT;
+
+      UPDATE media_items
+      SET collection_file_id = collection_files.id
+      FROM collection_files
+      WHERE collection_files.filename = media_items.path
+        AND media_items.collection_file_id IS DISTINCT FROM collection_files.id;
+    `)
   }
 
   public async rebuildFromCollection(service: CollectionService): Promise<number> {
@@ -264,17 +277,19 @@ export class PostgresMediaStore {
   public async list(query: string = '', limit?: number): Promise<CollectionListResult> {
     const normalizedLimit = normalizeLimit(limit, 100)
     const textQuery = query.trim()
-    type ListRow = { filename: string; filesize: string | number; score: number | null }
+    type ListRow = { id: string | number; filename: string; filesize: string | number; score: number | null }
     const rows: ListRow[] =
       textQuery.length > 0
         ? (
             await this.pool.query<{
+              id: string | number
               filename: string
               filesize: string | number
               score: number
             }>(
               `
                 SELECT
+                  COALESCE(collection_file_id, file_id) AS id,
                   path AS filename,
                   filesize,
                   ts_rank_cd(search_vector, plainto_tsquery('simple', $1)) AS score
@@ -288,11 +303,12 @@ export class PostgresMediaStore {
           ).rows.map((row) => ({ ...row, score: toNumber(row.score, 0) }))
         : (
             await this.pool.query<{
+              id: string | number
               filename: string
               filesize: string | number
             }>(
               `
-                SELECT path AS filename, filesize
+                SELECT COALESCE(collection_file_id, file_id) AS id, path AS filename, filesize
                 FROM media_items
                 ORDER BY path
                 LIMIT $1::int
@@ -302,6 +318,7 @@ export class PostgresMediaStore {
           ).rows.map((row) => ({ ...row, score: null }))
 
     const items: CollectionItem[] = rows.map((row) => ({
+      id: toNumber(row.id),
       filename: row.filename,
       filesize: toNumber(row.filesize),
       duration: null,
@@ -312,6 +329,7 @@ export class PostgresMediaStore {
 
   public async get(filename: string): Promise<CollectionItemDetails | null> {
     const result = await this.pool.query<{
+      item_id: string | number
       path: string
       filesize: string | number
       mtime_ms: string | number
@@ -347,6 +365,7 @@ export class PostgresMediaStore {
     }>(
       `
         SELECT
+          COALESCE(mi.collection_file_id, mi.file_id) AS item_id,
           mi.path, mi.filesize, mi.mtime_ms, mi.scope,
           mi.artist, mi.title, mi.version, mi.album, mi.year, mi.label, mi.catalog_number, mi.track_position, mi.discogs_release_id, mi.discogs_track_position,
           mi.analysis_status, mi.audio_hash, mi.analysis_version, mi.analysis_json,
@@ -368,6 +387,7 @@ export class PostgresMediaStore {
     const analysisJsonText = row.analysis_json ? JSON.stringify(row.analysis_json) : null
     const importReviewJsonText = row.import_review_json ? JSON.stringify(row.import_review_json) : null
     return {
+      id: toNumber(row.item_id),
       filename: row.path,
       filesize: toNumber(row.filesize),
       mtimeMs: toNumber(row.mtime_ms, 0),
@@ -376,6 +396,7 @@ export class PostgresMediaStore {
       identificationStatus: null,
       identificationConfidence: null,
       assignmentMethod: null,
+      identificationVerifiedAt: null,
       recordingCanonical: null,
       tags: {
         source: 'media_tags',
@@ -384,6 +405,7 @@ export class PostgresMediaStore {
         version: row.version,
         album: row.album,
         year: row.year,
+        comments: null,
         label: row.label,
         catalogNumber: row.catalog_number,
         trackPosition: row.track_position,
@@ -546,32 +568,33 @@ export class PostgresMediaStore {
       const analysisJson = details.parsedAudioAnalysis ? JSON.stringify(details.parsedAudioAnalysis) : null
       const importReviewJson = normalizeJsonText(details.importReview?.reviewJson)
       const searchDocumentSql = buildSearchDocumentSql(
-        '$2::text',
-        '$6::text',
+        '$3::text',
         '$7::text',
         '$8::text',
         '$9::text',
         '$10::text',
-        '$11::text'
+        '$11::text',
+        '$12::text'
       )
       await runner.query(
         `
           INSERT INTO media_items(
-            file_id, path, scope, filesize, mtime_ms,
+            file_id, collection_file_id, path, scope, filesize, mtime_ms,
             artist, title, version, album, year, label, catalog_number, track_position, discogs_release_id, discogs_track_position,
             analysis_status, audio_hash, analysis_version, analysis_json, duration_seconds, bitrate_kbps, integrated_lufs,
             import_review_version, import_status, import_error_message, import_processed_at,
             import_parsed_artist, import_parsed_title, import_parsed_version, import_parsed_year, import_review_json,
             search_vector, updated_at
           ) VALUES (
-            $1, $2, $3, $4, $5,
-            $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-            $16, $17, $18, $19::jsonb, $20, $21, $22,
-            $23, $24, $25, $26,
-            $27, $28, $29, $30, $31::jsonb,
+            $1, $2, $3, $4, $5, $6,
+            $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+            $17, $18, $19, $20::jsonb, $21, $22, $23,
+            $24, $25, $26, $27,
+            $28, $29, $30, $31, $32::jsonb,
             to_tsvector('simple', ${searchDocumentSql}), now()
           )
           ON CONFLICT(file_id) DO UPDATE SET
+            collection_file_id = EXCLUDED.collection_file_id,
             path = EXCLUDED.path,
             scope = EXCLUDED.scope,
             filesize = EXCLUDED.filesize,
@@ -607,6 +630,7 @@ export class PostgresMediaStore {
         `,
         [
           fileId,
+          details.id,
           details.filename,
           scope,
           details.filesize,

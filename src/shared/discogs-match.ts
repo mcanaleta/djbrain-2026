@@ -9,6 +9,7 @@ export type DiscogsTrackMatch = {
   year: string | null
   label: string | null
   catalogNumber: string | null
+  country?: string | null
   durationSeconds?: number | null
   score: number
 }

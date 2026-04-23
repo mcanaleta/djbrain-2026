@@ -39,6 +39,7 @@ import { ImportReviewOverviewTable } from './ImportReviewOverviewTable'
 import { ActionButton } from './view/ActionButton'
 import { CompactInput } from './view/CompactInput'
 import { DataTable, type DataTableColumn } from './view/DataTable'
+import { MessageDialog } from './view/MessageDialog'
 import { MiniStat } from './view/MiniStat'
 import { Notice } from './view/Notice'
 import { Pill } from './view/Pill'
@@ -643,31 +644,22 @@ export function ImportReviewDialog({
             </div>
           ) : null}
         </div>
-        {confirmDelete ? (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/55 p-4">
-            <div className="w-full max-w-sm rounded-xl border border-zinc-800 bg-zinc-950 p-4 shadow-2xl">
-              <div className="text-sm font-semibold text-zinc-100">Delete File?</div>
-              <div className="mt-2 text-xs text-zinc-400">
-                Delete this download file from the import inbox. This does not touch the existing collection file.
-              </div>
-              <div className="mt-2 truncate text-[11px] text-zinc-500">{filename}</div>
-              <div className="mt-4 flex justify-end gap-2">
-                <ActionButton size="xs" disabled={deleteLoading} onClick={() => setConfirmDelete(false)}>Cancel</ActionButton>
-                <ActionButton
-                  size="xs"
-                  tone="default"
-                  className="border-rose-700/50 bg-rose-950/40 text-rose-100 hover:bg-rose-950/60"
-                  disabled={deleteLoading}
-                  onClick={() => {
-                    void handleDelete()
-                  }}
-                >
-                  {deleteLoading ? 'Deleting…' : 'Delete'}
-                </ActionButton>
-              </div>
-            </div>
-          </div>
-        ) : null}
+        <MessageDialog
+          open={confirmDelete}
+          title="Delete File?"
+          onClose={() => setConfirmDelete(false)}
+          actions={
+            <>
+              <ActionButton size="xs" disabled={deleteLoading} onClick={() => setConfirmDelete(false)}>Cancel</ActionButton>
+              <ActionButton size="xs" tone="danger" disabled={deleteLoading} onClick={() => { void handleDelete() }}>
+                {deleteLoading ? 'Deleting…' : 'Delete'}
+              </ActionButton>
+            </>
+          }
+        >
+          <div>Delete this download file from the import inbox. This does not touch the existing collection file.</div>
+          <div className="truncate text-[11px] text-zinc-500">{filename}</div>
+        </MessageDialog>
 
         <audio {...audio.sourceAudioProps} />
         {comparison ? <audio {...audio.existingAudioProps} /> : null}

@@ -5,7 +5,7 @@ import { Notice } from '../components/view/Notice'
 import { useHeaderActions } from '../context/HeaderActionsContext'
 import { ImportTracksTable } from '../features/import/ImportTracksTable'
 import { useImportPageData } from '../features/import/useImportPageData'
-import { buildImportReviewHref } from '../lib/urls'
+import { buildImportRecordHref } from '../lib/urls'
 
 export default function ImportPage(): React.JSX.Element {
   const navigate = useNavigate()
@@ -25,6 +25,7 @@ export default function ImportPage(): React.JSX.Element {
     refetch,
     headerActions
   } = useImportPageData(submittedQuery)
+  const recordRows = groupedRows.filter((row) => row.recordingId != null)
 
   useHeaderActions(headerActions)
 
@@ -49,14 +50,14 @@ export default function ImportPage(): React.JSX.Element {
           inputClassName="h-9 rounded-md border-zinc-800 bg-zinc-950/30"
         />
         <div className="shrink-0 pb-1 text-xs text-zinc-400">
-          {total} items · {groupedRows.length} tracks
+          {total} items · {recordRows.length} records
         </div>
       </div>
       <ImportTracksTable
-        rows={groupedRows}
+        rows={recordRows}
         loading={isLoading}
         musicFolderPath={musicFolderPath}
-        onOpenRow={(row) => navigate(buildImportReviewHref(row.bestFile.filename, submittedQuery))}
+        onOpenRow={(row) => navigate(buildImportRecordHref(row.recordingId!, submittedQuery))}
       />
 
       {queueMessage ? <Notice>{queueMessage}</Notice> : null}

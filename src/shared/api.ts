@@ -16,6 +16,7 @@ export type AppSettings = {
 }
 
 export type CollectionItem = {
+  id: number
   filename: string
   filesize: number
   duration: number | null
@@ -29,6 +30,7 @@ export type CollectionItem = {
   identificationStatus?: IdentificationStatus | null
   identificationConfidence?: number | null
   assignmentMethod?: IdentificationAssignmentMethod | null
+  identificationVerifiedAt?: string | null
   recordingCanonical?: RecordingCanonical | null
   importStatus?: 'pending' | 'processing' | 'ready' | 'error' | null
   importArtist?: string | null
@@ -75,6 +77,7 @@ export type CollectionListResult = {
 }
 
 export type CollectionItemDetails = {
+  id: number
   filename: string
   filesize: number
   mtimeMs: number | null
@@ -83,6 +86,7 @@ export type CollectionItemDetails = {
   identificationStatus: IdentificationStatus | null
   identificationConfidence: number | null
   assignmentMethod: IdentificationAssignmentMethod | null
+  identificationVerifiedAt: string | null
   recordingCanonical: RecordingCanonical | null
   tags: {
     source: string
@@ -91,6 +95,7 @@ export type CollectionItemDetails = {
     version: string | null
     album: string | null
     year: string | null
+    comments: string | null
     label: string | null
     catalogNumber: string | null
     trackPosition: string | null
@@ -155,12 +160,51 @@ export type IdentificationCandidate = {
   recordingCanonical: RecordingCanonical | null
 }
 
+export type IdentifyReference = {
+  key: string
+  provider: IdentificationCandidate['provider'] | 'youtube'
+  entityType: IdentificationCandidate['entityType'] | 'video'
+  externalKey: string
+  artist: string | null
+  title: string | null
+  version: string | null
+  releaseTitle: string | null
+  label: string | null
+  format: string | null
+  catalogNumber: string | null
+  country: string | null
+  trackPosition: string | null
+  year: string | null
+  durationSeconds: number | null
+  link: string | null
+  score: number | null
+  candidateId: number | null
+  assignable: boolean
+  comments?: string | null
+  tagSource?: string | null
+  discogsReleaseId?: number | null
+  discogsTrackPosition?: string | null
+}
+
+export type IdentifyRecordCandidate = {
+  key: string
+  canonical: RecordingCanonical
+  recordingId: number | null
+  references: IdentifyReference[]
+}
+
+export type IdentifyReviewData = {
+  searchHint: string
+  recordCandidates: IdentifyRecordCandidate[]
+}
+
 export type FileIdentificationState = {
   filename: string
   recordingId: number | null
   audioHash: string | null
   status: IdentificationStatus
   assignmentMethod: IdentificationAssignmentMethod | null
+  verifiedAt: string | null
   confidence: number | null
   parsedArtist: string | null
   parsedTitle: string | null
@@ -175,12 +219,14 @@ export type FileIdentificationState = {
   processedAt: string | null
   errorMessage: string | null
   recordingCanonical: RecordingCanonical | null
+  reviewData: IdentifyReviewData | null
   candidates: IdentificationCandidate[]
 }
 
 export type RecordingSummary = {
   id: number
   canonical: RecordingCanonical
+  durationSeconds: number | null
   confidence: number
   reviewState: 'auto' | 'confirmed' | 'merged'
   metadataLocked: boolean
@@ -206,10 +252,18 @@ export type RecordingDetails = RecordingSummary & {
     rawJson: string | null
   }>
   files: Array<{
+    id: number
     filename: string
+    isDownload: boolean
+    filesize: number
+    duration: number | null
+    bitrateKbps: number | null
+    qualityScore: number | null
+    audioAnalysis: AudioAnalysis | null
     status: IdentificationStatus
     confidence: number | null
     assignmentMethod: IdentificationAssignmentMethod | null
+    verifiedAt: string | null
   }>
 }
 
@@ -387,6 +441,7 @@ export type AudioAnalysis = {
   highBandRmsDb: number | null
   subBassRmsDb: number | null
   airBandRmsDb: number | null
+  topEndHz: number | null
   humRmsDb: number | null
   cutoffDb: number | null
   rumbleScore: number | null
@@ -433,6 +488,26 @@ export type ImportCommitInput = {
   replaceFilename?: string | null
 }
 
+export type DiscogsReleaseDownloadTrackResult = {
+  position: string | null
+  artist: string
+  title: string
+  version: string | null
+  durationSeconds: number | null
+  filename: string | null
+  recordingId: number | null
+  status: 'verified' | 'no_results' | 'download_error' | 'identify_error'
+  message: string | null
+}
+
+export type DiscogsReleaseDownloadResult = {
+  releaseId: number
+  releaseTitle: string
+  trackCount: number
+  verifiedCount: number
+  results: DiscogsReleaseDownloadTrackResult[]
+}
+
 export type DJBrainApi = {
   wantList: {
     list: () => Promise<WantListItem[]>
@@ -474,8 +549,11 @@ export type DJBrainApi = {
   collection: {
     list: (query?: string, limit?: number) => Promise<CollectionListResult>
     get: (filename: string) => Promise<CollectionItemDetails | null>
+    getById: (id: number) => Promise<CollectionItemDetails | null>
     listDownloads: (query?: string) => Promise<CollectionListResult>
     reanalyze: (filename: string) => Promise<void>
+    transcodeToMp3320: (recordingId: number, filename: string) => Promise<void>
+    replaceRecordFile: (recordingId: number, sourceFilename: string, targetFilename: string) => Promise<void>
     syncNow: () => Promise<CollectionSyncStatus>
     getStatus: () => Promise<CollectionSyncStatus>
     onUpdated: (listener: (status: CollectionSyncStatus) => void) => () => void
@@ -483,13 +561,17 @@ export type DJBrainApi = {
     compareImport: (filename: string, existingFilename: string) => Promise<ImportComparison>
     queueImportProcessing: (filenames?: string[], force?: boolean) => Promise<{ queued: number }>
     queueIdentificationProcessing: (filenames?: string[], force?: boolean) => Promise<{ queued: number }>
+    identifyNow: (filename: string, search?: Partial<RecordingCanonical> | null) => Promise<FileIdentificationState | null>
+    identifyBetter: (filename: string, search?: Partial<RecordingCanonical> | null) => Promise<FileIdentificationState | null>
+    downloadDiscogsRelease: (releaseId: number) => Promise<DiscogsReleaseDownloadResult>
     reviewIdentification: (input: {
       filename: string
-      action: 'accept' | 'reject' | 'create_recording'
+      action: 'accept' | 'reject' | 'create_recording' | 'unverify'
       candidateId?: number | null
     }) => Promise<FileIdentificationState | null>
     listRecordings: (query?: string) => Promise<RecordingSummary[]>
     getRecording: (id: number) => Promise<RecordingDetails | null>
+    updateRecording: (recordingId: number, canonical: Partial<RecordingCanonical>, sourceClaimId?: number | null) => Promise<RecordingDetails | null>
     assignRecording: (input: {
       recordingId?: number | null
       filenames: string[]

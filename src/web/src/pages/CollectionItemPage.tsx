@@ -10,7 +10,7 @@ import { usePlayer } from '../context/PlayerContext'
 import { useAsyncAction } from '../hooks/useAsyncAction'
 import { getErrorMessage } from '../lib/error-utils'
 import { deriveTrackSummaryFromFilename, formatFileSize } from '../lib/music-file'
-import { buildIdentifyReviewHref } from '../lib/urls'
+import { buildIdentifyReviewHref, buildRecordingHref } from '../lib/urls'
 
 function fmtDate(value: string | number | null | undefined): string {
   if (value == null) return '—'
@@ -193,7 +193,7 @@ export default function CollectionItemPage(): React.JSX.Element {
                 <ActionButton size="xs" disabled={busyAction === 'identify'} onClick={() => void handleIdentify()}>
                   {busyAction === 'identify' ? 'Queuing…' : 'Reidentify'}
                 </ActionButton>
-                <ActionButton size="xs" onClick={() => navigate(buildIdentifyReviewHref(item.filename, item.isDownload ? 'downloads' : 'collection'))}>
+                <ActionButton size="xs" onClick={() => navigate(buildIdentifyReviewHref(item.id, item.isDownload ? 'downloads' : 'collection', null))}>
                   Review Identify
                 </ActionButton>
                 <ActionButton size="xs" disabled={busyAction === 'sync'} onClick={() => void handleSync()}>
@@ -309,7 +309,10 @@ export default function CollectionItemPage(): React.JSX.Element {
                 <KV
                   rows={[
                     { label: 'Status', value: item.identification.status },
-                    { label: 'Recording id', value: item.identification.recordingId ?? '—' },
+                    {
+                      label: 'Recording id',
+                      value: item.identification.recordingId ? <a href={buildRecordingHref(item.identification.recordingId)} className="text-zinc-300 hover:text-zinc-100">{item.identification.recordingId}</a> : '—'
+                    },
                     { label: 'Method', value: item.identification.assignmentMethod || '—' },
                     { label: 'Confidence', value: item.identification.confidence ?? '—' },
                     {

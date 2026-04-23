@@ -348,6 +348,22 @@ The UI can subscribe to `api.wantList.onItemUpdated()` for polling-backed update
 
 ---
 
+## Download Quality Policy
+
+Downloaded files must be analyzed automatically as part of the download flow, before import decisions.
+
+Authoritative downloads must start from a Discogs reference whenever possible. Do not start from a raw Soulseek/manual search if the goal is automatic identification, because only the Discogs-backed flow already knows the exact release and track identity.
+
+Quality rules for DJ use:
+
+- Prefer lossless or `mp3` at `320 kbps`.
+- Treat VBR or unusual average bitrates such as `171 kbps` as suspicious for DJ use, even if the file plays fine.
+- A file below `320 kbps` is not a final-quality candidate when a better source is expected.
+- Large duration drift versus the reference track is suspicious. A case like `5:09` versus expected `5:30` (about `7%` short) should be treated as likely wrong speed, wrong edit, or bad rip.
+- Top-end / spectral cutoff, bitrate mode, and duration drift should all be visible in the review UI so bad downloads can be rejected quickly.
+
+---
+
 ## Scoring Algorithm
 
 Files are scored 0–100+ by `SlskdService.scoreFile()`:

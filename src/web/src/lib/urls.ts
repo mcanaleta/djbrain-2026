@@ -1,4 +1,5 @@
 type IdentifyScope = 'collection' | 'downloads'
+type IdentifyFilter = 'all' | 'verified' | 'unverified'
 
 const matchUrl = (value: string | null | undefined, pattern: RegExp, build: (id: string) => string): string | null => {
   const match = value?.match(pattern)
@@ -26,8 +27,20 @@ export const musicBrainzRecordingUrlFromExternalKey = (externalKey?: string | nu
 export const buildImportHref = (query?: string | null): string =>
   query ? `/import?query=${encodeURIComponent(query)}` : '/import'
 
-export const buildImportReviewHref = (filename: string, query?: string | null): string =>
-  `/import/review?filename=${encodeURIComponent(filename)}${query ? `&query=${encodeURIComponent(query)}` : ''}`
+export const buildCollectionItemHref = (filename: string): string =>
+  `/collection/item?filename=${encodeURIComponent(filename)}`
 
-export const buildIdentifyReviewHref = (filename: string, scope: IdentifyScope): string =>
-  `/identify?scope=${scope}&filename=${encodeURIComponent(filename)}`
+export const buildRecordingHref = (recordingId: number | string): string =>
+  `/recordings/${encodeURIComponent(String(recordingId))}`
+
+export const buildImportRecordHref = (recordingId: number | string, query?: string | null): string =>
+  `/import/${encodeURIComponent(String(recordingId))}${query ? `?query=${encodeURIComponent(query)}` : ''}`
+
+export const buildImportReviewHref = (id: number, query?: string | null): string =>
+  `/import/review/${encodeURIComponent(String(id))}${query ? `?query=${encodeURIComponent(query)}` : ''}`
+
+export const buildIdentifyHref = (scope: IdentifyScope, query?: string | null, filter: IdentifyFilter = 'unverified'): string =>
+  `/identify?scope=${scope}${query ? `&query=${encodeURIComponent(query)}` : ''}${filter === 'unverified' ? '' : `&filter=${filter}`}`
+
+export const buildIdentifyReviewHref = (id: number, scope: IdentifyScope, query?: string | null, filter: IdentifyFilter = 'unverified'): string =>
+  `/identify/${encodeURIComponent(String(id))}?scope=${scope}${query ? `&query=${encodeURIComponent(query)}` : ''}${filter === 'unverified' ? '' : `&filter=${filter}`}`

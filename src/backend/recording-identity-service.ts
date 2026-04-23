@@ -7,13 +7,17 @@ import type { OnlineSearchService } from './online-search-service.ts'
 import type { AppSettings } from './settings-store.ts'
 import type { AudioTags, TaggerService } from './tagger-service.ts'
 import type {
+  IdentifyReference,
+  IdentifyReviewData,
   IdentificationAssignmentMethod,
   IdentificationStatus,
   ImportReview,
   RecordingCanonical
 } from '../shared/api.ts'
+import type { OnlineSearchItem } from '../shared/online-search.ts'
 import { parseImportFilename } from '../shared/import-filename.ts'
 import { parseTrackTitle } from '../shared/track-title-parser.ts'
+import { parseDurationString } from '../shared/track-matcher.ts'
 
 type RecordingClaimProvider = 'discogs' | 'musicbrainz' | 'tags' | 'filename' | 'manual'
 type RecordingClaimEntityType = 'recording' | 'release_track' | 'release' | 'file_parse'
@@ -73,6 +77,7 @@ export type IdentificationDecision = {
     reviewState: 'auto' | 'confirmed'
   } | null
   audioHash: string | null
+  durationSeconds: number | null
   parsedArtist: string | null
   parsedTitle: string | null
   parsedVersion: string | null
@@ -86,6 +91,7 @@ export type IdentificationDecision = {
   candidates: RecordingCandidateSuggestion[]
   explanationJson: string
   recordingCanonical: RecordingCanonical | null
+  reviewData: IdentifyReviewData | null
 }
 
 type RecordingIdentityServiceDeps = {
@@ -108,6 +114,8 @@ type IdentityEvidence = {
   releaseTitle: string | null
   provider: RecordingClaimProvider
 }
+
+type ReviewReferenceInput = Omit<IdentifyReference, 'candidateId'> & { candidateId?: number | null }
 
 type ResolveClaimsInput = {
   claims: RecordingClaimInput[]
@@ -142,7 +150,7 @@ function buildTagExternalKey(tags: Pick<AudioTags, 'artist' | 'title' | 'trackPo
   )
 }
 
-function buildDiscogsExternalKey(releaseId: number, trackPosition: string | null, title: string | null): string {
+export function buildDiscogsExternalKey(releaseId: number, trackPosition: string | null, title: string | null): string {
   return buildClaimKey(
     'discogs',
     [`release:${releaseId}`, `track:${normalizeIdentityText(trackPosition) || normalizeIdentityText(title) || 'unknown'}`].join(':')
@@ -229,33 +237,79 @@ function bestExternalKey(claims: RecordingClaimInput[]): string | null {
   )
 }
 
+function preferredCanonicalYear(claims: RecordingClaimInput[], durationSeconds: number | null): string | null {
+  return (
+    claims
+      .filter((claim) => claim.year)
+      .sort((left, right) => {
+        const score = (claim: RecordingClaimInput): number => {
+          let value = claim.confidence
+          if (claim.provider === 'musicbrainz') value += 8
+          else if (claim.provider === 'discogs') value += 6
+          else if (claim.provider === 'manual') value -= 8
+          else if (claim.provider === 'tags') value -= 10
+          else if (claim.provider === 'filename') value -= 12
+          if (durationSeconds != null && claim.durationSeconds != null) {
+            const delta = Math.abs(claim.durationSeconds - durationSeconds)
+            if (delta <= 3) value += 12
+            else if (delta <= 6) value += 8
+            else if (delta <= 10) value += 4
+            else if (delta > 20) value -= 10
+          }
+          if (claim.provider === 'discogs' && typeof claim.rawJson === 'string' && /unofficial release/i.test(claim.rawJson)) value -= 10
+          return value
+        }
+        return score(right) - score(left)
+      })[0]?.year ?? null
+  )
+}
+
 function pickCanonical(
   discogsClaim: RecordingClaimInput | null,
   musicbrainzClaim: RecordingClaimInput | null,
+  manualClaim: RecordingClaimInput | null,
   tagClaim: RecordingClaimInput | null,
-  filenameClaim: RecordingClaimInput | null
+  filenameClaim: RecordingClaimInput | null,
+  claims: RecordingClaimInput[],
+  durationSeconds: number | null
 ): RecordingCanonical | null {
-  const artist = tagClaim?.artist ?? filenameClaim?.artist ?? null
-  const title = tagClaim?.title ?? filenameClaim?.title ?? null
+  const bestSourceClaim = discogsClaim ?? musicbrainzClaim ?? null
+  const hasStructuredLocalCanonical = Boolean(
+    (manualClaim?.artist && manualClaim?.title) ||
+    (tagClaim?.artist && tagClaim?.title) ||
+    (filenameClaim?.artist && filenameClaim?.title)
+  )
+  if (bestSourceClaim && !hasStructuredLocalCanonical) {
+    return {
+      artist: bestSourceClaim.artist ?? null,
+      title: bestSourceClaim.title ?? null,
+      version: bestSourceClaim.version ?? null,
+      year: preferredCanonicalYear(claims, durationSeconds)
+    }
+  }
+  const artist = manualClaim?.artist ?? tagClaim?.artist ?? filenameClaim?.artist ?? null
+  const title = manualClaim?.title ?? tagClaim?.title ?? filenameClaim?.title ?? null
   const chosen =
-    [discogsClaim, musicbrainzClaim, tagClaim, filenameClaim].find(
+    [discogsClaim, musicbrainzClaim, manualClaim, tagClaim, filenameClaim].find(
       (claim) =>
         claim &&
         !isGenericArtist(claim.artist) &&
         (!artist || sameText(claim.artist, artist)) &&
         (!title || sameText(claim.title, title))
     ) ??
+    manualClaim ??
     tagClaim ??
     filenameClaim ??
     [discogsClaim, musicbrainzClaim].find((claim) => claim && !isGenericArtist(claim.artist)) ??
     discogsClaim ??
     musicbrainzClaim
   if (!chosen) return null
+  const canonicalYear = preferredCanonicalYear(claims, durationSeconds)
   return {
     artist: chosen.artist ?? artist,
     title: chosen.title ?? title,
-    version: chosen.version ?? tagClaim?.version ?? filenameClaim?.version ?? null,
-    year: chosen.year ?? discogsClaim?.year ?? musicbrainzClaim?.year ?? tagClaim?.year ?? filenameClaim?.year ?? null
+    version: chosen.version ?? discogsClaim?.version ?? musicbrainzClaim?.version ?? manualClaim?.version ?? tagClaim?.version ?? filenameClaim?.version ?? null,
+    year: canonicalYear ?? chosen.year ?? discogsClaim?.year ?? musicbrainzClaim?.year ?? manualClaim?.year ?? tagClaim?.year ?? filenameClaim?.year ?? null
   }
 }
 
@@ -273,7 +327,7 @@ function pickSourceMatchCanonical(
   })
 }
 
-function parseImportReviewClaim(reviewJson: string | null | undefined): RecordingClaimInput | null {
+export function parseImportReviewClaim(reviewJson: string | null | undefined): RecordingClaimInput | null {
   if (!reviewJson) return null
   try {
     const review = JSON.parse(reviewJson) as ImportReview
@@ -412,6 +466,239 @@ function buildExplanation(value: unknown): string {
   return JSON.stringify(value)
 }
 
+function buildSearchHint(artist: string | null | undefined, title: string | null | undefined, version: string | null | undefined): string {
+  const cleanArtist = cleanupArtistText(artist)
+  const cleanTitle = cleanupText(title)
+  const cleanVersion = cleanupText(version)
+  const titleText = cleanTitle ? `${cleanTitle}${cleanVersion ? ` (${cleanVersion})` : ''}` : null
+  return [cleanArtist, titleText].filter(Boolean).join(' - ')
+}
+
+function parseJson<T>(value: string | null | undefined): T | null {
+  if (!value) return null
+  try {
+    return JSON.parse(value) as T
+  } catch {
+    return null
+  }
+}
+
+function refLink(provider: IdentifyReference['provider'], externalKey: string, fallback?: string | null): string | null {
+  if (provider === 'youtube') return fallback ?? externalKey
+  const discogs = externalKey.match(/^discogs:release:(\d+)/i)
+  if (discogs?.[1]) return `https://www.discogs.com/release/${discogs[1]}`
+  const musicbrainz = externalKey.match(/^musicbrainz:recording:([0-9a-f-]+)/i)
+  if (musicbrainz?.[1]) return `https://musicbrainz.org/recording/${musicbrainz[1].toLowerCase()}`
+  return fallback ?? null
+}
+
+function scoreDiscogsTrackTitle(trackTitle: string, targetTitle: string, targetVersion: string | null): number {
+  const parsedTrack = parseTrackTitle(trackTitle)
+  const track = normalizeIdentityText(parsedTrack.title || trackTitle)
+  const title = normalizeIdentityText(targetTitle)
+  const version = normalizeIdentityText(targetVersion)
+  const trackVersion = normalizeIdentityText(parsedTrack.version)
+  let score = 0
+  if (track && title) {
+    if (track === title) score += 60
+    else if (track.includes(title) || title.includes(track)) score += 40
+  }
+  if (version) {
+    if (trackVersion === version) score += 20
+    else if (trackVersion && (trackVersion.includes(version) || version.includes(trackVersion))) score += 12
+    else if (normalizeIdentityText(trackTitle).includes(version)) score += 15
+  }
+  return score
+}
+
+async function enrichTitleOnlyDiscogsItem(
+  deps: RecordingIdentityServiceDeps,
+  settings: AppSettings,
+  releaseId: number,
+  title: string,
+  version: string | null
+): Promise<{ durationSeconds: number | null; trackPosition: string | null; country: string | null; label: string | null; catalogNumber: string | null } | null> {
+  const entity = await deps.onlineSearchService.getDiscogsEntity(settings, 'release', releaseId).catch(() => null)
+  if (!entity || entity.type !== 'release') return null
+  const bestTrack = entity.tracklist
+    .map((track) => ({ track, score: scoreDiscogsTrackTitle(track.title, title, version) }))
+    .sort((left, right) => right.score - left.score)[0]?.track ?? null
+  return {
+    durationSeconds: bestTrack?.duration ? parseDurationString(bestTrack.duration) : null,
+    trackPosition: cleanupText(bestTrack?.position),
+    country: cleanupText(entity.country),
+    label: cleanupText(entity.labels[0]),
+    catalogNumber: cleanupText(entity.catalogNumbers[0])
+  }
+}
+
+function reviewCanonical(value: Partial<RecordingCanonical> | null | undefined): RecordingCanonical {
+  return toCanonical(value)
+}
+
+function reviewGroupKey(canonical: RecordingCanonical, fallback: string): string {
+  return buildCanonicalNormKey(canonical) || fallback
+}
+
+function proposedRecordingIdForCanonical(
+  recordingId: number | null,
+  recordingCanonical: RecordingCanonical | null,
+  claim: RecordingClaimInput
+): number | null {
+  if (recordingId == null || !recordingCanonical) return null
+  return buildCanonicalNormKey(reviewCanonical(claim)) === buildCanonicalNormKey(recordingCanonical) ? recordingId : null
+}
+
+function claimMeta(claim: RecordingClaimInput): { label: string | null; format: string | null; catalogNumber: string | null; country: string | null } {
+  const raw = parseJson<{ label?: unknown; format?: unknown; catalogNumber?: unknown; country?: unknown }>(claim.rawJson)
+  const text = (value: unknown): string | null => typeof value === 'string' && value.trim() ? value.trim() : null
+  return {
+    label: claim.provider === 'discogs' ? text(raw?.label) : null,
+    format: claim.provider === 'discogs' ? text(raw?.format) : null,
+    catalogNumber: claim.provider === 'discogs' ? text(raw?.catalogNumber) : null,
+    country: claim.provider === 'discogs' ? text(raw?.country) : null
+  }
+}
+
+function claimToReviewReference(
+  claim: RecordingClaimInput,
+  candidate: RecordingCandidateSuggestion | null
+): ReviewReferenceInput | null {
+  const canonical = reviewCanonical(claim)
+  if (!canonical.artist && !canonical.title && !canonical.version) return null
+  const meta = claimMeta(claim)
+  return {
+    key: `${claim.provider}:${claim.externalKey}`,
+    provider: claim.provider,
+    entityType: claim.entityType,
+    externalKey: claim.externalKey,
+    artist: canonical.artist,
+    title: canonical.title,
+    version: canonical.version,
+    releaseTitle: cleanupText(claim.releaseTitle),
+    label: meta.label,
+    format: meta.format,
+    catalogNumber: meta.catalogNumber,
+    country: meta.country,
+    trackPosition: cleanupText(claim.trackPosition),
+    year: cleanupText(claim.year),
+    durationSeconds: claim.durationSeconds ?? null,
+    link: refLink(claim.provider, claim.externalKey),
+    score: candidate?.score ?? claim.confidence,
+    candidateId: null,
+    assignable: claim.provider === 'discogs' || claim.provider === 'musicbrainz'
+  }
+}
+
+function youtubeToReviewReference(item: OnlineSearchItem): ReviewReferenceInput | null {
+  const best = item.candidates[0] ?? null
+  const canonical = reviewCanonical({
+    artist: best?.artist ?? best?.artists?.join(', ') ?? null,
+    title: best?.title ?? item.title,
+    version: best?.version ?? null,
+    year: best?.year ?? null
+  })
+  if (!canonical.artist && !canonical.title && !canonical.version) return null
+  return {
+    key: `youtube:${item.link}`,
+    provider: 'youtube',
+    entityType: 'video',
+    externalKey: item.link,
+    artist: canonical.artist,
+    title: canonical.title,
+    version: canonical.version,
+    releaseTitle: null,
+    label: cleanupText(item.label),
+    format: cleanupText(item.format),
+    catalogNumber: cleanupText(item.catno),
+    country: null,
+    trackPosition: null,
+    year: cleanupText(best?.year),
+    durationSeconds: null,
+    link: item.link,
+    score: null,
+    candidateId: null,
+    assignable: false
+  }
+}
+
+function discogsIdFromLink(link: string | null | undefined): number | null {
+  const match = link?.match(/discogs\.com\/(?:release|master)\/(\d+)/i)
+  return match?.[1] ? Number(match[1]) : null
+}
+
+function buildReviewData(
+  claims: RecordingClaimInput[],
+  candidates: RecordingCandidateSuggestion[],
+  youtubeItems: OnlineSearchItem[],
+  searchHint: string,
+  recordingId: number | null,
+  recordingCanonical: RecordingCanonical | null
+): IdentifyReviewData {
+  const candidateByExternalKey = new Map(candidates.map((candidate) => [candidate.externalKey, candidate] as const))
+  const refs = [
+    ...dedupeClaims(claims)
+      .filter((claim) => claim.provider !== 'manual')
+      .map((claim) => claimToReviewReference(claim, candidateByExternalKey.get(claim.externalKey) ?? null))
+      .filter((value): value is ReviewReferenceInput => Boolean(value)),
+    ...youtubeItems.map(youtubeToReviewReference).filter((value): value is ReviewReferenceInput => Boolean(value))
+  ]
+  if (refs.length === 0) return { searchHint, recordCandidates: [] }
+  const groups = new Map<string, IdentifyReviewData['recordCandidates'][number] & { bestScore: number }>()
+  const currentKey = recordingCanonical ? buildCanonicalNormKey(recordingCanonical) : ''
+  for (const ref of refs) {
+    const canonical = reviewCanonical(ref)
+    const key = reviewGroupKey(canonical, ref.externalKey)
+    const current = groups.get(key) ?? {
+      key,
+      canonical,
+      recordingId: null,
+      references: [],
+      bestScore: -1
+    }
+    current.references.push({ ...ref, candidateId: ref.candidateId ?? null })
+    if ((ref.score ?? -1) > current.bestScore) {
+      current.bestScore = ref.score ?? -1
+      current.canonical = {
+        artist: canonical.artist ?? current.canonical.artist,
+        title: canonical.title ?? current.canonical.title,
+        version: canonical.version ?? current.canonical.version,
+        year: canonical.year ?? current.canonical.year
+      }
+    }
+    groups.set(key, current)
+  }
+  const recordCandidates = [...groups.values()]
+    .map((group) => {
+      const recordingIds = [...new Set(
+        group.references
+          .map((ref) => candidateByExternalKey.get(ref.externalKey)?.proposedRecordingId ?? null)
+          .filter((value): value is number => typeof value === 'number')
+      )]
+      const nextRecordingId =
+        recordingId != null && currentKey === group.key
+          ? recordingId
+          : recordingIds.length === 1
+            ? recordingIds[0]
+            : null
+      return {
+        key: group.key,
+        canonical: group.canonical,
+        recordingId: nextRecordingId,
+        references: group.references.sort((left, right) => {
+          if (left.assignable !== right.assignable) return left.assignable ? -1 : 1
+          return (right.score ?? -1) - (left.score ?? -1)
+        })
+      }
+    })
+    .sort((left, right) => {
+      if (left.recordingId === recordingId && right.recordingId !== recordingId) return -1
+      if (right.recordingId === recordingId && left.recordingId !== recordingId) return 1
+      return (right.references[0]?.score ?? -1) - (left.references[0]?.score ?? -1)
+    })
+  return { searchHint, recordCandidates }
+}
+
 export class RecordingIdentityService {
   private readonly deps: RecordingIdentityServiceDeps
 
@@ -434,25 +721,32 @@ export class RecordingIdentityService {
     const tagEvidence = dedupedClaims.find((claim) => claim.provider === 'tags') ?? null
     const baseDecision = {
       audioHash: audioHash ?? null,
+      durationSeconds,
       parsedArtist: parsed.artist,
       parsedTitle: parsed.title,
       parsedVersion: parsed.version,
       parsedYear: parsed.year,
       tagArtist: tagCanonical?.artist ?? null,
       tagTitle: tagCanonical?.title ?? null,
-      tagVersion: tagCanonical?.version ?? null
+      tagVersion: tagCanonical?.version ?? null,
+      reviewData: null
     }
 
     if (audioHash) {
       const audioMatch = await this.deps.collectionService.findRecordingByAudioHash(audioHash)
       if (audioMatch) {
         const acceptedClaims = sortClaims(dedupedClaims.filter((claim) => claim.confidence >= 80))
+        const persistedCandidates = dedupedClaims.filter((claim) => claim.provider !== 'manual')
+        const acceptedExternalKey = bestExternalKey(acceptedClaims)
         const audioCanonical =
           pickCanonical(
             bestClaim(rankedClaims, 'discogs'),
             bestClaim(rankedClaims, 'musicbrainz'),
+            bestClaim(rankedClaims, 'manual'),
             tagEvidence,
-            filenameEvidence
+            filenameEvidence,
+            rankedClaims,
+            durationSeconds
           ) ?? pickSourceMatchCanonical(acceptedClaims[0] ?? null, audioMatch.canonical, tagCanonical, parsed)
         return {
           status: 'ready',
@@ -461,15 +755,15 @@ export class RecordingIdentityService {
           recordingId: audioMatch.recordingId,
           createRecording: null,
           chosenClaimId: null,
-          chosenExternalKey: bestExternalKey(acceptedClaims),
+          chosenExternalKey: acceptedExternalKey,
           acceptedClaims,
-          candidates: acceptedClaims.map((claim) => ({
+          candidates: persistedCandidates.map((claim) => ({
             provider: claim.provider,
             entityType: claim.entityType,
             externalKey: claim.externalKey,
-            proposedRecordingId: audioMatch.recordingId,
-            score: 100,
-            disposition: 'accepted',
+            proposedRecordingId: proposedRecordingIdForCanonical(audioMatch.recordingId, audioCanonical ?? audioMatch.canonical, claim),
+            score: claim.confidence,
+            disposition: claim.externalKey === acceptedExternalKey ? 'accepted' : rejectedKeys.has(claim.externalKey) ? 'rejected' : 'candidate',
             payloadJson: JSON.stringify(claim),
             recordingCanonical: audioCanonical ?? audioMatch.canonical
           })),
@@ -549,8 +843,11 @@ export class RecordingIdentityService {
     const canonical = pickCanonical(
       bestClaim(rankedClaims, 'discogs'),
       bestClaim(rankedClaims, 'musicbrainz'),
+      bestClaim(rankedClaims, 'manual'),
       tagEvidence ?? null,
-      filenameEvidence ?? null
+      filenameEvidence ?? null,
+      rankedClaims,
+      durationSeconds
     )
     const evidenceScore = buildEvidenceScore(dedupedClaims, durationSeconds)
     const heuristicCandidates = dedupedClaims
@@ -639,7 +936,7 @@ export class RecordingIdentityService {
       : null
   }
 
-  async identifyFile(filename: string): Promise<IdentificationDecision> {
+  async identifyFile(filename: string, searchOverride?: Partial<RecordingCanonical> | null, useWebDiscogsSearch: boolean = false): Promise<IdentificationDecision> {
     const absolutePath = this.deps.resolveMusicRelativePath(filename)
     await this.deps.fileAnalysisService.get(filename, absolutePath).catch(() => null)
     const [item, audioHash, rejectedKeys, tags] = await Promise.all([
@@ -653,6 +950,7 @@ export class RecordingIdentityService {
     }
 
     const parsed = toCanonical(parseImportFilename(filename))
+    const manualCanonical = toCanonical(searchOverride)
     const rawTagArtist = cleanupArtistText(tags?.artist)
     const rawTagTitle = normalizeClaimFields({ title: tags?.title }).title
     const parsedTag = !rawTagArtist && rawTagTitle?.includes(' - ') ? parseImportFilename(rawTagTitle) : null
@@ -725,9 +1023,18 @@ export class RecordingIdentityService {
       ].filter((value): value is RecordingClaimInput => Boolean(value))
     )
 
-    const searchArtist = tagCanonical?.artist ?? parsed.artist ?? ''
-    const searchTitle = tagCanonical?.title ?? parsed.title ?? ''
-    const searchVersion = tagCanonical?.version ?? parsed.version ?? null
+    const hasManualSearch = Boolean(
+      cleanupText(searchOverride?.artist) ||
+      cleanupText(searchOverride?.title) ||
+      cleanupText(searchOverride?.version) ||
+      cleanupText(searchOverride?.year)
+    )
+    const searchArtist = manualCanonical?.artist ?? tagCanonical?.artist ?? parsed.artist ?? ''
+    const searchTitle = manualCanonical?.title ?? tagCanonical?.title ?? parsed.title ?? ''
+    const searchVersion = hasManualSearch
+      ? (manualCanonical?.version ?? null)
+      : (tagCanonical?.version ?? parsed.version ?? null)
+    const searchHint = buildSearchHint(searchArtist, searchTitle, searchVersion)
     const localDecision = await this.resolveClaims({
       claims,
       parsed,
@@ -737,16 +1044,37 @@ export class RecordingIdentityService {
       rejectedKeys,
       includeNeedsReview: false
     })
-    if (localDecision) return localDecision
+    if (localDecision && localDecision.assignmentMethod !== 'audio_hash' && !(manualCanonical?.artist || manualCanonical?.title)) {
+      return {
+        ...localDecision,
+        reviewData: buildReviewData(claims, localDecision.candidates, [], searchHint, localDecision.recordingId, localDecision.recordingCanonical)
+      }
+    }
 
-    if (searchArtist && searchTitle) {
+    let youtubeItems: OnlineSearchItem[] = []
+    if (searchTitle) {
       const settings = this.deps.getSettings()
-      const [discogs, musicbrainz] = await Promise.all([
-        this.deps.discogsMatchService
-          .findTrack(settings, searchArtist, searchTitle, searchVersion, this.deps.onlineSearchService)
-          .catch(() => ({ candidates: [] as Array<{ releaseId: number; releaseTitle: string; artist: string; title: string; version: string | null; trackPosition?: string | null; year?: string | null; durationSeconds?: number | null; score: number }> })),
-        this.deps.musicbrainzService.searchRecordings(searchArtist, searchTitle, searchVersion).catch(() => [])
+      const titleOnlyDiscogsSearch = !searchArtist
+        ? (async (): Promise<{ items: OnlineSearchItem[] }> => {
+            const queries = [...new Set([searchTitle, parsed.title, tagCanonical?.title].map((value) => cleanupText(value)?.toLowerCase() ?? ''))].filter(Boolean)
+            for (const value of queries) {
+              const result = await this.deps.onlineSearchService.search(settings, value, 'discogs').catch(() => ({ items: [] as OnlineSearchItem[] }))
+              if (result.items.length > 0) return result
+            }
+            return { items: [] as OnlineSearchItem[] }
+          })()
+        : Promise.resolve({ items: [] as OnlineSearchItem[] })
+      const [discogs, discogsTitleOnly, musicbrainz, youtube] = await Promise.all([
+        searchArtist
+          ? (useWebDiscogsSearch ? this.deps.discogsMatchService.findTrackViaWebSearch : this.deps.discogsMatchService.findTrack)
+              .call(this.deps.discogsMatchService, settings, searchArtist, searchTitle, searchVersion, this.deps.onlineSearchService)
+              .catch(() => ({ candidates: [] as Awaited<ReturnType<DiscogsMatchService['findTrack']>>['candidates'] }))
+          : Promise.resolve({ candidates: [] as Awaited<ReturnType<DiscogsMatchService['findTrack']>>['candidates'] }),
+        titleOnlyDiscogsSearch,
+        this.deps.musicbrainzService.searchRecordings(searchArtist, searchTitle, searchVersion).catch(() => []),
+        this.deps.onlineSearchService.search(settings, searchHint, 'youtube').catch(() => ({ items: [] as OnlineSearchItem[] }))
       ])
+      youtubeItems = youtube.items.filter((item) => item.source === 'youtube').slice(0, 3)
       for (const candidate of discogs.candidates.slice(0, 3)) {
         const normalized = normalizeClaimFields({
           artist: candidate.artist,
@@ -766,6 +1094,42 @@ export class RecordingIdentityService {
           durationSeconds: candidate.durationSeconds ?? null,
           confidence: Math.min(100, Math.max(70, Math.round(candidate.score))),
           rawJson: JSON.stringify(candidate)
+        })
+      }
+      for (const [index, item] of discogsTitleOnly.items.filter((value) => value.source === 'discogs' && value.sourceType === 'release').slice(0, 3).entries()) {
+        const releaseId = discogsIdFromLink(item.link)
+        const best = item.candidates[0] ?? null
+        const normalized = normalizeClaimFields({
+          artist: best?.artist ?? best?.artists?.join(', ') ?? null,
+          title: best?.title ?? item.title,
+          version: best?.version ?? null
+        })
+        if (!releaseId || !normalized.title) continue
+        const detail = await enrichTitleOnlyDiscogsItem(this.deps, settings, releaseId, normalized.title, normalized.version)
+        claims.push({
+          provider: 'discogs',
+          entityType: 'release_track',
+          externalKey: buildDiscogsExternalKey(releaseId, detail?.trackPosition ?? null, normalized.title),
+          artist: normalized.artist,
+          title: normalized.title,
+          version: normalized.version,
+          releaseTitle: cleanupText(item.title),
+          trackPosition: detail?.trackPosition ?? null,
+          year: cleanupText(best?.year),
+          durationSeconds: detail?.durationSeconds ?? null,
+          confidence: 86 - index * 4,
+          rawJson: JSON.stringify({
+            releaseId,
+            releaseTitle: item.title,
+            artist: normalized.artist,
+            title: normalized.title,
+            version: normalized.version,
+            year: best?.year ?? null,
+            label: detail?.label ?? item.label ?? null,
+            catalogNumber: detail?.catalogNumber ?? item.catno ?? null,
+            country: detail?.country ?? null,
+            score: 86 - index * 4
+          })
         })
       }
       for (const candidate of musicbrainz.slice(0, 3)) {
@@ -791,7 +1155,12 @@ export class RecordingIdentityService {
       }
     }
 
-    return (await this.resolveClaims({
+    if (localDecision && !searchTitle) return {
+      ...localDecision,
+      reviewData: buildReviewData(claims, localDecision.candidates, [], searchHint, localDecision.recordingId, localDecision.recordingCanonical)
+    }
+
+    const decision = (await this.resolveClaims({
       claims,
       parsed,
       tagCanonical,
@@ -800,5 +1169,9 @@ export class RecordingIdentityService {
       rejectedKeys,
       includeNeedsReview: true
     })) as IdentificationDecision
+    return {
+      ...decision,
+      reviewData: buildReviewData(claims, decision.candidates, youtubeItems, searchHint, decision.recordingId, decision.recordingCanonical)
+    }
   }
 }

@@ -65,7 +65,7 @@ export function ImportTracksTable({
     },
     {
       key: 'track',
-      header: 'Track',
+      header: 'Record',
       cellClassName: 'max-w-[360px] truncate text-zinc-100',
       render: (row) => (
         <div>
@@ -140,7 +140,7 @@ export function ImportTracksTable({
         getRowKey={(row) => row.key}
         loading={loading}
         loadingMessage="Loading…"
-        emptyMessage="No tracks in configured download folders. Update env and sync."
+        emptyMessage="No identified download records."
         onRowClick={onOpenRow}
         tableClassName="min-w-[1120px]"
         rowClassName={(row) =>

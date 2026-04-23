@@ -1,25 +1,38 @@
-import { basename, join } from 'node:path'
-import { unlink } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { basename, dirname, extname, join } from 'node:path'
+import { access, copyFile, unlink } from 'node:fs/promises'
 import type { Express } from 'express'
 import type { CollectionService } from '../../backend/collection-service.ts'
 import { FileAnalysisService } from '../../backend/file-analysis-service.ts'
 import { ImportService, parseSongFilename } from '../../backend/import-service.ts'
 import type { PostgresMediaStore } from '../../backend/postgres-media-store.ts'
+import type { RecordingIdentityService } from '../../backend/recording-identity-service.ts'
 import type { AppSettings } from '../../backend/settings-store.ts'
+import type { TaggerService } from '../../backend/tagger-service.ts'
 import type { DiscogsTrackMatch } from '../../shared/discogs-match.ts'
 import type { ImportTagPreview } from '../../shared/api.ts'
 import { asyncHandler, sendEmpty, sendJson } from '../http.ts'
 
+const execFileAsync = promisify(execFile)
+
+function isMp3Filename(filename: string | null | undefined): boolean {
+  return extname(filename ?? '').toLowerCase() === '.mp3'
+}
+
 type CollectionRouteDeps = {
   requireCollectionService: () => CollectionService
+  requireRecordingIdentityService: () => RecordingIdentityService
   automationEnabled: boolean
   currentSettings: () => AppSettings
   readCollectionStatus: () => Promise<unknown>
   buildImportReview: (filename: string, searchValue?: unknown, force?: boolean) => Promise<unknown>
+  downloadDiscogsRelease: (releaseId: number) => Promise<unknown>
   fileAnalysisService: FileAnalysisService
   importService: ImportService
   syncImportReviewQueue: () => Promise<void>
   syncIdentificationQueue: () => Promise<void>
+  taggerService: TaggerService
   resolveMusicRelativePath: (filename: string) => string
   normalizeFilename: (value: string) => string
   getAudioDuration: (filePath: string) => Promise<number | null>
@@ -40,14 +53,17 @@ type CollectionRouteDeps = {
 export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps): void {
   const {
     requireCollectionService,
+    requireRecordingIdentityService,
     automationEnabled,
     currentSettings,
     readCollectionStatus,
     buildImportReview,
+    downloadDiscogsRelease,
     fileAnalysisService,
     importService,
     syncImportReviewQueue,
     syncIdentificationQueue,
+    taggerService,
     resolveMusicRelativePath,
     normalizeFilename,
     getAudioDuration,
@@ -61,6 +77,20 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
     syncMediaCatalog,
     syncMediaItem
   } = deps
+
+  async function buildUniqueSiblingMp3Filename(filename: string): Promise<string> {
+    const parent = dirname(filename)
+    const stem = basename(filename, extname(filename))
+    for (let index = 0; index < 1000; index += 1) {
+      const candidate = join(parent, `${stem}${index === 0 ? ' [320]' : ` [320 ${index + 1}]`}.mp3`)
+      try {
+        await access(resolveMusicRelativePath(candidate))
+      } catch {
+        return candidate
+      }
+    }
+    throw new Error('Could not allocate 320 MP3 filename.')
+  }
 
   app.get('/api/collection', asyncHandler(async (request, response) => {
     const query = typeof request.query['query'] === 'string' ? request.query['query'] : ''
@@ -97,6 +127,11 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
     sendJson(response, 200, await requireCollectionService().getItem(filename))
   }))
 
+  app.get('/api/collection/item/:id', asyncHandler(async (request, response) => {
+    const id = Number(request.params.id)
+    sendJson(response, 200, Number.isInteger(id) && id > 0 ? await requireCollectionService().getItemById(id) : null)
+  }))
+
   app.get(
     '/api/collection/downloads',
     asyncHandler(async (request, response) => {
@@ -127,6 +162,20 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
       await requireCollectionService().syncNow()
       await syncMediaCatalog?.()
       sendJson(response, 200, await readCollectionStatus())
+    })
+  )
+
+  app.post(
+    '/api/collection/discogs/release/:id/download',
+    asyncHandler(async (request, response) => {
+      const id = Number(request.params['id'])
+      if (!Number.isFinite(id) || id <= 0) {
+        sendJson(response, 400, { message: 'release id is required.' })
+        return
+      }
+      const result = await downloadDiscogsRelease(id)
+      await syncMediaCatalog?.()
+      sendJson(response, 200, result)
     })
   )
 
@@ -183,11 +232,91 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
   )
 
   app.post(
+    '/api/collection/identify/now',
+    asyncHandler(async (request, response) => {
+      const body = (request.body ?? null) as {
+        filename?: string | null
+        search?: { artist?: string | null; title?: string | null; version?: string | null; year?: string | null } | null
+      } | null
+      const filenameRaw = typeof body?.filename === 'string' ? body.filename : ''
+      const filename = normalizeFilename(filenameRaw)
+      if (!filename) {
+        sendJson(response, 400, { message: 'filename is required' })
+        return
+      }
+      const collection = requireCollectionService()
+      await collection.queueIdentificationFiles([filename], true)
+      const next = await collection.claimIdentificationFile(filename)
+      if (!next) {
+        sendJson(response, 200, (await collection.getItem(filename))?.identification ?? null)
+        return
+      }
+      try {
+        const decision = await requireRecordingIdentityService().identifyFile(filename, body?.search ?? null)
+        await collection.saveIdentificationDecision(filename, {
+          filesize: next.filesize,
+          mtimeMs: next.mtimeMs,
+          ...decision
+        })
+      } catch (error) {
+        await collection.saveIdentificationError(filename, {
+          filesize: next.filesize,
+          mtimeMs: next.mtimeMs,
+          errorMessage: error instanceof Error ? error.message : 'Identification failed.'
+        })
+      }
+      if (syncMediaItem) await syncMediaItem(filename)
+      else await syncMediaCatalog?.()
+      sendJson(response, 200, (await collection.getItem(filename))?.identification ?? null)
+    })
+  )
+
+  app.post(
+    '/api/collection/identify/better',
+    asyncHandler(async (request, response) => {
+      const body = (request.body ?? null) as {
+        filename?: string | null
+        search?: { artist?: string | null; title?: string | null; version?: string | null; year?: string | null } | null
+      } | null
+      const filenameRaw = typeof body?.filename === 'string' ? body.filename : ''
+      const filename = normalizeFilename(filenameRaw)
+      if (!filename) {
+        sendJson(response, 400, { message: 'filename is required' })
+        return
+      }
+      const collection = requireCollectionService()
+      await collection.queueIdentificationFiles([filename], true)
+      const next = await collection.claimIdentificationFile(filename)
+      if (!next) {
+        sendJson(response, 200, (await collection.getItem(filename))?.identification ?? null)
+        return
+      }
+      try {
+        const decision = await requireRecordingIdentityService().identifyFile(filename, body?.search ?? null, true)
+        await collection.saveIdentificationDecision(filename, {
+          filesize: next.filesize,
+          mtimeMs: next.mtimeMs,
+          ...decision
+        })
+      } catch (error) {
+        await collection.saveIdentificationError(filename, {
+          filesize: next.filesize,
+          mtimeMs: next.mtimeMs,
+          errorMessage: error instanceof Error ? error.message : 'Identification failed.'
+        })
+      }
+      if (syncMediaItem) await syncMediaItem(filename)
+      else await syncMediaCatalog?.()
+      sendJson(response, 200, (await collection.getItem(filename))?.identification ?? null)
+    })
+  )
+
+  app.post(
     '/api/collection/identify/review',
     asyncHandler(async (request, response) => {
       const body = (request.body ?? null) as {
         filename?: string
-        action?: 'accept' | 'reject' | 'create_recording'
+        action?: 'accept' | 'reject' | 'create_recording' | 'unverify'
         candidateId?: number | null
       } | null
       const filename = typeof body?.filename === 'string' ? normalizeFilename(body.filename) : ''
@@ -220,6 +349,22 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
     asyncHandler(async (request, response) => {
       const id = Number(request.params['id'])
       sendJson(response, 200, Number.isFinite(id) ? await requireCollectionService().getRecording(id) : null)
+    })
+  )
+
+  app.post(
+    '/api/collection/recordings/:id/update',
+    asyncHandler(async (request, response) => {
+      const id = Number(request.params['id'])
+      if (!Number.isFinite(id)) {
+        sendJson(response, 400, { message: 'recording id is required.' })
+        return
+      }
+      const body = (request.body ?? null) as {
+        canonical?: { artist?: string | null; title?: string | null; version?: string | null; year?: string | null } | null
+        sourceClaimId?: number | null
+      } | null
+      sendJson(response, 200, await requireCollectionService().updateRecording(id, body?.canonical ?? null, body?.sourceClaimId ?? null))
     })
   )
 
@@ -289,6 +434,86 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
   )
 
   app.post(
+    '/api/collection/transcode-mp3-320',
+    asyncHandler(async (request, response) => {
+      const body = (request.body ?? null) as { filename?: string | null; recordingId?: number | null } | null
+      const filename = normalizeFilename(typeof body?.filename === 'string' ? body.filename : '')
+      const recordingId = typeof body?.recordingId === 'number' ? body.recordingId : null
+      if (!filename || !recordingId) {
+        sendJson(response, 400, { message: 'filename and recordingId are required' })
+        return
+      }
+      const sourcePath = resolveMusicRelativePath(filename)
+      const targetFilename = await buildUniqueSiblingMp3Filename(filename)
+      const targetPath = resolveMusicRelativePath(targetFilename)
+      const tags = taggerService.readTags(sourcePath)
+      await execFileAsync('ffmpeg', [
+        '-v', 'error', '-nostdin', '-y',
+        '-i', sourcePath,
+        '-map', '0:a:0',
+        '-vn',
+        '-c:a', 'libmp3lame',
+        '-b:a', '320k',
+        '-id3v2_version', '3',
+        targetPath
+      ])
+      if (tags) await taggerService.writeTags(targetPath, tags)
+      const service = requireCollectionService()
+      await service.syncNow()
+      await service.assignRecording({ recordingId, filenames: [targetFilename] })
+      await fileAnalysisService.get(targetFilename, targetPath)
+      if (syncMediaItem) await syncMediaItem(targetFilename)
+      else await syncMediaCatalog?.()
+      sendEmpty(response, 204)
+    })
+  )
+
+  app.post(
+    '/api/collection/replace-record-file',
+    asyncHandler(async (request, response) => {
+      const body = (request.body ?? null) as {
+        recordingId?: number | null
+        sourceFilename?: string | null
+        targetFilename?: string | null
+      } | null
+      const recordingId = typeof body?.recordingId === 'number' ? body.recordingId : null
+      const sourceFilename = normalizeFilename(typeof body?.sourceFilename === 'string' ? body.sourceFilename : '')
+      const targetFilename = normalizeFilename(typeof body?.targetFilename === 'string' ? body.targetFilename : '')
+      if (!recordingId || !sourceFilename || !targetFilename) {
+        sendJson(response, 400, { message: 'recordingId, sourceFilename and targetFilename are required' })
+        return
+      }
+      const recording = await requireCollectionService().getRecording(recordingId)
+      if (!recording) {
+        sendJson(response, 404, { message: 'Record not found.' })
+        return
+      }
+      const source = recording.files.find((file) => file.filename === sourceFilename && file.isDownload)
+      const target = recording.files.find((file) => file.filename === targetFilename && !file.isDownload)
+      if (!source || !target) {
+        sendJson(response, 400, { message: 'Expected one download source and one existing song target on this record.' })
+        return
+      }
+      if (!isMp3Filename(sourceFilename)) {
+        sendJson(response, 400, { message: 'Convert download to 320 MP3 before importing.' })
+        return
+      }
+      const sourcePath = resolveMusicRelativePath(sourceFilename)
+      const targetPath = resolveMusicRelativePath(targetFilename)
+      await unlink(targetPath)
+      await copyFile(sourcePath, targetPath)
+      await unlink(sourcePath)
+      const service = requireCollectionService()
+      await service.invalidateAudioAnalysis(targetFilename)
+      await service.syncNow()
+      await fileAnalysisService.get(targetFilename, targetPath)
+      if (syncMediaItem) await syncMediaItem(targetFilename)
+      else await syncMediaCatalog?.()
+      sendEmpty(response, 204)
+    })
+  )
+
+  app.post(
     '/api/collection/import/compare',
     asyncHandler(async (request, response) => {
       const body = (request.body ?? null) as { filename?: string; existingFilename?: string } | null
@@ -320,6 +545,10 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
         typeof body?.replaceFilename === 'string' && body.replaceFilename.trim()
           ? normalizeFilename(body.replaceFilename)
           : null
+      if (!isMp3Filename(filename)) {
+        sendJson(response, 400, { status: 'error', message: 'Convert download to 320 MP3 before importing.' })
+        return
+      }
 
       if (replaceFilename) {
         resolveMusicRelativePath(replaceFilename)
@@ -349,11 +578,10 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
             return importService.importFile(settings, parsed.artist, parsed.title, parsed.version, absolutePath)
           })()
 
-      void service.syncNow().then(async () => {
-        if (!syncMediaItem) {
-          await syncMediaCatalog?.()
-          return
-        }
+      await service.syncNow()
+      if (!syncMediaItem) {
+        await syncMediaCatalog?.()
+      } else {
         const changed = new Set<string>()
         if (result.status === 'imported' || result.status === 'imported_upgrade') {
           changed.add(normalizeFilename(result.destRelativePath))
@@ -365,7 +593,7 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
           changed.add(normalizeFilename(result.existingRelativePath))
         }
         await Promise.all([...changed].map((item) => syncMediaItem(item)))
-      })
+      }
 
       if (result.status === 'imported') {
         sendJson(response, 200, { status: 'imported', destRelativePath: result.destRelativePath })
@@ -408,11 +636,11 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
       const service = requireCollectionService()
       const body = (request.body ?? null) as { filename?: string } | null
       const filename = typeof body?.filename === 'string' ? body.filename : ''
+      const normalizedFilename = normalizeFilename(filename)
       await unlink(resolveMusicRelativePath(filename))
-      void service.syncNow().then(async () => {
-        if (syncMediaItem) await syncMediaItem(normalizeFilename(filename))
-        else await syncMediaCatalog?.()
-      })
+      await service.syncNow()
+      if (syncMediaItem) await syncMediaItem(normalizedFilename)
+      else await syncMediaCatalog?.()
       sendEmpty(response, 204)
     })
   )

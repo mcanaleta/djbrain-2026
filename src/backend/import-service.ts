@@ -91,6 +91,7 @@ function buildTags(match: DiscogsTrackMatch) {
     title: match.title,
     album: match.releaseTitle,
     year: match.year,
+    comments: null,
     label: match.label,
     catalogNumber: match.catalogNumber,
     trackPosition: match.trackPosition,
@@ -230,7 +231,7 @@ export class ImportService {
     const destDir = join(settings.musicFolderPath, settings.songsFolderPath, year)
     const destAbsPath = join(destDir, destFilename)
     const destRelativePath = join(settings.songsFolderPath, year, destFilename)
-    const tags = buildTags(match)
+    const tags = { ...buildTags(match), comments: this.tagger.readTags(localFilePath)?.comments ?? null }
 
     await mkdir(destDir, { recursive: true })
 

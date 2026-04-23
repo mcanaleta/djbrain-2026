@@ -15,6 +15,7 @@ export const AUDIO_EXTENSIONS = new Set([
 ])
 
 type CollectionRow = {
+  id?: number | bigint
   filename: string
   filesize: number | bigint
   duration?: number | null
@@ -28,6 +29,7 @@ type CollectionRow = {
   identificationStatus?: CollectionItem['identificationStatus']
   identificationConfidence?: number | null
   assignmentMethod?: CollectionItem['assignmentMethod']
+  identificationVerifiedAt?: string | null
   recordingCanonicalArtist?: string | null
   recordingCanonicalTitle?: string | null
   recordingCanonicalVersion?: string | null
@@ -166,6 +168,7 @@ export function buildPrefixWhereClause(
 
 export function toListResult(rows: CollectionRow[]): CollectionListResult {
   const items = rows.map((row) => ({
+    id: row.id == null ? 0 : toNumber(row.id),
     filename: row.filename,
     filesize: toNumber(row.filesize),
     duration: row.duration ?? null,
@@ -179,6 +182,7 @@ export function toListResult(rows: CollectionRow[]): CollectionListResult {
     identificationStatus: row.identificationStatus ?? null,
     identificationConfidence: row.identificationConfidence ?? null,
     assignmentMethod: row.assignmentMethod ?? null,
+    identificationVerifiedAt: row.identificationVerifiedAt ?? null,
     recordingCanonical:
       row.recordingCanonicalArtist || row.recordingCanonicalTitle || row.recordingCanonicalVersion || row.recordingCanonicalYear
         ? {

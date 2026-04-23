@@ -107,6 +107,7 @@ export class ImportReviewBackgroundService {
         parsedYear: preprocessed?.year ?? null,
         reviewJson: JSON.stringify({ ...review, sourceAnalysis: null })
       })
+      await this.deps.collectionService.promoteImportReviewIdentification(next.filename)
     } catch (error) {
       await this.deps.collectionService.saveImportReviewError(next.filename, {
         filesize: next.filesize,
