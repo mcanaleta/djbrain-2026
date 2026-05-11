@@ -16,6 +16,7 @@ import { COLLECTION_LIST_QUERY_KEY, useCollectionStatusQuery } from '../hooks/us
 import { useSettingsQuery } from '../hooks/useSettingsQuery'
 import { getErrorMessage } from '../lib/error-utils'
 import { deriveTrackSummaryFromFilename, formatCompactDuration, formatExtensionName, formatFileSize, formatQualityScore, joinPath } from '../lib/music-file'
+import { buildCollectionItemHref } from '../lib/urls'
 
 const COLLECTION_VIEW_LIMIT = 100
 
@@ -107,7 +108,7 @@ export default function CollectionPage(): React.JSX.Element {
 
   const handleOpenItem = useCallback(
     (row: CollectionRow): void => {
-      navigate(`/collection/item?filename=${encodeURIComponent(row.filename)}`)
+      navigate(buildCollectionItemHref(row.id))
     },
     [navigate]
   )

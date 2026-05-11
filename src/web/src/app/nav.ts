@@ -64,8 +64,8 @@ export function resolveNavTitle(pathname: string): string {
     return 'Identify'
   }
 
-  if (/^\/identify\/.+$/u.test(pathname)) {
-    return 'Identify Review'
+  if (/^\/(?:file|identify|item)\/\d+$/u.test(pathname)) {
+    return 'File'
   }
 
   if (/^\/upgrades\/\d+$/u.test(pathname)) {
@@ -77,7 +77,7 @@ export function resolveNavTitle(pathname: string): string {
   }
 
   if (pathname === '/collection/item') {
-    return 'Track'
+    return 'File'
   }
 
   return NAV_TITLE_BY_PATH.get(pathname as `/${string}`) ?? 'DJBrain'

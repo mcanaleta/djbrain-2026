@@ -1,7 +1,11 @@
 type IdentifyScope = 'collection' | 'downloads'
 type IdentifyFilter = 'all' | 'verified' | 'unverified'
 
-const matchUrl = (value: string | null | undefined, pattern: RegExp, build: (id: string) => string): string | null => {
+const matchUrl = (
+  value: string | null | undefined,
+  pattern: RegExp,
+  build: (id: string) => string
+): string | null => {
   const match = value?.match(pattern)
   return match ? build(match[1]) : null
 }
@@ -21,26 +25,46 @@ export const buildMusicBrainzRecordingUrl = (recordingId: string): string =>
 export const discogsReleaseUrlFromExternalKey = (externalKey?: string | null): string | null =>
   matchUrl(externalKey, /discogs:release:(\d+)/i, buildDiscogsReleaseUrl)
 
-export const musicBrainzRecordingUrlFromExternalKey = (externalKey?: string | null): string | null =>
+export const musicBrainzRecordingUrlFromExternalKey = (
+  externalKey?: string | null
+): string | null =>
   matchUrl(externalKey, /musicbrainz:recording:([a-f0-9-]+)/i, buildMusicBrainzRecordingUrl)
 
 export const buildImportHref = (query?: string | null): string =>
   query ? `/import?query=${encodeURIComponent(query)}` : '/import'
 
-export const buildCollectionItemHref = (filename: string): string =>
-  `/collection/item?filename=${encodeURIComponent(filename)}`
+export const buildFileHref = (
+  id: number | string,
+  scope?: IdentifyScope,
+  query?: string | null,
+  filter: IdentifyFilter = 'unverified'
+): string =>
+  `/file/${encodeURIComponent(String(id))}${scope ? `?scope=${scope}${query ? `&query=${encodeURIComponent(query)}` : ''}${filter === 'unverified' ? '' : `&filter=${filter}`}` : ''}`
+
+export const buildCollectionItemHref = (id: number | string): string => buildFileHref(id)
 
 export const buildRecordingHref = (recordingId: number | string): string =>
   `/recordings/${encodeURIComponent(String(recordingId))}`
 
-export const buildImportRecordHref = (recordingId: number | string, query?: string | null): string =>
+export const buildImportRecordHref = (
+  recordingId: number | string,
+  query?: string | null
+): string =>
   `/import/${encodeURIComponent(String(recordingId))}${query ? `?query=${encodeURIComponent(query)}` : ''}`
 
 export const buildImportReviewHref = (id: number, query?: string | null): string =>
   `/import/review/${encodeURIComponent(String(id))}${query ? `?query=${encodeURIComponent(query)}` : ''}`
 
-export const buildIdentifyHref = (scope: IdentifyScope, query?: string | null, filter: IdentifyFilter = 'unverified'): string =>
+export const buildIdentifyHref = (
+  scope: IdentifyScope,
+  query?: string | null,
+  filter: IdentifyFilter = 'unverified'
+): string =>
   `/identify?scope=${scope}${query ? `&query=${encodeURIComponent(query)}` : ''}${filter === 'unverified' ? '' : `&filter=${filter}`}`
 
-export const buildIdentifyReviewHref = (id: number, scope: IdentifyScope, query?: string | null, filter: IdentifyFilter = 'unverified'): string =>
-  `/identify/${encodeURIComponent(String(id))}?scope=${scope}${query ? `&query=${encodeURIComponent(query)}` : ''}${filter === 'unverified' ? '' : `&filter=${filter}`}`
+export const buildIdentifyReviewHref = (
+  id: number,
+  scope: IdentifyScope,
+  query?: string | null,
+  filter: IdentifyFilter = 'unverified'
+): string => buildFileHref(id, scope, query, filter)

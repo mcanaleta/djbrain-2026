@@ -8,6 +8,8 @@ import {
 import AppShell from './layout/AppShell'
 import CollectionPage from './pages/CollectionPage'
 import CollectionItemPage from './pages/CollectionItemPage'
+import LegacyCollectionItemPage from './pages/LegacyCollectionItemPage'
+import FilePage from './pages/FilePage'
 import WantlistPage from './pages/WantlistPage'
 import WantlistItemPage from './pages/WantlistItemPage'
 import DiscogsReleasePage from './pages/DiscogsReleasePage'
@@ -34,7 +36,9 @@ const router = createBrowserRouter(
     <Route element={<AppShell />}>
       <Route path="/" element={<Navigate to="/collection" replace />} />
       <Route path="/collection" element={<CollectionPage />} />
-      <Route path="/collection/item" element={<CollectionItemPage />} />
+      <Route path="/collection/item" element={<LegacyCollectionItemPage />} />
+      <Route path="/file/:itemId" element={<FilePage />} />
+      <Route path="/item/:itemId" element={<CollectionItemPage />} />
       <Route path="/wantlist" element={<WantlistPage />} />
       <Route path="/wantlist/:wantId" element={<WantlistItemPage />} />
       <Route path="/discogs/release/:discogsId" element={<DiscogsReleasePage />} />

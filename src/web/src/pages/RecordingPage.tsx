@@ -60,7 +60,7 @@ export default function RecordingPage(): React.JSX.Element {
       errorFallback: 'Failed to update recording'
     })
   }
-  const useSourceForRecord = (sourceClaimId: number): void => {
+  const assignSourceForRecord = (sourceClaimId: number): void => {
     if (!recording) return
     void actions.run({
       key: `use-source-${sourceClaimId}`,
@@ -126,7 +126,7 @@ export default function RecordingPage(): React.JSX.Element {
                   >
                     {player.track?.filename === file.filename && player.isPlaying ? 'Pause' : 'Play'}
                   </ActionButton>
-                  <Link to={buildCollectionItemHref(file.filename)} className="text-zinc-200 hover:text-zinc-50">
+                  <Link to={buildCollectionItemHref(file.id)} className="text-zinc-200 hover:text-zinc-50">
                     {file.filename}
                   </Link>
                   <ActionButton size="xs" onClick={() => navigate(buildIdentifyReviewHref(file.id, file.filename.includes('to_organize/') ? 'downloads' : 'collection'))}>
@@ -203,7 +203,7 @@ export default function RecordingPage(): React.JSX.Element {
                             <ActionButton
                               size="xs"
                               disabled={actions.busyAction === `use-source-${claim.id}`}
-                              onClick={() => useSourceForRecord(claim.id)}
+                              onClick={() => assignSourceForRecord(claim.id)}
                             >
                               {actions.busyAction === `use-source-${claim.id}` ? 'Updating…' : 'Use For Record'}
                             </ActionButton>
