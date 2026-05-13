@@ -1,6 +1,7 @@
 export type DiscogsTrackMatch = {
   releaseId: number
   releaseTitle: string
+  format: string | null
   artist: string
   title: string
   version: string | null
@@ -8,6 +9,7 @@ export type DiscogsTrackMatch = {
   year: string | null
   label: string | null
   catalogNumber: string | null
+  durationSeconds?: number | null
   score: number
 }
 

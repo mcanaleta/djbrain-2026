@@ -42,7 +42,7 @@ const NOISE_RE =
   /\b(vinilo|makina|remember|revival|vinyl|hardstyle|hardcore|rave|dj\s*set|full\s*album)\b/gi
 
 /** Remove year suffixes / prefixes like "- 1997", "(1997)", "[1997]" */
-const YEAR_RE = /[-–]?\s*[\[(]?(19|20)\d{2}[\])]?/g
+const YEAR_RE = /[-–]?\s*(?:\(|\[)?(19|20)\d{2}(?:\)|\])?/g
 
 export function normalize(s: string): string {
   return s

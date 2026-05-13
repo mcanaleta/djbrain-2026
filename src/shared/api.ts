@@ -1,4 +1,5 @@
 import type { DiscogsArtist, DiscogsLabel, DiscogsMaster, DiscogsRelease } from './discogs'
+import type { DiscogsTrackMatch } from './discogs-match'
 import type { GrokSearchResponse } from './grok-search'
 import type { OnlineSearchResponse, OnlineSearchScope } from './online-search'
 
@@ -14,32 +15,27 @@ export type AppSettings = {
   youtubeApiKey: string
 }
 
-export type AppPaths = {
-  userDataPath: string
-  settingsFilePath: string
-  dataDirPath: string
-  databaseFilePath: string
-  cacheDirPath: string
-  logsDirPath: string
-}
-
-export type SettingsSnapshot = {
-  settings: AppSettings
-  appPaths: AppPaths
-}
-
-export type SettingsPatch = Partial<AppSettings>
-
-export type PickDirectoryOptions = {
-  title?: string
-  defaultPath?: string
-}
-
 export type CollectionItem = {
   filename: string
   filesize: number
   duration: number | null
   score: number | null
+  importStatus?: 'pending' | 'processing' | 'ready' | 'error' | null
+  importArtist?: string | null
+  importTitle?: string | null
+  importVersion?: string | null
+  importYear?: string | null
+  importError?: string | null
+  importTrackKey?: string | null
+  importMatchArtist?: string | null
+  importMatchTitle?: string | null
+  importMatchVersion?: string | null
+  importMatchYear?: string | null
+  importReleaseTitle?: string | null
+  importTrackPosition?: string | null
+  importExactExistingFilename?: string | null
+  importBetterThanExisting?: boolean | null
+  importQualityScore?: number | null
 }
 
 export type CollectionSyncStatus = {
@@ -47,11 +43,70 @@ export type CollectionSyncStatus = {
   lastSyncedAt: string | null
   itemCount: number
   lastError: string | null
+  importPendingCount?: number
+  importProcessingCount?: number
+  importErrorCount?: number
+  queueBackend?: 'redis' | 'memory'
+  queueDepth?: number
+  audioHashVersion?: number
+  audioAnalysisVersion?: number
+  importReviewVersion?: number
 }
 
 export type CollectionListResult = {
   items: CollectionItem[]
   total: number
+}
+
+export type CollectionItemDetails = {
+  filename: string
+  filesize: number
+  mtimeMs: number | null
+  isDownload: boolean
+  tags: {
+    source: string
+    artist: string | null
+    title: string | null
+    version: string | null
+    album: string | null
+    year: string | null
+    label: string | null
+    catalogNumber: string | null
+    trackPosition: string | null
+    discogsReleaseId: number | null
+    discogsTrackPosition: string | null
+  } | null
+  importReview: {
+    filesize: number
+    mtimeMs: number
+    reviewVersion: number
+    status: 'pending' | 'processing' | 'ready' | 'error'
+    parsedArtist: string | null
+    parsedTitle: string | null
+    parsedVersion: string | null
+    parsedYear: string | null
+    reviewJson: string | null
+    errorMessage: string | null
+    processedAt: string | null
+  } | null
+  fileAudioState: {
+    filesize: number
+    mtimeMs: number
+    hashVersion: number
+    audioHash: string | null
+    status: 'pending' | 'ready' | 'error'
+    errorMessage: string | null
+    processedAt: string | null
+  } | null
+  audioAnalysisCache: {
+    audioHash: string
+    analysisVersion: number
+    analysisJson: string | null
+    errorMessage: string | null
+    processedAt: string | null
+  } | null
+  parsedAudioAnalysis: AudioAnalysis | null
+  upgradeCase: UpgradeCase | null
 }
 
 export type WantListPipelineStatus =
@@ -110,11 +165,69 @@ export type SlskdCandidate = {
   size: number
   score: number
   bitrate: number | null
+  durationSeconds: number | null
   queueLength: number | null
   hasFreeUploadSlot: boolean | null
   uploadSpeed: number | null
   isLocked: boolean
   extension: string
+}
+
+export type UpgradeCaseStatus =
+  | 'idle'
+  | 'searching'
+  | 'results_ready'
+  | 'no_results'
+  | 'downloading'
+  | 'downloaded'
+  | 'pending_reanalyze'
+  | 'completed'
+  | 'error'
+
+export type UpgradeReferenceSource = 'discogs' | 'current_file'
+
+export type UpgradeCandidateSpeedClass =
+  | 'same_track_likely'
+  | 'different_edit_likely'
+  | 'unknown'
+
+export type UpgradeCandidate = SlskdCandidate & {
+  durationDeltaSeconds: number | null
+  durationDeltaPercent: number | null
+  speedClass: UpgradeCandidateSpeedClass
+}
+
+export type UpgradeLocalCandidate = {
+  filename: string
+  filesize: number
+  durationSeconds: number | null
+  source: 'auto_download' | 'import_folder'
+  sourceUsername: string | null
+  sourceFilename: string | null
+}
+
+export type UpgradeCase = {
+  id: number
+  collectionFilename: string
+  status: UpgradeCaseStatus
+  searchArtist: string
+  searchTitle: string
+  searchVersion: string | null
+  currentDurationSeconds: number | null
+  officialDurationSeconds: number | null
+  officialDurationSource: UpgradeReferenceSource | null
+  referenceDurationSeconds: number | null
+  referenceDurationSource: UpgradeReferenceSource | null
+  candidateCount: number
+  localCandidateCount: number
+  selectedCandidate: UpgradeCandidate | null
+  selectedLocalFilename: string | null
+  archiveFilename: string | null
+  replacementFilename: string | null
+  lastError: string | null
+  createdAt: string
+  updatedAt: string
+  completedAt: string | null
 }
 
 export type SlskdConnectionTestInput = {
@@ -132,9 +245,89 @@ export type SlskdConnectionTestResult = {
 export type ImportFileResult =
   | { status: 'imported'; destRelativePath: string }
   | { status: 'imported_upgrade'; destRelativePath: string; existingRelativePath: string }
+  | { status: 'replaced'; replacedRelativePath: string }
   | { status: 'skipped_existing'; existingRelativePath: string }
   | { status: 'needs_review' }
   | { status: 'error'; message: string }
+
+export type ImportTagPreview = {
+  artist: string | null
+  title: string | null
+  album: string | null
+  year: string | null
+  label: string | null
+  catalogNumber: string | null
+  trackPosition: string | null
+  discogsReleaseId: number | null
+  discogsTrackPosition: string | null
+}
+
+export type AudioAnalysis = {
+  format: string
+  codec: string | null
+  channels: number | null
+  sampleRateHz: number | null
+  bitDepth: number | null
+  bitrateKbps: number | null
+  durationSeconds: number | null
+  fileSizeBytes: number
+  integratedLufs: number | null
+  loudnessRangeLu: number | null
+  truePeakDbfs: number | null
+  peakLevelDb: number | null
+  rmsLevelDb: number | null
+  crestDb: number | null
+  noiseFloorDb: number | null
+  noiseScore: number | null
+  lowBandRmsDb: number | null
+  highBandRmsDb: number | null
+  subBassRmsDb: number | null
+  airBandRmsDb: number | null
+  humRmsDb: number | null
+  cutoffDb: number | null
+  rumbleScore: number | null
+  humScore: number | null
+  vinylLikelihood: number | null
+}
+
+export type ImportReviewCandidate = {
+  match: DiscogsTrackMatch
+  proposedTags: ImportTagPreview
+  destinationRelativePath: string
+  exactExistingFilename: string | null
+}
+
+export type ImportReviewSearch = {
+  artist: string
+  title: string
+  version: string | null
+}
+
+export type ImportReview = {
+  filename: string
+  parsed: { artist: string; title: string; version: string | null } | null
+  search: ImportReviewSearch
+  selectedCandidateIndex: number | null
+  candidates: ImportReviewCandidate[]
+  similarItems: CollectionItem[]
+  sourceAnalysis: AudioAnalysis | null
+  tagWriteSupported: boolean
+}
+
+export type ImportComparison = {
+  sourceFilename: string
+  existingFilename: string
+  sourceAnalysis: AudioAnalysis | null
+  existingAnalysis: AudioAnalysis | null
+}
+
+export type ImportCommitInput = {
+  filename: string
+  match?: DiscogsTrackMatch | null
+  tags?: ImportTagPreview | null
+  mode?: 'import_new' | 'replace_existing'
+  replaceFilename?: string | null
+}
 
 export type DJBrainApi = {
   wantList: {
@@ -151,9 +344,7 @@ export type DJBrainApi = {
     onItemUpdated: (listener: (item: WantListItem) => void) => () => void
   }
   settings: {
-    get: () => Promise<SettingsSnapshot>
-    update: (patch: SettingsPatch) => Promise<SettingsSnapshot>
-    pickDirectory: (options?: PickDirectoryOptions) => Promise<string | null>
+    get: () => Promise<AppSettings>
   }
   slskd: {
     testConnection: (input: SlskdConnectionTestInput) => Promise<SlskdConnectionTestResult>
@@ -177,15 +368,38 @@ export type DJBrainApi = {
     search: (query: string) => Promise<GrokSearchResponse>
   }
   collection: {
-    list: (query?: string) => Promise<CollectionListResult>
+    list: (query?: string, limit?: number) => Promise<CollectionListResult>
+    get: (filename: string) => Promise<CollectionItemDetails | null>
     listDownloads: (query?: string) => Promise<CollectionListResult>
+    reanalyze: (filename: string) => Promise<void>
     syncNow: () => Promise<CollectionSyncStatus>
     getStatus: () => Promise<CollectionSyncStatus>
     onUpdated: (listener: (status: CollectionSyncStatus) => void) => () => void
+    getImportReview: (filename: string, search?: Partial<ImportReviewSearch>, force?: boolean) => Promise<ImportReview>
+    compareImport: (filename: string, existingFilename: string) => Promise<ImportComparison>
+    queueImportProcessing: (filenames?: string[], force?: boolean) => Promise<{ queued: number }>
+    commitImport: (input: ImportCommitInput) => Promise<ImportFileResult>
     importFile: (filename: string) => Promise<ImportFileResult>
     deleteFile: (filename: string) => Promise<void>
     clearEmptyFolders: () => Promise<number>
     showInFinder: (filename: string) => Promise<void>
     openInPlayer: (filename: string) => Promise<void>
+  }
+  upgrades: {
+    list: () => Promise<UpgradeCase[]>
+    open: (collectionFilename: string) => Promise<UpgradeCase>
+    get: (id: number) => Promise<UpgradeCase | null>
+    search: (id: number, search?: Partial<ImportReviewSearch>) => Promise<UpgradeCase | null>
+    setReference: (
+      id: number,
+      input: { artist?: string; title?: string; version?: string | null; durationSeconds?: number | null }
+    ) => Promise<UpgradeCase | null>
+    getCandidates: (id: number) => Promise<UpgradeCandidate[]>
+    getLocalCandidates: (id: number) => Promise<UpgradeLocalCandidate[]>
+    download: (id: number, username: string, filename: string, size: number) => Promise<UpgradeCase | null>
+    addLocalCandidate: (id: number, filename: string) => Promise<UpgradeCase | null>
+    selectLocalCandidate: (id: number, filename: string) => Promise<UpgradeCase | null>
+    replace: (id: number) => Promise<UpgradeCase | null>
+    markReanalyzed: (id: number) => Promise<UpgradeCase | null>
   }
 }

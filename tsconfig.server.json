@@ -3,14 +3,7 @@
   "include": [
     "vite.config.ts",
     "src/server/**/*",
-    "src/main/settings-store.ts",
-    "src/main/collection-service.ts",
-    "src/main/online-search-service.ts",
-    "src/main/grok-search-service.ts",
-    "src/main/slskd-service.ts",
-    "src/main/discogs-match-service.ts",
-    "src/main/tagger-service.ts",
-    "src/main/import-service.ts",
+    "src/backend/**/*",
     "src/shared/**/*"
   ],
   "compilerOptions": {
