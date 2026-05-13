@@ -639,7 +639,7 @@ export class RecordingIdentityService {
       : null
   }
 
-  async identifyFile(filename: string): Promise<IdentificationDecision> {
+  async identifyFile(filename: string, options: { forceExternal?: boolean } = {}): Promise<IdentificationDecision> {
     const absolutePath = this.deps.resolveMusicRelativePath(filename)
     await this.deps.fileAnalysisService.get(filename, absolutePath).catch(() => null)
     const [item, audioHash, rejectedKeys, tags] = await Promise.all([
@@ -737,7 +737,7 @@ export class RecordingIdentityService {
       rejectedKeys,
       includeNeedsReview: false
     })
-    if (localDecision) return localDecision
+    if (localDecision && !options.forceExternal) return localDecision
 
     if (searchArtist && searchTitle) {
       const settings = this.deps.getSettings()

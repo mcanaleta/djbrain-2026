@@ -6,6 +6,7 @@ type Queryable = Pick<Pool, 'query'> | Pick<PoolClient, 'query'>
 
 type WantListRow = {
   id: number | string
+  want_kind: string | null
   artist: string
   title: string
   version: string | null
@@ -15,6 +16,12 @@ type WantListRow = {
   label: string | null
   added_at: Date | string
   pipeline_status: string | null
+  source_collection_filename: string | null
+  target_download_count: number | string | null
+  auto_download_enabled: boolean | null
+  last_search_at: Date | string | null
+  next_search_at: Date | string | null
+  selected_download_id: number | string | null
   search_id: string | null
   search_result_count: number | string | null
   best_candidates_json: string | null
@@ -33,8 +40,10 @@ function toIso(value: Date | string): string {
 
 export class WantListStore {
   private readonly columns = `
-    id, artist, title, version, length, year, album, label, added_at,
-    pipeline_status, search_id, search_result_count, best_candidates_json,
+    id, want_kind, artist, title, version, length, year, album, label, added_at,
+    pipeline_status, source_collection_filename, target_download_count, auto_download_enabled,
+    last_search_at, next_search_at, selected_download_id,
+    search_id, search_result_count, best_candidates_json,
     download_username, download_filename, pipeline_error,
     discogs_release_id, discogs_track_position, discogs_entity_type, imported_filename
   `
@@ -48,6 +57,7 @@ export class WantListStore {
   private rowToItem(row: WantListRow): WantListItem {
     return {
       id: toNumber(row.id),
+      wantKind: row.want_kind === 'replacement' ? 'replacement' : 'missing',
       artist: row.artist,
       title: row.title,
       version: row.version ?? null,
@@ -57,6 +67,12 @@ export class WantListStore {
       label: row.label ?? null,
       addedAt: toIso(row.added_at),
       pipelineStatus: row.pipeline_status ?? 'idle',
+      sourceCollectionFilename: row.source_collection_filename ?? null,
+      targetDownloadCount: toNumber(row.target_download_count ?? 3),
+      autoDownloadEnabled: row.auto_download_enabled ?? true,
+      lastSearchAt: row.last_search_at ? toIso(row.last_search_at) : null,
+      nextSearchAt: row.next_search_at ? toIso(row.next_search_at) : null,
+      selectedDownloadId: row.selected_download_id != null ? toNumber(row.selected_download_id) : null,
       searchId: row.search_id ?? null,
       searchResultCount: toNumber(row.search_result_count ?? 0),
       bestCandidatesJson: row.best_candidates_json ?? null,
@@ -73,20 +89,28 @@ export class WantListStore {
   public async add(input: WantListAddInput): Promise<WantListItem> {
     const normalized = normalizeWantListInput(input)
     const result = await this.db.query<WantListRow>(
-      `INSERT INTO want_list (artist, title, version, length, year, album, label, discogs_release_id, discogs_track_position, discogs_entity_type)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `INSERT INTO want_list (
+         want_kind, artist, title, version, length, year, album, label,
+         discogs_release_id, discogs_track_position, discogs_entity_type,
+         source_collection_filename, target_download_count, auto_download_enabled
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
        RETURNING ${this.columns}`,
       [
+        normalized.wantKind,
         normalized.artist,
         normalized.title,
         normalized.version ?? null,
         normalized.length ?? null,
-        input.year ?? null,
+        normalized.year ?? null,
         normalized.album ?? null,
         normalized.label ?? null,
-        input.discogsReleaseId ?? null,
-        input.discogsTrackPosition ?? null,
-        input.discogsEntityType ?? null
+        normalized.discogsReleaseId ?? null,
+        normalized.discogsTrackPosition ?? null,
+        normalized.discogsEntityType ?? null,
+        normalized.sourceCollectionFilename ?? null,
+        normalized.targetDownloadCount ?? 3,
+        normalized.autoDownloadEnabled ?? true
       ]
     )
     return this.rowToItem(result.rows[0])
@@ -102,17 +126,22 @@ export class WantListStore {
     const normalized = normalizeWantListInput(input)
     const result = await this.db.query<WantListRow>(
       `UPDATE want_list
-       SET artist = $1, title = $2, version = $3, length = $4, year = $5, album = $6, label = $7
-       WHERE id = $8
+       SET want_kind = $1, artist = $2, title = $3, version = $4, length = $5, year = $6, album = $7, label = $8,
+           source_collection_filename = $9, target_download_count = $10, auto_download_enabled = $11
+       WHERE id = $12
        RETURNING ${this.columns}`,
       [
+        normalized.wantKind,
         normalized.artist,
         normalized.title,
         normalized.version ?? null,
         normalized.length ?? null,
-        input.year ?? null,
+        normalized.year ?? null,
         normalized.album ?? null,
         normalized.label ?? null,
+        normalized.sourceCollectionFilename ?? null,
+        normalized.targetDownloadCount ?? 3,
+        normalized.autoDownloadEnabled ?? true,
         id
       ]
     )
@@ -127,6 +156,30 @@ export class WantListStore {
     if ('pipelineStatus' in patch) {
       params.push(patch.pipelineStatus ?? 'idle')
       parts.push(`pipeline_status = $${params.length}`)
+    }
+    if ('sourceCollectionFilename' in patch) {
+      params.push(patch.sourceCollectionFilename ?? null)
+      parts.push(`source_collection_filename = $${params.length}`)
+    }
+    if ('targetDownloadCount' in patch) {
+      params.push(patch.targetDownloadCount ?? 3)
+      parts.push(`target_download_count = $${params.length}`)
+    }
+    if ('autoDownloadEnabled' in patch) {
+      params.push(patch.autoDownloadEnabled ?? true)
+      parts.push(`auto_download_enabled = $${params.length}`)
+    }
+    if ('lastSearchAt' in patch) {
+      params.push(patch.lastSearchAt ?? null)
+      parts.push(`last_search_at = $${params.length}`)
+    }
+    if ('nextSearchAt' in patch) {
+      params.push(patch.nextSearchAt ?? null)
+      parts.push(`next_search_at = $${params.length}`)
+    }
+    if ('selectedDownloadId' in patch) {
+      params.push(patch.selectedDownloadId ?? null)
+      parts.push(`selected_download_id = $${params.length}`)
     }
     if ('searchId' in patch) {
       params.push(patch.searchId ?? null)
@@ -183,6 +236,20 @@ export class WantListStore {
 
   public async list(): Promise<WantListItem[]> {
     const result = await this.db.query<WantListRow>(`SELECT ${this.columns} FROM want_list ORDER BY added_at DESC`)
+    return result.rows.map((row) => this.rowToItem(row))
+  }
+
+  public async listDueForDownload(limit: number): Promise<WantListItem[]> {
+    const result = await this.db.query<WantListRow>(
+      `SELECT ${this.columns}
+       FROM want_list
+       WHERE auto_download_enabled = TRUE
+         AND pipeline_status NOT IN ('imported', 'importing', 'identifying')
+         AND (next_search_at IS NULL OR next_search_at <= now())
+       ORDER BY COALESCE(next_search_at, added_at), id
+       LIMIT $1`,
+      [Math.max(1, Math.trunc(limit))]
+    )
     return result.rows.map((row) => this.rowToItem(row))
   }
 }

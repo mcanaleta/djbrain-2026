@@ -155,6 +155,7 @@ export function createWantListPipelines(deps: WantListPipelineDeps) {
   const {
     currentSettings,
     requireCollectionService,
+    resolveMusicRelativePath,
     normalizeSearchText,
     slskdService,
     importService
@@ -215,7 +216,7 @@ export function createWantListPipelines(deps: WantListPipelineDeps) {
       return
     }
 
-    if (!item.artist || !item.title || !item.year) {
+    if (!item.artist || !item.title || (item.wantKind !== 'replacement' && !item.year)) {
       await service.wantListUpdatePipeline(itemId, {
         pipelineStatus: 'import_error',
         pipelineError:
@@ -230,6 +231,58 @@ export function createWantListPipelines(deps: WantListPipelineDeps) {
     })
 
     try {
+      if (item.wantKind === 'replacement') {
+        if (!item.sourceCollectionFilename) {
+          throw new HttpError(400, 'Replacement wanted record is missing the source collection filename.')
+        }
+        const collectionPath = resolveMusicRelativePath(item.sourceCollectionFilename)
+        const localRelativePath = toMusicRelativePath(settings, localFilePath)
+        const parsed = parseImportFilename(item.sourceCollectionFilename) ?? parseImportFilename(localRelativePath)
+        const archiveDate = new Date().toISOString().slice(0, 10)
+        const songsPrefix = normalizeFilename(settings.songsFolderPath)
+        const normalizedCollectionFilename = normalizeFilename(item.sourceCollectionFilename)
+        const archiveSuffix = normalizedCollectionFilename.startsWith(`${songsPrefix}/`)
+          ? normalizedCollectionFilename.slice(songsPrefix.length + 1)
+          : basename(normalizedCollectionFilename)
+        const archivePath = await findAvailableArchivePath(resolveMusicRelativePath(normalizeFilename(
+          join(settings.songsFolderPath, '_replaced', archiveDate, archiveSuffix)
+        )))
+        const replacementRelativePath = buildReplacementRelativePath(item.sourceCollectionFilename, localRelativePath)
+        const match = {
+          releaseId: item.discogsReleaseId ?? 0,
+          releaseTitle: item.album ?? item.title,
+          format: null,
+          artist: item.artist || parsed?.artist || 'Unknown Artist',
+          title: item.title || parsed?.title || basename(item.sourceCollectionFilename),
+          version: item.version ?? parsed?.version ?? null,
+          trackPosition: item.discogsTrackPosition,
+          year: item.year ?? parsed?.year ?? null,
+          label: item.label,
+          catalogNumber: null,
+          score: 100
+        }
+        await mkdir(dirname(archivePath), { recursive: true })
+        await copyFile(collectionPath, archivePath)
+        const result = await importService.importFileWithKnownMatch(settings, match, localFilePath, null, {
+          conflictStrategy: 'replace',
+          replaceRelativePath: replacementRelativePath
+        })
+        if (result.status !== 'replaced') {
+          throw new HttpError(400, result.status === 'error' ? result.message : 'Replacement failed.')
+        }
+        if (normalizeFilename(replacementRelativePath) !== normalizedCollectionFilename) {
+          await unlink(collectionPath).catch(() => {})
+        }
+        await service.wantListUpdatePipeline(itemId, {
+          pipelineStatus: 'imported',
+          sourceCollectionFilename: replacementRelativePath,
+          discogsReleaseId: result.match.releaseId,
+          discogsTrackPosition: result.match.trackPosition,
+          importedFilename: replacementRelativePath
+        })
+        return
+      }
+
       const match = {
         releaseId: item.discogsReleaseId ?? 0,
         releaseTitle: item.album ?? item.title,

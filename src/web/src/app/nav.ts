@@ -19,7 +19,6 @@ export type NavItem = {
 
 export const NAV_ITEMS: NavItem[] = [
   { key: 'collection', label: 'Collection', path: '/collection', icon: RowsIcon },
-  { key: 'upgrades', label: 'Upgrades', path: '/upgrades', icon: ArchiveIcon },
   { key: 'wantlist', label: 'Want List', path: '/wantlist', icon: BookmarkIcon },
   {
     key: 'discogs-search',
@@ -59,11 +58,7 @@ export function resolveNavTitle(pathname: string): string {
     return 'Identify'
   }
 
-  if (/^\/upgrades\/\d+$/u.test(pathname)) {
-    return 'Upgrade'
-  }
-
-  if (pathname === '/collection/item') {
+  if (pathname === '/collection/item' || /^\/collection\/item\/\d+$/u.test(pathname)) {
     return 'Track'
   }
 

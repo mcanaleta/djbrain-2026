@@ -7,6 +7,7 @@ import type {
   RecordingDetails,
   RecordingSummary,
   DJBrainApi,
+  DownloadAttempt,
   SlskdConnectionTestInput,
   UpgradeCandidate,
   UpgradeCase,
@@ -168,11 +169,19 @@ export const api: DJBrainApi = {
       })
       if (item) emitWantListItem(item)
     },
-    async import(id: number, localFilePath: string) {
+    listDownloads: (id: number) => request<DownloadAttempt[]>(`/api/want-list/${id}/downloads`),
+    async selectDownload(id: number, downloadId: number) {
+      const item = await request<WantListItem | null>(`/api/want-list/${id}/downloads/${downloadId}/select`, {
+        method: 'POST'
+      })
+      if (item) emitWantListItem(item)
+      return item
+    },
+    async import(id: number, localFilePath: string, downloadId?: number | null) {
       const item = await request<WantListItem | null>(`/api/want-list/${id}/import`, {
         method: 'POST',
         headers: JSON_HEADERS,
-        body: JSON.stringify({ localFilePath, filename: localFilePath })
+        body: JSON.stringify({ localFilePath, filename: localFilePath, downloadId })
       })
       if (item) emitWantListItem(item)
     },
@@ -225,7 +234,10 @@ export const api: DJBrainApi = {
       request(
         `/api/collection?query=${encodeURIComponent(query ?? '')}${typeof limit === 'number' ? `&limit=${encodeURIComponent(String(limit))}` : ''}`
       ),
-    get: (filename: string) => request(`/api/collection/item?filename=${encodeURIComponent(filename)}`),
+    get: (idOrFilename: number | string) =>
+      typeof idOrFilename === 'number'
+        ? request(`/api/collection/items/${encodeURIComponent(String(idOrFilename))}`)
+        : request(`/api/collection/item?filename=${encodeURIComponent(idOrFilename)}`),
     listDownloads: (query?: string) =>
       request(`/api/collection/downloads?query=${encodeURIComponent(query ?? '')}`),
     reanalyze: (filename: string) =>
@@ -276,6 +288,16 @@ export const api: DJBrainApi = {
         headers: JSON_HEADERS,
         body: JSON.stringify({ filenames, force })
       }),
+    async identifyWithExternalSources(filename: string) {
+      const result = await request<FileIdentificationState | null>('/api/collection/identify/discogs', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ filename })
+      })
+      invalidateCollectionSnapshot()
+      void syncCollectionSnapshot()
+      return result
+    },
     async reviewIdentification(input) {
       const result = await request<FileIdentificationState | null>('/api/collection/identify/review', {
         method: 'POST',

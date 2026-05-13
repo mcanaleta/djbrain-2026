@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import type { CollectionItem } from '../../../shared/api'
+import { buildCollectionItemPath } from '../../../shared/collection-url'
 import { api } from '../api/client'
 import { ActionButton } from '../components/view/ActionButton'
 import { DataTable, type DataTableColumn } from '../components/view/DataTable'
@@ -107,7 +108,7 @@ export default function CollectionPage(): React.JSX.Element {
 
   const handleOpenItem = useCallback(
     (row: CollectionRow): void => {
-      navigate(`/collection/item?filename=${encodeURIComponent(row.filename)}`)
+      navigate(buildCollectionItemPath(row.id, row.filename))
     },
     [navigate]
   )

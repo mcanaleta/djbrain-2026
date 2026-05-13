@@ -1,7 +1,7 @@
 import { DownloadIcon, LockClosedIcon } from '@radix-ui/react-icons'
 import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import type { SlskdCandidate } from '../../../shared/api'
+import type { DownloadAttempt, SlskdCandidate } from '../../../shared/api'
 import { ActionButton } from '../components/view/ActionButton'
 import { DataTable, type DataTableColumn } from '../components/view/DataTable'
 import { EmptyState } from '../components/view/EmptyState'
@@ -22,7 +22,8 @@ import {
 import {
   getSoulseekActionKey,
   updateWantListEditState,
-  type WantListEditState
+  type WantListEditState,
+  type WantListTextField
 } from '../features/wantlist/view-model'
 import { WantListStatusBadge } from '../features/wantlist/WantListStatusBadge'
 import {
@@ -30,6 +31,7 @@ import {
   type WantListLocalResult,
   type WantListVideoResult
 } from '../features/wantlist/useWantListItemPage'
+import { LinkedSourceRecord } from '../features/wantlist/LinkedSourceRecord'
 
 function LocalResultRow({
   item,
@@ -107,6 +109,10 @@ function soulseekFolderLabel(filename: string): string {
   return parts.length > 1 ? parts[parts.length - 2] : 'root'
 }
 
+function attemptLabel(attempt: DownloadAttempt): string {
+  return attempt.localFilename ?? attempt.remoteFilename ?? `Download ${attempt.id}`
+}
+
 export default function WantlistItemPage(): React.JSX.Element {
   const { wantId } = useParams<{ wantId: string }>()
   const [activeVideoId, setActiveVideoId] = useState<string | null>(null)
@@ -114,6 +120,7 @@ export default function WantlistItemPage(): React.JSX.Element {
   const {
     item,
     editState,
+    sourceItem,
     setEditState,
     soulseekQuery,
     setSoulseekQuery,
@@ -122,30 +129,84 @@ export default function WantlistItemPage(): React.JSX.Element {
     collectionQuery,
     setCollectionQuery,
     soulseekResults,
+    downloadAttempts,
     youtubeResults,
     collectionResults,
     isLoading,
     isSaving,
     isLoadingSoulseek,
+    isLoadingSourceItem,
     isLoadingYouTube,
     isLoadingCollection,
     errorMessage,
     actionError,
+    sourceItemError,
     busyAction,
     sectionErrors,
     actions
   } = useWantListItemPage(wantId)
 
   const activeVideo = youtubeResults.find((video) => video.id === activeVideoId) ?? youtubeResults[0] ?? null
-  const metadataFields: Array<{ key: keyof WantListEditState; label: string }> = [
+  const metadataFields: Array<{ key: WantListTextField; label: string }> = [
     { key: 'artist', label: 'Artist' },
     { key: 'title', label: 'Title' },
     { key: 'version', label: 'Version' },
     { key: 'length', label: 'Length' },
     { key: 'year', label: 'Year' },
     { key: 'album', label: 'Album' },
-    { key: 'label', label: 'Label' }
+    { key: 'label', label: 'Label' },
+    ...(item?.wantKind === 'replacement' ? [{ key: 'sourceCollectionFilename' as const, label: 'Source file' }] : []),
+    { key: 'targetDownloadCount', label: 'Downloads' }
   ]
+
+  const downloadColumns = useMemo<DataTableColumn<DownloadAttempt>[]>(
+    () => [
+      {
+        key: 'status',
+        header: 'Status',
+        cellClassName: 'w-[92px] whitespace-nowrap',
+        render: (attempt) => <Pill tone={attempt.status === 'downloaded' ? 'success' : attempt.status === 'failed' ? 'danger' : 'muted'}>{attempt.status}</Pill>
+      },
+      {
+        key: 'file',
+        header: 'File',
+        cellClassName: 'max-w-[1px] min-w-[240px]',
+        render: (attempt) => (
+          <div className="space-y-0.5 leading-tight">
+            <div className="truncate text-[11px] font-medium text-zinc-100" title={attemptLabel(attempt)}>{fileBasename(attemptLabel(attempt))}</div>
+            <div className="truncate text-[10px] text-zinc-500" title={attempt.username ?? ''}>{attempt.username ?? 'local'} · {formatFileSize(attempt.localFilesize ?? attempt.remoteSize ?? 0)}</div>
+          </div>
+        )
+      },
+      {
+        key: 'meta',
+        header: 'Meta',
+        cellClassName: 'w-[150px] whitespace-nowrap text-[10px] text-zinc-500',
+        render: (attempt) => `${attempt.extension ?? '?'} ${attempt.bitrate ? `${attempt.bitrate} kbps` : ''} ${formatCompactDuration(attempt.durationSeconds)}`
+      },
+      {
+        key: 'actions',
+        header: '',
+        cellClassName: 'w-[1%]',
+        render: (attempt) => {
+          const filename = attempt.localFilename
+          const isSelected = item?.selectedDownloadId === attempt.id
+          return (
+            <div className="flex items-center gap-1">
+              {filename ? <ActionButton type="button" size="xs" onClick={() => actions.openInPlayer(filename)}>Play</ActionButton> : null}
+              <ActionButton type="button" size="xs" disabled={!filename || isSelected || busyAction === `select-download:${attempt.id}`} onClick={() => void actions.selectDownload(attempt)}>
+                {isSelected ? 'Selected' : 'Select'}
+              </ActionButton>
+              <ActionButton type="button" size="xs" tone="success" disabled={!filename || busyAction === `import-download:${attempt.id}`} onClick={() => void actions.importDownload(attempt)}>
+                {busyAction === `import-download:${attempt.id}` ? 'Working...' : item?.wantKind === 'replacement' ? 'Replace' : 'Import'}
+              </ActionButton>
+            </div>
+          )
+        }
+      }
+    ],
+    [actions, busyAction, item?.selectedDownloadId, item?.wantKind]
+  )
 
   const soulseekColumns = useMemo<DataTableColumn<SlskdCandidate>[]>(
     () => [
@@ -309,9 +370,22 @@ export default function WantlistItemPage(): React.JSX.Element {
 
       {actionError ? <Notice tone="error">{actionError}</Notice> : null}
 
+      {item.wantKind === 'replacement' ? (
+        <ViewSection title="Linked Record" subtitle="Current collection file this wanted item will upgrade.">
+          <LinkedSourceRecord
+            item={sourceItem}
+            filename={item.sourceCollectionFilename}
+            error={sourceItemError}
+            isLoading={isLoadingSourceItem}
+            onShowInFinder={actions.showInFinder}
+            onOpenInPlayer={actions.openInPlayer}
+          />
+        </ViewSection>
+      ) : null}
+
       <ViewSection
         title="Song"
-        subtitle="Edit the wanted item and save."
+        subtitle={item.wantKind === 'replacement' ? 'Replacement target and metadata.' : 'Wanted metadata.'}
         aside={
           <ActionButton type="button" tone="success" disabled={isSaving} onClick={() => void actions.save()}>
             {isSaving ? 'Saving…' : 'Save'}
@@ -330,6 +404,17 @@ export default function WantlistItemPage(): React.JSX.Element {
             />
           ))}
         </div>
+      </ViewSection>
+
+      <ViewSection title="Download Attempts" subtitle="The downloader worker fills this list. Listen, select, then import or replace.">
+        <DataTable
+          columns={downloadColumns}
+          rows={downloadAttempts}
+          getRowKey={(attempt) => String(attempt.id)}
+          emptyMessage="No download attempts yet."
+          tableClassName="min-w-[720px]"
+          rowClassName="text-[11px]"
+        />
       </ViewSection>
 
       <ViewSection

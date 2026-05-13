@@ -370,6 +370,15 @@ export function IdentificationReviewPanel({
     })
   }
 
+  const handleFindDiscogs = (): void => {
+    void actions.run({
+      key: 'discogs',
+      action: async () => { await api.collection.identifyWithExternalSources(filename); await reloadAll() },
+      successMessage: 'Discogs candidates refreshed.',
+      errorFallback: 'Failed to search Discogs'
+    })
+  }
+
   return (
     <div className="space-y-3">
       {loading ? <Notice>Loading identification…</Notice> : null}
@@ -387,6 +396,9 @@ export function IdentificationReviewPanel({
                 {item.identification?.status ? <Pill>{item.identification.status}</Pill> : null}
                 <ActionButton size="xs" onClick={() => void api.collection.showInFinder(item.filename)}>Finder</ActionButton>
                 <ActionButton size="xs" onClick={() => void api.collection.openInPlayer(item.filename)}>Open Player</ActionButton>
+                <ActionButton size="xs" disabled={actions.busyAction === 'discogs'} onClick={() => void handleFindDiscogs()}>
+                  {actions.busyAction === 'discogs' ? 'Searching...' : 'Find Discogs'}
+                </ActionButton>
                 <ActionButton size="xs" disabled={actions.busyAction === 'identify'} onClick={() => void handleReidentify()}>
                   {actions.busyAction === 'identify' ? 'Queuing…' : 'Reidentify'}
                 </ActionButton>

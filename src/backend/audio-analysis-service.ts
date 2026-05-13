@@ -65,6 +65,10 @@ async function run(command: string, args: string[]): Promise<string> {
   return `${stdout}\n${stderr}`.replace(/\r/g, '')
 }
 
+export function buildAudioOnlyFfmpegArgs(filePath: string, args: string[]): string[] {
+  return ['-hide_banner', '-nostats', '-i', filePath, '-map', '0:a:0', '-vn', ...args, '-f', 'null', '-']
+}
+
 async function readProbe(filePath: string): Promise<ProbeData> {
   return JSON.parse(
     await run('ffprobe', ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', filePath])
@@ -72,17 +76,7 @@ async function readProbe(filePath: string): Promise<ProbeData> {
 }
 
 async function readLoudness(filePath: string): Promise<Pick<AudioAnalysis, 'integratedLufs' | 'loudnessRangeLu' | 'truePeakDbfs'>> {
-  const output = await run('ffmpeg', [
-    '-hide_banner',
-    '-nostats',
-    '-i',
-    filePath,
-    '-filter_complex',
-    'ebur128=peak=true',
-    '-f',
-    'null',
-    '-'
-  ])
+  const output = await run('ffmpeg', buildAudioOnlyFfmpegArgs(filePath, ['-af', 'ebur128=peak=true']))
   return {
     integratedLufs: parseDb(output.match(/Integrated loudness:\s*\n\s*I:\s*([-\d.]+)/)?.[1]),
     loudnessRangeLu: parseDb(output.match(/Loudness range:\s*\n\s*LRA:\s*([-\d.]+)/)?.[1]),
@@ -95,17 +89,7 @@ async function readStats(
   filter: string,
   metrics: string[]
 ): Promise<Record<string, number | null>> {
-  const output = await run('ffmpeg', [
-    '-hide_banner',
-    '-nostats',
-    '-i',
-    filePath,
-    '-af',
-    `${filter}astats=measure_overall=${metrics.join('+')}:metadata=0:reset=0`,
-    '-f',
-    'null',
-    '-'
-  ])
+  const output = await run('ffmpeg', buildAudioOnlyFfmpegArgs(filePath, ['-af', `${filter}astats=measure_overall=${metrics.join('+')}:metadata=0:reset=0`]))
   return Object.fromEntries(
     metrics.map((metric) => {
       const label = metric.replace(/_/g, ' ')

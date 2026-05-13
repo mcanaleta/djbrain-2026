@@ -21,7 +21,7 @@ import { MusicBrainzService } from '../backend/musicbrainz-service.ts'
 import { RecordingIdentityService } from '../backend/recording-identity-service.ts'
 import { YouTubeApiService } from '../backend/youtube-api-service.ts'
 import type { DiscogsTrackMatch } from '../shared/discogs-match.ts'
-import type { ImportTagPreview } from '../shared/api.ts'
+import type { FileIdentificationState, ImportTagPreview } from '../shared/api.ts'
 import { formatError, HttpError, sendJson } from './http.ts'
 import { registerCollectionRoutes } from './routes/collection.ts'
 import { registerMediaRoutes } from './routes/media.ts'
@@ -426,7 +426,7 @@ function applyTagOverrides(match: DiscogsTrackMatch, tags: ImportTagPreview | nu
 }
 
 const { buildImportReview, readCollectionStatus, showInFolder, openInSystemPlayer } = collectionActions
-const { runSearchPipeline, runImportPipeline, startDownloadPipeline } = wantListPipelines
+const { runImportPipeline } = wantListPipelines
 const {
   listCases,
   getCase,
@@ -477,6 +477,7 @@ export function createApp(): express.Express {
     clearEmptyDirsWithin,
     showInFolder,
     openInSystemPlayer,
+    identifyWithExternalSources,
     readDiscogsTrackMatch,
     readImportTagPreview,
     applyTagOverrides
@@ -486,9 +487,7 @@ export function createApp(): express.Express {
     requireCollectionService,
     normalizeSearchText,
     resolveMusicRelativePath,
-    runSearchPipeline,
-    runImportPipeline,
-    startDownloadPipeline
+    runImportPipeline
   })
 
   registerUpgradeRoutes(app, {
@@ -638,4 +637,24 @@ function requireCollectionService(): CollectionService {
     throw new Error('Collection service not initialized')
   }
   return collectionService
+}
+
+function requireRecordingIdentityService(): RecordingIdentityService {
+  if (!recordingIdentityService) {
+    throw new Error('Recording identity service not initialized')
+  }
+  return recordingIdentityService
+}
+
+async function identifyWithExternalSources(filename: string): Promise<FileIdentificationState | null> {
+  const service = requireCollectionService()
+  const item = await service.getItem(filename)
+  if (!item) throw new HttpError(404, 'File not found in collection.')
+  const decision = await requireRecordingIdentityService().identifyFile(filename, { forceExternal: true })
+  await service.saveIdentificationDecision(filename, {
+    filesize: item.filesize,
+    mtimeMs: item.mtimeMs ?? 0,
+    ...decision
+  })
+  return (await service.getItem(filename))?.identification ?? null
 }

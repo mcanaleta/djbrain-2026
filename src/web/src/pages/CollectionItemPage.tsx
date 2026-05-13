@@ -1,13 +1,14 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { buildReplacementWantInput } from '../../../shared/want-list-input'
 import { api } from '../api/client'
 import { ActionButton } from '../components/view/ActionButton'
 import { KV } from '../components/view/KV'
 import { Notice } from '../components/view/Notice'
 import { ViewSection } from '../components/view/ViewSection'
 import { usePlayer } from '../context/PlayerContext'
-import { useAsyncAction } from '../hooks/useAsyncAction'
+import { CollectionItemModelView } from '../features/collection-item/CollectionItemModelView'
 import { getErrorMessage } from '../lib/error-utils'
 import { deriveTrackSummaryFromFilename, formatFileSize } from '../lib/music-file'
 import { buildIdentifyReviewHref } from '../lib/urls'
@@ -31,9 +32,14 @@ function JsonBlock({ value }: { value: string | null | undefined }): React.JSX.E
 export default function CollectionItemPage(): React.JSX.Element {
   const navigate = useNavigate()
   const player = usePlayer()
+  const { itemId } = useParams<{ itemId: string }>()
   const [params] = useSearchParams()
   const filename = (params.get('filename') ?? '').trim()
-  const [busyAction, setBusyAction] = useState<'sync' | 'reanalyze' | 'mark-reanalyzed' | 'identify' | null>(null)
+  const numericItemId = Number(itemId)
+  const hasItemId = typeof itemId === 'string'
+  const hasValidItemId = Number.isInteger(numericItemId) && numericItemId > 0
+  const itemLabel = hasItemId ? (itemId ?? '') : filename
+  const [busyAction, setBusyAction] = useState<'sync' | 'reanalyze' | 'identify' | 'discogs' | 'upgrade' | null>(null)
   const [busyCandidateId, setBusyCandidateId] = useState<number | 'create' | null>(null)
   const [actionMessage, setActionMessage] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -43,11 +49,18 @@ export default function CollectionItemPage(): React.JSX.Element {
     isPending: isLoading,
     refetch
   } = useQuery({
-    queryKey: ['collection', 'item', filename],
-    queryFn: () => api.collection.get(filename),
-    enabled: Boolean(filename)
+    queryKey: ['collection', 'item', hasItemId ? numericItemId : filename],
+    queryFn: () => api.collection.get(hasItemId ? numericItemId : filename),
+    enabled: hasItemId ? hasValidItemId : Boolean(filename)
   })
-  const errorMessage = itemError ? getErrorMessage(itemError, 'Failed to load collection item') : null
+  const errorMessage = hasItemId && !hasValidItemId
+    ? 'Collection item id is invalid.'
+    : itemError ? getErrorMessage(itemError, 'Failed to load collection item') : null
+  const { data: recording, isPending: isRecordingLoading } = useQuery({
+    queryKey: ['collection', 'recording', item?.recordingId ?? null],
+    queryFn: () => item?.recordingId ? api.collection.getRecording(item.recordingId) : Promise.resolve(null),
+    enabled: Boolean(item?.recordingId)
+  })
 
   const summary = useMemo(
     () =>
@@ -95,22 +108,6 @@ export default function CollectionItemPage(): React.JSX.Element {
     }
   }, [item, refetch])
 
-  const handleMarkReanalyzed = useCallback(async (): Promise<void> => {
-    if (!item?.upgradeCase) return
-    setBusyAction('mark-reanalyzed')
-    setActionMessage(null)
-    setActionError(null)
-    try {
-      await api.upgrades.markReanalyzed(item.upgradeCase.id)
-      await refetch()
-      setActionMessage('Upgrade marked as reanalyzed.')
-    } catch (error) {
-      setActionError(getErrorMessage(error, 'Failed to mark reanalyzed'))
-    } finally {
-      setBusyAction(null)
-    }
-  }, [item, refetch])
-
   const handleIdentify = useCallback(async (): Promise<void> => {
     if (!item) return
     setBusyAction('identify')
@@ -126,6 +123,40 @@ export default function CollectionItemPage(): React.JSX.Element {
       setBusyAction(null)
     }
   }, [item, refetch])
+
+  const handleFindDiscogs = useCallback(async (): Promise<void> => {
+    if (!item) return
+    setBusyAction('discogs')
+    setActionMessage(null)
+    setActionError(null)
+    try {
+      await api.collection.identifyWithExternalSources(item.filename)
+      await refetch()
+      setActionMessage('Discogs candidates refreshed. Review Identify to accept one.')
+    } catch (error) {
+      setActionError(getErrorMessage(error, 'Failed to search Discogs'))
+    } finally {
+      setBusyAction(null)
+    }
+  }, [item, refetch])
+
+  const handleRequestUpgrade = useCallback(async (): Promise<void> => {
+    if (!item) return
+    setBusyAction('upgrade')
+    setActionMessage(null)
+    setActionError(null)
+    try {
+      const existing = (await api.wantList.list()).find(
+        (want) => want.wantKind === 'replacement' && want.sourceCollectionFilename === item.filename
+      )
+      const want = existing ?? await api.wantList.add(buildReplacementWantInput(item))
+      navigate(`/wantlist/${want.id}`)
+    } catch (error) {
+      setActionError(getErrorMessage(error, 'Failed to request upgrade'))
+    } finally {
+      setBusyAction(null)
+    }
+  }, [item, navigate])
 
   const handleReviewIdentification = useCallback(
     async (action: 'accept' | 'reject' | 'create_recording', candidateId?: number | null): Promise<void> => {
@@ -193,45 +224,44 @@ export default function CollectionItemPage(): React.JSX.Element {
                 <ActionButton size="xs" disabled={busyAction === 'identify'} onClick={() => void handleIdentify()}>
                   {busyAction === 'identify' ? 'Queuing…' : 'Reidentify'}
                 </ActionButton>
+                <ActionButton size="xs" disabled={busyAction === 'discogs'} onClick={() => void handleFindDiscogs()}>
+                  {busyAction === 'discogs' ? 'Searching...' : 'Find Discogs'}
+                </ActionButton>
                 <ActionButton size="xs" onClick={() => navigate(buildIdentifyReviewHref(item.filename, item.isDownload ? 'downloads' : 'collection'))}>
                   Review Identify
                 </ActionButton>
-                <ActionButton size="xs" disabled={busyAction === 'sync'} onClick={() => void handleSync()}>
-                  {busyAction === 'sync' ? 'Rescanning…' : 'Rescan'}
-                </ActionButton>
-                {item.upgradeCase?.status === 'pending_reanalyze' ? (
-                  <ActionButton size="xs" tone="success" disabled={busyAction === 'mark-reanalyzed'} onClick={() => void handleMarkReanalyzed()}>
-                    {busyAction === 'mark-reanalyzed' ? 'Saving…' : 'Mark Reanalyzed'}
+                {!item.isDownload ? (
+                  <ActionButton size="xs" tone="primary" disabled={busyAction === 'upgrade'} onClick={() => void handleRequestUpgrade()}>
+                    {busyAction === 'upgrade' ? 'Requesting...' : 'Request Upgrade'}
                   </ActionButton>
                 ) : null}
-                <ActionButton
-                  size="xs"
-                  onClick={() => {
-                    if (item.upgradeCase) navigate(`/upgrades/${item.upgradeCase.id}`)
-                    else void api.upgrades.open(item.filename).then((next) => navigate(`/upgrades/${next.id}`))
-                  }}
-                >
-                  {item.upgradeCase ? 'Open Upgrade' : 'Create Upgrade'}
+                <ActionButton size="xs" disabled={busyAction === 'sync'} onClick={() => void handleSync()}>
+                  {busyAction === 'sync' ? 'Rescanning…' : 'Rescan'}
                 </ActionButton>
               </>
             ) : null}
           </div>
         }
       >
-        <div className="text-xs text-zinc-500">{filename || 'Missing filename query parameter.'}</div>
+        <div className="text-xs text-zinc-500">{item?.filename ?? (itemLabel || 'Missing collection item.')}</div>
       </ViewSection>
 
       {isLoading ? <Notice className="text-sm">Loading item…</Notice> : null}
       {errorMessage ? <Notice tone="error" className="text-sm">{errorMessage}</Notice> : null}
       {actionError ? <Notice tone="error" className="text-sm">{actionError}</Notice> : null}
       {actionMessage ? <Notice tone="success" className="text-sm">{actionMessage}</Notice> : null}
-      {!isLoading && filename && !item && !errorMessage ? (
+      {!isLoading && itemLabel && !item && !errorMessage ? (
         <Notice tone="warning" className="text-sm">Item not found in collection.</Notice>
       ) : null}
 
       {item ? (
         <>
-          <ViewSection title="Core" padding="sm">
+          <CollectionItemModelView item={item} recording={recording} isRecordingLoading={Boolean(item.recordingId) && isRecordingLoading} />
+
+          <details className="rounded-xl border border-zinc-800 bg-zinc-950/30 p-2">
+            <summary className="cursor-pointer text-[12px] font-semibold text-zinc-300">Diagnostics</summary>
+            <div className="mt-2 space-y-3">
+          <ViewSection title="File Row" padding="sm">
             <KV
               rows={[
                 { label: 'Filename', value: item.filename },
@@ -370,22 +400,9 @@ export default function CollectionItemPage(): React.JSX.Element {
             )}
           </ViewSection>
 
-          <ViewSection title="Upgrade Case" padding="sm">
-            {item.upgradeCase ? (
-              <KV
-                rows={[
-                  { label: 'Case id', value: item.upgradeCase.id },
-                  { label: 'Status', value: item.upgradeCase.status },
-                  { label: 'Search artist', value: item.upgradeCase.searchArtist },
-                  { label: 'Search title', value: item.upgradeCase.searchTitle },
-                  { label: 'Search version', value: item.upgradeCase.searchVersion || '—' },
-                  { label: 'Updated', value: fmtDate(item.upgradeCase.updatedAt) }
-                ]}
-              />
-            ) : (
-              <div className="text-xs text-zinc-500">No row in `upgrade_cases`.</div>
-            )}
-          </ViewSection>
+            </div>
+          </details>
+
         </>
       ) : null}
     </div>

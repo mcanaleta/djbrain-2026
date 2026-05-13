@@ -7,7 +7,7 @@ import { ImportService, parseSongFilename } from '../../backend/import-service.t
 import type { PostgresMediaStore } from '../../backend/postgres-media-store.ts'
 import type { AppSettings } from '../../backend/settings-store.ts'
 import type { DiscogsTrackMatch } from '../../shared/discogs-match.ts'
-import type { ImportTagPreview } from '../../shared/api.ts'
+import type { FileIdentificationState, ImportTagPreview } from '../../shared/api.ts'
 import { asyncHandler, sendEmpty, sendJson } from '../http.ts'
 
 type CollectionRouteDeps = {
@@ -26,6 +26,7 @@ type CollectionRouteDeps = {
   clearEmptyDirsWithin: (rootDir: string) => Promise<number>
   showInFolder: (filePath: string) => Promise<void>
   openInSystemPlayer: (filePath: string) => Promise<void>
+  identifyWithExternalSources: (filename: string) => Promise<FileIdentificationState | null>
   readDiscogsTrackMatch: (value: unknown) => DiscogsTrackMatch | null
   readImportTagPreview: (value: unknown) => ImportTagPreview | null
   applyTagOverrides: (
@@ -54,6 +55,7 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
     clearEmptyDirsWithin,
     showInFolder,
     openInSystemPlayer,
+    identifyWithExternalSources,
     readDiscogsTrackMatch,
     readImportTagPreview,
     applyTagOverrides,
@@ -95,6 +97,24 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
       }
     }
     sendJson(response, 200, await requireCollectionService().getItem(filename))
+  }))
+
+  app.get('/api/collection/items/:id', asyncHandler(async (request, response) => {
+    const id = Number(request.params['id'])
+    if (!Number.isInteger(id) || id <= 0) {
+      sendJson(response, 200, null)
+      return
+    }
+    const mediaStore = getMediaStore?.() ?? null
+    if (mediaStore) {
+      const item = await mediaStore.getById(id)
+      if (item) {
+        item.upgradeCase = await requireCollectionService().upgradeCaseGetByCollectionFilename(item.filename)
+        sendJson(response, 200, item)
+        return
+      }
+    }
+    sendJson(response, 200, await requireCollectionService().getItemById(id))
   }))
 
   app.get(
@@ -204,6 +224,22 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
           typeof body.candidateId === 'number' ? body.candidateId : null
         )
       )
+    })
+  )
+
+  app.post(
+    '/api/collection/identify/discogs',
+    asyncHandler(async (request, response) => {
+      const body = (request.body ?? null) as { filename?: string | null } | null
+      const filename = typeof body?.filename === 'string' ? normalizeFilename(body.filename) : ''
+      if (!filename) {
+        sendJson(response, 400, { message: 'filename is required.' })
+        return
+      }
+      const result = await identifyWithExternalSources(filename)
+      if (syncMediaItem) await syncMediaItem(filename)
+      else await syncMediaCatalog?.()
+      sendJson(response, 200, result)
     })
   )
 

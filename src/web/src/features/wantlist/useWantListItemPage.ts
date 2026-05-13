@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { CollectionItem, SlskdCandidate, WantListItem } from '../../../../shared/api'
+import type { CollectionItem, CollectionItemDetails, DownloadAttempt, SlskdCandidate, WantListItem } from '../../../../shared/api'
 import type { OnlineSearchItem } from '../../../../shared/online-search'
 import { api } from '../../api/client'
 import { extractYouTubeId } from '../../lib/youtube'
@@ -26,10 +26,6 @@ type SectionErrors = {
   soulseek: string | null
   youtube: string | null
   collection: string | null
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 function mergeLocalResults(
@@ -81,23 +77,6 @@ function extractVideoResults(items: OnlineSearchItem[]): WantListVideoResult[] {
   return videos
 }
 
-async function waitForSoulseekCompletion(id: number): Promise<WantListItem | null> {
-  const deadline = Date.now() + 60_000
-
-  while (Date.now() < deadline) {
-    const item = await api.wantList.get(id)
-    if (!item) {
-      return null
-    }
-    if (item.pipelineStatus !== 'searching') {
-      return item
-    }
-    await sleep(1_500)
-  }
-
-  return api.wantList.get(id)
-}
-
 export function useWantListItemPage(wantId: string | undefined) {
   const numericId = Number(wantId)
   const [item, setItem] = useState<WantListItem | null>(null)
@@ -106,15 +85,19 @@ export function useWantListItemPage(wantId: string | undefined) {
   const [youtubeQuery, setYoutubeQuery] = useState('')
   const [collectionQuery, setCollectionQuery] = useState('')
   const [soulseekResults, setSoulseekResults] = useState<SlskdCandidate[]>([])
+  const [downloadAttempts, setDownloadAttempts] = useState<DownloadAttempt[]>([])
+  const [sourceItem, setSourceItem] = useState<CollectionItemDetails | null>(null)
   const [youtubeResults, setYoutubeResults] = useState<WantListVideoResult[]>([])
   const [collectionResults, setCollectionResults] = useState<WantListLocalResult[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [isLoadingSoulseek, setIsLoadingSoulseek] = useState(false)
+  const [isLoadingSourceItem, setIsLoadingSourceItem] = useState(false)
   const [isLoadingYouTube, setIsLoadingYouTube] = useState(false)
   const [isLoadingCollection, setIsLoadingCollection] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [sourceItemError, setSourceItemError] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [sectionErrors, setSectionErrors] = useState<SectionErrors>({
     soulseek: null,
@@ -125,6 +108,11 @@ export function useWantListItemPage(wantId: string | undefined) {
   const itemRequestRef = useRef(0)
   const youtubeRequestRef = useRef(0)
   const collectionRequestRef = useRef(0)
+  const sourceItemRequestRef = useRef(0)
+
+  const loadDownloadAttempts = useCallback(async (id: number): Promise<void> => {
+    setDownloadAttempts(await api.wantList.listDownloads(id))
+  }, [])
 
   const loadSoulseekResults = useCallback(async (id: number): Promise<void> => {
     setSectionErrors((current) => ({ ...current, soulseek: null }))
@@ -196,6 +184,35 @@ export function useWantListItemPage(wantId: string | undefined) {
   }, [])
 
   useEffect(() => {
+    const sourceFilename = item?.wantKind === 'replacement' ? item.sourceCollectionFilename : null
+    const requestId = sourceItemRequestRef.current + 1
+    sourceItemRequestRef.current = requestId
+
+    if (!sourceFilename) {
+      setSourceItem(null)
+      setSourceItemError(null)
+      setIsLoadingSourceItem(false)
+      return
+    }
+
+    setIsLoadingSourceItem(true)
+    setSourceItem(null)
+    setSourceItemError(null)
+    void api.collection.get(sourceFilename)
+      .then((next) => {
+        if (sourceItemRequestRef.current === requestId) setSourceItem(next)
+      })
+      .catch((error) => {
+        if (sourceItemRequestRef.current !== requestId) return
+        setSourceItem(null)
+        setSourceItemError(formatWantListError(error, 'Failed to load linked source record'))
+      })
+      .finally(() => {
+        if (sourceItemRequestRef.current === requestId) setIsLoadingSourceItem(false)
+      })
+  }, [item?.sourceCollectionFilename, item?.wantKind])
+
+  useEffect(() => {
     if (!Number.isInteger(numericId) || numericId <= 0) {
       setItem(null)
       setEditState(null)
@@ -231,6 +248,7 @@ export function useWantListItemPage(wantId: string | undefined) {
 
         await Promise.all([
           loadSoulseekResults(nextItem.id),
+          loadDownloadAttempts(nextItem.id),
           loadYouTubeResults(defaultQuery, nextItem),
           loadCollectionResults(defaultQuery, nextItem)
         ])
@@ -247,7 +265,7 @@ export function useWantListItemPage(wantId: string | undefined) {
         }
       }
     })()
-  }, [loadCollectionResults, loadSoulseekResults, loadYouTubeResults, numericId])
+  }, [loadCollectionResults, loadDownloadAttempts, loadSoulseekResults, loadYouTubeResults, numericId])
 
   useEffect(() => {
     if (!Number.isInteger(numericId) || numericId <= 0) {
@@ -274,8 +292,11 @@ export function useWantListItemPage(wantId: string | undefined) {
           }))
         })
       }
+      if (['queued', 'downloading', 'downloaded', 'error'].includes(updated.pipelineStatus)) {
+        void loadDownloadAttempts(updated.id).catch((error) => setActionError(formatWantListError(error)))
+      }
     })
-  }, [loadSoulseekResults, numericId])
+  }, [loadDownloadAttempts, loadSoulseekResults, numericId])
 
   const save = useCallback(async (): Promise<void> => {
     if (!item || !editState) {
@@ -313,10 +334,6 @@ export function useWantListItemPage(wantId: string | undefined) {
         setItem(updated)
       }
 
-      const completed = await waitForSoulseekCompletion(item.id)
-      if (completed) {
-        setItem(completed)
-      }
       await loadSoulseekResults(item.id)
     } catch (error) {
       setSectionErrors((current) => ({
@@ -343,6 +360,7 @@ export function useWantListItemPage(wantId: string | undefined) {
   return {
     item,
     editState,
+    sourceItem,
     setEditState,
     soulseekQuery,
     setSoulseekQuery,
@@ -351,15 +369,18 @@ export function useWantListItemPage(wantId: string | undefined) {
     collectionQuery,
     setCollectionQuery,
     soulseekResults,
+    downloadAttempts,
     youtubeResults,
     collectionResults,
     isLoading,
     isSaving,
     isLoadingSoulseek,
+    isLoadingSourceItem,
     isLoadingYouTube,
     isLoadingCollection,
     errorMessage,
     actionError,
+    sourceItemError,
     busyAction,
     sectionErrors,
     actions: {
@@ -374,12 +395,25 @@ export function useWantListItemPage(wantId: string | undefined) {
           }
           await api.wantList.import(item.id, filename)
         }),
+      importDownload: (attempt: DownloadAttempt) =>
+        runBusyAction(`import-download:${attempt.id}`, async () => {
+          if (!item || !attempt.localFilename) return
+          await api.wantList.import(item.id, attempt.localFilename, attempt.id)
+          await loadDownloadAttempts(item.id)
+        }),
+      selectDownload: (attempt: DownloadAttempt) =>
+        runBusyAction(`select-download:${attempt.id}`, async () => {
+          if (!item) return
+          const updated = await api.wantList.selectDownload(item.id, attempt.id)
+          if (updated) setItem(updated)
+        }),
       download: (candidate: SlskdCandidate) =>
         runBusyAction(`download:${candidate.username}:${candidate.filename}`, async () => {
           if (!item) {
             return
           }
           await api.wantList.download(item.id, candidate.username, candidate.filename, candidate.size)
+          await loadDownloadAttempts(item.id)
         }),
       showInFinder: (filename: string) => {
         void api.collection.showInFinder(filename).catch((error) => {

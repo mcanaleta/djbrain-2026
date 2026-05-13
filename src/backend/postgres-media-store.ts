@@ -264,18 +264,20 @@ export class PostgresMediaStore {
   public async list(query: string = '', limit?: number): Promise<CollectionListResult> {
     const normalizedLimit = normalizeLimit(limit, 100)
     const textQuery = query.trim()
-    type ListRow = { filename: string; filesize: string | number; score: number | null }
+    type ListRow = { id: string | number; filename: string; filesize: string | number; score: number | null }
     const rows: ListRow[] =
       textQuery.length > 0
         ? (
             await this.pool.query<{
               filename: string
+              id: string | number
               filesize: string | number
               score: number
             }>(
               `
                 SELECT
                   path AS filename,
+                  file_id AS id,
                   filesize,
                   ts_rank_cd(search_vector, plainto_tsquery('simple', $1)) AS score
                 FROM media_items
@@ -289,10 +291,11 @@ export class PostgresMediaStore {
         : (
             await this.pool.query<{
               filename: string
+              id: string | number
               filesize: string | number
             }>(
               `
-                SELECT path AS filename, filesize
+                SELECT file_id AS id, path AS filename, filesize
                 FROM media_items
                 ORDER BY path
                 LIMIT $1::int
@@ -302,6 +305,7 @@ export class PostgresMediaStore {
           ).rows.map((row) => ({ ...row, score: null }))
 
     const items: CollectionItem[] = rows.map((row) => ({
+      id: toNumber(row.id),
       filename: row.filename,
       filesize: toNumber(row.filesize),
       duration: null,
@@ -313,6 +317,7 @@ export class PostgresMediaStore {
   public async get(filename: string): Promise<CollectionItemDetails | null> {
     const result = await this.pool.query<{
       path: string
+      file_id: string | number
       filesize: string | number
       mtime_ms: string | number
       scope: string
@@ -347,7 +352,7 @@ export class PostgresMediaStore {
     }>(
       `
         SELECT
-          mi.path, mi.filesize, mi.mtime_ms, mi.scope,
+          mi.file_id, mi.path, mi.filesize, mi.mtime_ms, mi.scope,
           mi.artist, mi.title, mi.version, mi.album, mi.year, mi.label, mi.catalog_number, mi.track_position, mi.discogs_release_id, mi.discogs_track_position,
           mi.analysis_status, mi.audio_hash, mi.analysis_version, mi.analysis_json,
           mas.hash_version AS audio_hash_version, mas.error_message AS audio_error_message, mas.processed_at AS audio_processed_at,
@@ -368,6 +373,7 @@ export class PostgresMediaStore {
     const analysisJsonText = row.analysis_json ? JSON.stringify(row.analysis_json) : null
     const importReviewJsonText = row.import_review_json ? JSON.stringify(row.import_review_json) : null
     return {
+      id: toNumber(row.file_id),
       filename: row.path,
       filesize: toNumber(row.filesize),
       mtimeMs: toNumber(row.mtime_ms, 0),
@@ -432,6 +438,14 @@ export class PostgresMediaStore {
       identification: null,
       upgradeCase: null
     }
+  }
+
+  public async getById(id: number): Promise<CollectionItemDetails | null> {
+    const row = (await this.pool.query<{ path: string }>(
+      `SELECT path FROM media_files WHERE id = $1 AND deleted_at IS NULL`,
+      [id]
+    )).rows[0]
+    return row ? this.get(row.path) : null
   }
 
   private async upsertDetailsWithClient(

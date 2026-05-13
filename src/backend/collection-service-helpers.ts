@@ -15,6 +15,7 @@ export const AUDIO_EXTENSIONS = new Set([
 ])
 
 type CollectionRow = {
+  id: number | bigint
   filename: string
   filesize: number | bigint
   duration?: number | null
@@ -107,13 +108,22 @@ export function normalizeWantListInput(input: WantListAddInput): WantListAddInpu
   if (!artist) throw new Error('Want list artist is required.')
   const title = normalizeWantListText(input.title)
   if (!title) throw new Error('Want list title is required.')
+  const targetDownloadCount = Number.isFinite(input.targetDownloadCount) ? Math.trunc(Number(input.targetDownloadCount)) : 3
   return {
+    wantKind: input.wantKind === 'replacement' ? 'replacement' : 'missing',
     artist,
     title,
     version: normalizeWantListOptionalText(input.version),
     length: normalizeWantListOptionalText(input.length),
+    year: normalizeWantListOptionalText(input.year),
     album: normalizeWantListOptionalText(input.album),
-    label: normalizeWantListOptionalText(input.label)
+    label: normalizeWantListOptionalText(input.label),
+    discogsReleaseId: input.discogsReleaseId ?? null,
+    discogsTrackPosition: normalizeWantListOptionalText(input.discogsTrackPosition),
+    discogsEntityType: normalizeWantListOptionalText(input.discogsEntityType),
+    sourceCollectionFilename: input.sourceCollectionFilename ? normalizeFilename(input.sourceCollectionFilename) : null,
+    targetDownloadCount: Math.max(1, Math.min(20, targetDownloadCount)),
+    autoDownloadEnabled: input.autoDownloadEnabled ?? true
   }
 }
 
@@ -166,6 +176,7 @@ export function buildPrefixWhereClause(
 
 export function toListResult(rows: CollectionRow[]): CollectionListResult {
   const items = rows.map((row) => ({
+    id: toNumber(row.id),
     filename: row.filename,
     filesize: toNumber(row.filesize),
     duration: row.duration ?? null,

@@ -16,6 +16,7 @@ export type AppSettings = {
 }
 
 export type CollectionItem = {
+  id: number
   filename: string
   filesize: number
   duration: number | null
@@ -75,6 +76,7 @@ export type CollectionListResult = {
 }
 
 export type CollectionItemDetails = {
+  id: number
   filename: string
   filesize: number
   mtimeMs: number | null
@@ -215,6 +217,7 @@ export type RecordingDetails = RecordingSummary & {
 
 export type WantListPipelineStatus =
   | 'idle'
+  | 'queued'
   | 'searching'
   | 'results_ready'
   | 'no_results'
@@ -227,8 +230,11 @@ export type WantListPipelineStatus =
   | 'import_error'
   | 'error'
 
+export type WantKind = 'missing' | 'replacement'
+
 export type WantListItem = {
   id: number
+  wantKind: WantKind
   artist: string
   title: string
   version: string | null
@@ -238,6 +244,12 @@ export type WantListItem = {
   label: string | null
   addedAt: string
   pipelineStatus: WantListPipelineStatus
+  sourceCollectionFilename: string | null
+  targetDownloadCount: number
+  autoDownloadEnabled: boolean
+  lastSearchAt: string | null
+  nextSearchAt: string | null
+  selectedDownloadId: number | null
   searchId: string | null
   searchResultCount: number
   bestCandidatesJson: string | null
@@ -251,6 +263,7 @@ export type WantListItem = {
 }
 
 export type WantListAddInput = {
+  wantKind?: WantKind
   artist: string
   title: string
   version?: string | null
@@ -261,6 +274,55 @@ export type WantListAddInput = {
   discogsReleaseId?: number | null
   discogsTrackPosition?: string | null
   discogsEntityType?: string | null
+  sourceCollectionFilename?: string | null
+  targetDownloadCount?: number | null
+  autoDownloadEnabled?: boolean | null
+}
+
+export type DownloadAttemptStatus =
+  | 'queued'
+  | 'requested'
+  | 'downloading'
+  | 'downloaded'
+  | 'failed'
+  | 'timeout'
+  | 'cancelled'
+  | 'missing_local'
+
+export type DownloadAttempt = {
+  id: number
+  wantListId: number | null
+  status: DownloadAttemptStatus
+  originArtist: string
+  originTitle: string
+  originVersion: string | null
+  originYear: string | null
+  originAlbum: string | null
+  originLabel: string | null
+  originSourceCollectionFilename: string | null
+  originDiscogsReleaseId: number | null
+  originDiscogsTrackPosition: string | null
+  searchQuery: string | null
+  slskdSearchId: string | null
+  username: string | null
+  remoteFilename: string | null
+  remoteSize: number | null
+  bitrate: number | null
+  durationSeconds: number | null
+  extension: string | null
+  score: number | null
+  queueLength: number | null
+  hasFreeUploadSlot: boolean | null
+  uploadSpeed: number | null
+  isLocked: boolean
+  rawCandidateJson: string | null
+  localFilename: string | null
+  localFilesize: number | null
+  errorMessage: string | null
+  requestedAt: string | null
+  completedAt: string | null
+  createdAt: string
+  updatedAt: string
 }
 
 export type SlskdCandidate = {
@@ -443,7 +505,9 @@ export type DJBrainApi = {
     search: (id: number, query?: string) => Promise<WantListItem | null>
     getCandidates: (id: number) => Promise<SlskdCandidate[]>
     download: (id: number, username: string, filename: string, size: number) => Promise<void>
-    import: (id: number, localFilePath: string) => Promise<void>
+    listDownloads: (id: number) => Promise<DownloadAttempt[]>
+    selectDownload: (id: number, downloadId: number) => Promise<WantListItem | null>
+    import: (id: number, localFilePath: string, downloadId?: number | null) => Promise<void>
     resetPipeline: (id: number) => Promise<WantListItem | null>
     onItemUpdated: (listener: (item: WantListItem) => void) => () => void
   }
@@ -473,7 +537,7 @@ export type DJBrainApi = {
   }
   collection: {
     list: (query?: string, limit?: number) => Promise<CollectionListResult>
-    get: (filename: string) => Promise<CollectionItemDetails | null>
+    get: (idOrFilename: number | string) => Promise<CollectionItemDetails | null>
     listDownloads: (query?: string) => Promise<CollectionListResult>
     reanalyze: (filename: string) => Promise<void>
     syncNow: () => Promise<CollectionSyncStatus>
@@ -483,6 +547,7 @@ export type DJBrainApi = {
     compareImport: (filename: string, existingFilename: string) => Promise<ImportComparison>
     queueImportProcessing: (filenames?: string[], force?: boolean) => Promise<{ queued: number }>
     queueIdentificationProcessing: (filenames?: string[], force?: boolean) => Promise<{ queued: number }>
+    identifyWithExternalSources: (filename: string) => Promise<FileIdentificationState | null>
     reviewIdentification: (input: {
       filename: string
       action: 'accept' | 'reject' | 'create_recording'

@@ -2,7 +2,7 @@ import { watch, type FSWatcher } from 'node:fs'
 import { extname } from 'node:path'
 import { Pool, type PoolClient } from 'pg'
 import type { AppSettings } from './settings-store'
-import { AUDIO_ANALYSIS_VERSION, AUDIO_HASH_VERSION, IDENTIFY_VERSION, IMPORT_REVIEW_VERSION } from '../shared/analysis-version.ts'
+import { AUDIO_ANALYSIS_VERSION, AUDIO_HASH_VERSION, IDENTIFY_VERSION, IMPORT_REVIEW_VERSION, LOCAL_TAG_VERSION } from '../shared/analysis-version.ts'
 import { parseImportFilename } from '../shared/import-filename.ts'
 import {
   escapeLikePattern,
@@ -21,6 +21,7 @@ import {
   type SyncChange
 } from './collection-scanner.ts'
 import { WantListStore } from './want-list-store.ts'
+import { DownloadAttemptStore, type DownloadAttemptCreateInput, type DownloadAttemptPatch } from './download-attempt-store.ts'
 import { UpgradeCaseStore, type UpgradeCaseCreateInput, type UpgradeCasePatch } from './upgrade-case-store.ts'
 import type {
   AudioAnalysis,
@@ -37,7 +38,7 @@ import type {
   UpgradeCase,
   UpgradeLocalCandidate
 } from '../shared/api.ts'
-import { compareQuality, fileQualityFromExt, qualityScore } from '../shared/quality.ts'
+import { compareQuality, fileQualityFromExt } from '../shared/quality.ts'
 import type {
   IdentificationDecision,
   RecordingClaimInput,
@@ -45,6 +46,25 @@ import type {
   SourceClaimMatch
 } from './recording-identity-service.ts'
 import { buildCanonicalNormKey } from './recording-identity-service.ts'
+import type { LocalSongFileState, SongsOnlySyncPlan } from './local-song-sync.ts'
+
+type FileTagStateInput = {
+  filesize: number
+  mtimeMs: number
+  source: string
+  artist: string | null
+  title: string | null
+  version: string | null
+  album: string | null
+  year: string | null
+  label: string | null
+  catalogNumber: string | null
+  trackPosition: string | null
+  discogsReleaseId: number | null
+  discogsTrackPosition: string | null
+  rawJson: string | null
+  errorMessage: string | null
+}
 
 type CollectionServiceOptions = {
   connectionString: string
@@ -234,6 +254,7 @@ function buildPrefixWhereClausePg(columnName: string, prefixes: string[], startP
 }
 
 export type CollectionItem = {
+  id: number
   filename: string
   filesize: number
   duration: number | null
@@ -274,6 +295,7 @@ export type CollectionListResult = {
 
 export type WantListItem = {
   id: number
+  wantKind: 'missing' | 'replacement'
   artist: string
   title: string
   version: string | null
@@ -283,6 +305,12 @@ export type WantListItem = {
   label: string | null
   addedAt: string
   pipelineStatus: string
+  sourceCollectionFilename: string | null
+  targetDownloadCount: number
+  autoDownloadEnabled: boolean
+  lastSearchAt: string | null
+  nextSearchAt: string | null
+  selectedDownloadId: number | null
   searchId: string | null
   searchResultCount: number
   bestCandidatesJson: string | null
@@ -296,6 +324,7 @@ export type WantListItem = {
 }
 
 export type WantListAddInput = {
+  wantKind?: 'missing' | 'replacement'
   artist: string
   title: string
   version?: string | null
@@ -306,10 +335,19 @@ export type WantListAddInput = {
   discogsReleaseId?: number | null
   discogsTrackPosition?: string | null
   discogsEntityType?: string | null
+  sourceCollectionFilename?: string | null
+  targetDownloadCount?: number | null
+  autoDownloadEnabled?: boolean | null
 }
 
 export type WantListPipelinePatch = {
   pipelineStatus?: string
+  sourceCollectionFilename?: string | null
+  targetDownloadCount?: number
+  autoDownloadEnabled?: boolean
+  lastSearchAt?: string | null
+  nextSearchAt?: string | null
+  selectedDownloadId?: number | null
   searchId?: string | null
   searchResultCount?: number
   bestCandidatesJson?: string | null
@@ -319,6 +357,44 @@ export type WantListPipelinePatch = {
   discogsReleaseId?: number | null
   discogsTrackPosition?: string | null
   importedFilename?: string | null
+}
+
+export type DownloadAttemptStatus = 'queued' | 'requested' | 'downloading' | 'downloaded' | 'failed' | 'timeout' | 'cancelled' | 'missing_local'
+
+export type DownloadAttempt = {
+  id: number
+  wantListId: number | null
+  status: DownloadAttemptStatus
+  originArtist: string
+  originTitle: string
+  originVersion: string | null
+  originYear: string | null
+  originAlbum: string | null
+  originLabel: string | null
+  originSourceCollectionFilename: string | null
+  originDiscogsReleaseId: number | null
+  originDiscogsTrackPosition: string | null
+  searchQuery: string | null
+  slskdSearchId: string | null
+  username: string | null
+  remoteFilename: string | null
+  remoteSize: number | null
+  bitrate: number | null
+  durationSeconds: number | null
+  extension: string | null
+  score: number | null
+  queueLength: number | null
+  hasFreeUploadSlot: boolean | null
+  uploadSpeed: number | null
+  isLocked: boolean
+  rawCandidateJson: string | null
+  localFilename: string | null
+  localFilesize: number | null
+  errorMessage: string | null
+  requestedAt: string | null
+  completedAt: string | null
+  createdAt: string
+  updatedAt: string
 }
 
 export type CollectionSyncStatus = {
@@ -344,6 +420,8 @@ export class CollectionService {
   private readonly pool: Pool
 
   private readonly wantListStore: WantListStore
+
+  private readonly downloadAttemptStore: DownloadAttemptStore
 
   private readonly upgradeCaseStore: UpgradeCaseStore
 
@@ -389,6 +467,7 @@ export class CollectionService {
   constructor(options: CollectionServiceOptions) {
     this.pool = new Pool({ connectionString: options.connectionString, max: 8 })
     this.wantListStore = new WantListStore(this.pool)
+    this.downloadAttemptStore = new DownloadAttemptStore(this.pool)
     this.upgradeCaseStore = new UpgradeCaseStore(this.pool)
     this.onUpdated = options.onUpdated
     this.onImportQueueChanged = options.onImportQueueChanged
@@ -436,6 +515,7 @@ export class CollectionService {
     const normalizedLimit = normalizeLimit(limit)
     const ftsQuery = buildFtsQuery(query)
     type ListRow = {
+      id: number | bigint
       filename: string
       filesize: number | bigint
       score: number | null
@@ -461,6 +541,7 @@ export class CollectionService {
     const selectSql = `
       SELECT
         collection_files.filename AS filename,
+        collection_files.id AS id,
         collection_files.filesize AS filesize,
         ${ftsQuery ? `ts_rank_cd(to_tsvector('simple', ${searchDocumentSql}), plainto_tsquery('simple', $1))` : 'NULL'} AS score,
         ${buildAnalysisJsonSql('collection_files.filename')} AS analysisJson,
@@ -500,6 +581,7 @@ export class CollectionService {
           const analysis = parseAudioAnalysis(row.analysisjson)
           return {
             filename: row.filename,
+            id: toNumber(row.id),
             filesize: row.filesize,
             duration: analysis?.durationSeconds ?? null,
             score: row.score,
@@ -535,6 +617,7 @@ export class CollectionService {
         const analysis = parseAudioAnalysis(row.analysisjson)
         return {
           filename: row.filename,
+          id: toNumber(row.id),
           filesize: row.filesize,
           duration: analysis?.durationSeconds ?? null,
           score: row.score,
@@ -559,6 +642,7 @@ export class CollectionService {
   public async getItem(filename: string): Promise<CollectionItemDetails | null> {
     await this.ensureReady()
     const itemResult = await this.pool.query<{
+      id: number | bigint
       filename: string
       filesize: number | bigint
       mtimems: number | bigint | null
@@ -574,6 +658,7 @@ export class CollectionService {
       `
         SELECT
           collection_files.filename,
+          collection_files.id,
           collection_files.filesize,
           collection_file_state.mtime_ms AS mtimeMs,
           file_identification_state.recording_id AS recordingId,
@@ -627,6 +712,40 @@ export class CollectionService {
       [filename]
     )
     const importRow = importResult.rows[0]
+
+    const fileTagRow = (
+      await this.pool.query<{
+        source: string
+        artist: string | null
+        title: string | null
+        version: string | null
+        album: string | null
+        year: string | null
+        label: string | null
+        catalognumber: string | null
+        trackposition: string | null
+        discogsreleaseid: number | bigint | null
+        discogstrackposition: string | null
+      }>(
+        `
+          SELECT
+            source,
+            artist,
+            title,
+            version,
+            album,
+            year,
+            label,
+            catalog_number AS catalogNumber,
+            track_position AS trackPosition,
+            discogs_release_id AS discogsReleaseId,
+            discogs_track_position AS discogsTrackPosition
+          FROM file_tag_state
+          WHERE filename = $1
+        `,
+        [filename]
+      )
+    ).rows[0]
 
     const fileAudioResult = await this.pool.query<{
       filesize: number | bigint
@@ -823,6 +942,7 @@ export class CollectionService {
 
     return {
       filename: itemRow.filename,
+      id: toNumber(itemRow.id),
       filesize: toNumber(itemRow.filesize),
       mtimeMs: itemRow.mtimems == null ? null : toNumber(itemRow.mtimems),
       isDownload: isDownloadRelativeFilename(itemRow.filename, this.settings.downloadFolderPaths),
@@ -831,7 +951,21 @@ export class CollectionService {
       identificationConfidence: itemRow.identificationconfidence ?? null,
       assignmentMethod: itemRow.assignmentmethod ?? null,
       recordingCanonical,
-      tags: importRow
+      tags: fileTagRow
+        ? {
+            source: fileTagRow.source || 'file_tag_state',
+            artist: fileTagRow.artist,
+            title: fileTagRow.title,
+            version: fileTagRow.version,
+            album: fileTagRow.album,
+            year: fileTagRow.year,
+            label: fileTagRow.label,
+            catalogNumber: fileTagRow.catalognumber,
+            trackPosition: fileTagRow.trackposition,
+            discogsReleaseId: fileTagRow.discogsreleaseid == null ? null : toNumber(fileTagRow.discogsreleaseid),
+            discogsTrackPosition: fileTagRow.discogstrackposition
+          }
+        : importRow
         ? {
             source: 'import_review_cache',
             artist: importRow.parsedartist ?? null,
@@ -923,6 +1057,7 @@ export class CollectionService {
 
     const rows = (
       await this.pool.query<{
+        id: number | bigint
         filename: string
         filesize: number | bigint
         score: number | null
@@ -946,6 +1081,7 @@ export class CollectionService {
       }>(
         `
           SELECT
+            collection_files.id AS id,
             collection_files.filename AS filename,
             collection_files.filesize AS filesize,
             ${scoreSql} AS score,
@@ -1011,6 +1147,7 @@ export class CollectionService {
 
         return {
           ...row,
+          id: toNumber(row.id),
           isDownload: true,
           duration: sourceAnalysis?.durationSeconds ?? null,
           bitrateKbps: sourceAnalysis?.bitrateKbps ?? null,
@@ -1102,9 +1239,18 @@ export class CollectionService {
   private async initializeSchema(): Promise<void> {
     await this.pool.query(`
       CREATE TABLE IF NOT EXISTS collection_files (
+        id BIGINT,
         filename TEXT PRIMARY KEY,
         filesize BIGINT NOT NULL
       );
+
+      CREATE SEQUENCE IF NOT EXISTS collection_files_id_seq;
+      ALTER TABLE collection_files ADD COLUMN IF NOT EXISTS id BIGINT;
+      ALTER TABLE collection_files ALTER COLUMN id SET DEFAULT nextval('collection_files_id_seq');
+      UPDATE collection_files SET id = nextval('collection_files_id_seq') WHERE id IS NULL;
+      SELECT setval('collection_files_id_seq', GREATEST((SELECT COALESCE(max(id), 0) FROM collection_files), 1), true);
+      ALTER TABLE collection_files ALTER COLUMN id SET NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS collection_files_id_key ON collection_files(id);
 
       CREATE TABLE IF NOT EXISTS collection_file_state (
         filename TEXT PRIMARY KEY REFERENCES collection_files(filename) ON DELETE CASCADE,
@@ -1142,6 +1288,27 @@ export class CollectionService {
 
       CREATE INDEX IF NOT EXISTS file_audio_state_status_idx
       ON file_audio_state(status, processed_at, filename);
+
+      CREATE TABLE IF NOT EXISTS file_tag_state (
+        filename TEXT PRIMARY KEY REFERENCES collection_files(filename) ON DELETE CASCADE,
+        filesize BIGINT NOT NULL,
+        mtime_ms BIGINT NOT NULL,
+        tag_version INTEGER NOT NULL,
+        source TEXT NOT NULL,
+        artist TEXT,
+        title TEXT,
+        version TEXT,
+        album TEXT,
+        year TEXT,
+        label TEXT,
+        catalog_number TEXT,
+        track_position TEXT,
+        discogs_release_id BIGINT,
+        discogs_track_position TEXT,
+        raw_json JSONB,
+        error_message TEXT,
+        processed_at TIMESTAMPTZ
+      );
 
       CREATE TABLE IF NOT EXISTS audio_analysis_cache (
         audio_hash TEXT NOT NULL,
@@ -1253,6 +1420,7 @@ export class CollectionService {
 
       CREATE TABLE IF NOT EXISTS want_list (
         id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        want_kind TEXT NOT NULL DEFAULT 'missing',
         artist TEXT NOT NULL,
         title TEXT NOT NULL,
         version TEXT,
@@ -1262,6 +1430,12 @@ export class CollectionService {
         label TEXT,
         added_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         pipeline_status TEXT NOT NULL DEFAULT 'idle',
+        source_collection_filename TEXT,
+        target_download_count INTEGER NOT NULL DEFAULT 3,
+        auto_download_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        last_search_at TIMESTAMPTZ,
+        next_search_at TIMESTAMPTZ,
+        selected_download_id BIGINT,
         search_id TEXT,
         search_result_count INTEGER NOT NULL DEFAULT 0,
         best_candidates_json TEXT,
@@ -1300,6 +1474,123 @@ export class CollectionService {
 
       CREATE INDEX IF NOT EXISTS upgrade_cases_status_idx
       ON upgrade_cases(status, updated_at DESC, id DESC);
+
+      CREATE TABLE IF NOT EXISTS download_attempts (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        want_list_id BIGINT,
+        status TEXT NOT NULL DEFAULT 'queued',
+        origin_artist TEXT NOT NULL,
+        origin_title TEXT NOT NULL,
+        origin_version TEXT,
+        origin_year TEXT,
+        origin_album TEXT,
+        origin_label TEXT,
+        origin_source_collection_filename TEXT,
+        origin_discogs_release_id BIGINT,
+        origin_discogs_track_position TEXT,
+        search_query TEXT,
+        slskd_search_id TEXT,
+        username TEXT,
+        remote_filename TEXT,
+        remote_size BIGINT,
+        bitrate INTEGER,
+        duration_seconds DOUBLE PRECISION,
+        extension TEXT,
+        score INTEGER,
+        queue_length INTEGER,
+        has_free_upload_slot BOOLEAN,
+        upload_speed BIGINT,
+        is_locked BOOLEAN NOT NULL DEFAULT FALSE,
+        raw_candidate_json TEXT,
+        local_filename TEXT,
+        local_filesize BIGINT,
+        error_message TEXT,
+        requested_at TIMESTAMPTZ,
+        completed_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+
+      CREATE INDEX IF NOT EXISTS download_attempts_want_list_idx
+      ON download_attempts(want_list_id, updated_at DESC, id DESC);
+
+      CREATE INDEX IF NOT EXISTS download_attempts_status_idx
+      ON download_attempts(status, updated_at, id);
+
+      CREATE UNIQUE INDEX IF NOT EXISTS download_attempts_remote_once_idx
+      ON download_attempts(want_list_id, username, remote_filename, remote_size)
+      WHERE want_list_id IS NOT NULL AND username IS NOT NULL AND remote_filename IS NOT NULL;
+
+      ALTER TABLE want_list ADD COLUMN IF NOT EXISTS want_kind TEXT NOT NULL DEFAULT 'missing';
+      ALTER TABLE want_list ADD COLUMN IF NOT EXISTS source_collection_filename TEXT;
+      ALTER TABLE want_list ADD COLUMN IF NOT EXISTS target_download_count INTEGER NOT NULL DEFAULT 3;
+      ALTER TABLE want_list ADD COLUMN IF NOT EXISTS auto_download_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+      ALTER TABLE want_list ADD COLUMN IF NOT EXISTS last_search_at TIMESTAMPTZ;
+      ALTER TABLE want_list ADD COLUMN IF NOT EXISTS next_search_at TIMESTAMPTZ;
+      ALTER TABLE want_list ADD COLUMN IF NOT EXISTS selected_download_id BIGINT;
+
+      INSERT INTO want_list (
+        want_kind, artist, title, version, year, album, label, added_at, pipeline_status,
+        best_candidates_json, source_collection_filename, target_download_count, auto_download_enabled
+      )
+      SELECT
+        'replacement',
+        COALESCE(NULLIF(search_artist, ''), 'Unknown Artist'),
+        COALESCE(NULLIF(search_title, ''), collection_filename),
+        search_version,
+        NULL,
+        NULL,
+        NULL,
+        created_at,
+        CASE WHEN status IN ('completed', 'pending_reanalyze') THEN 'downloaded' ELSE COALESCE(NULLIF(status, ''), 'idle') END,
+        candidate_cache_json,
+        collection_filename,
+        3,
+        TRUE
+      FROM upgrade_cases upgrade_cases_source
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM want_list existing_want
+        WHERE existing_want.want_kind = 'replacement'
+          AND existing_want.source_collection_filename = upgrade_cases_source.collection_filename
+      );
+
+      INSERT INTO download_attempts (
+        want_list_id, status, origin_artist, origin_title, origin_version, origin_year, origin_album, origin_label,
+        origin_source_collection_filename, search_query, username, remote_filename, remote_size, duration_seconds,
+        raw_candidate_json, local_filename, local_filesize, completed_at
+      )
+      SELECT
+        wanted.id,
+        'downloaded',
+        wanted.artist,
+        wanted.title,
+        wanted.version,
+        wanted.year,
+        wanted.album,
+        wanted.label,
+        wanted.source_collection_filename,
+        concat_ws(' ', wanted.artist, wanted.title, wanted.version),
+        candidate->>'sourceUsername',
+        candidate->>'sourceFilename',
+        NULLIF(candidate->>'filesize', '')::bigint,
+        NULLIF(candidate->>'durationSeconds', '')::double precision,
+        candidate::text,
+        candidate->>'filename',
+        NULLIF(candidate->>'filesize', '')::bigint,
+        now()
+      FROM upgrade_cases upgrade_cases_source
+      JOIN want_list wanted
+        ON wanted.want_kind = 'replacement'
+       AND wanted.source_collection_filename = upgrade_cases_source.collection_filename
+      CROSS JOIN LATERAL jsonb_array_elements(COALESCE(NULLIF(upgrade_cases_source.local_candidates_json, '')::jsonb, '[]'::jsonb)) candidate
+      WHERE candidate ? 'filename'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM download_attempts existing_attempt
+          WHERE existing_attempt.want_list_id = wanted.id
+            AND existing_attempt.local_filename = candidate->>'filename'
+        );
     `)
   }
 
@@ -2211,6 +2502,129 @@ export class CollectionService {
       )
     ).rows[0]
     return row ? { filesize: toNumber(row.filesize), mtimeMs: toNumber(row.mtimems) } : null
+  }
+
+  public async listCollectionFileState(): Promise<LocalSongFileState[]> {
+    await this.ensureReady()
+    return (
+      await this.pool.query<{ filename: string; filesize: number | bigint; mtimems: number | bigint }>(
+        `
+          SELECT collection_files.filename, collection_files.filesize, collection_file_state.mtime_ms AS mtimeMs
+          FROM collection_files
+          JOIN collection_file_state ON collection_file_state.filename = collection_files.filename
+          ORDER BY collection_files.filename
+        `
+      )
+    ).rows.map((row) => ({ filename: row.filename, filesize: toNumber(row.filesize), mtimeMs: toNumber(row.mtimems) }))
+  }
+
+  public async applySongsOnlySyncPlan(plan: SongsOnlySyncPlan): Promise<void> {
+    await this.ensureReady()
+    const changed = [...plan.inserted, ...plan.updated]
+    if (changed.length === 0 && plan.deleted.length === 0) return
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      for (const item of changed) {
+        await client.query(
+          `
+            INSERT INTO collection_files(filename, filesize)
+            VALUES ($1, $2)
+            ON CONFLICT(filename) DO UPDATE SET filesize = excluded.filesize
+          `,
+          [item.filename, item.filesize]
+        )
+        await client.query(
+          `
+            INSERT INTO collection_file_state(filename, mtime_ms)
+            VALUES ($1, $2)
+            ON CONFLICT(filename) DO UPDATE SET mtime_ms = excluded.mtime_ms
+          `,
+          [item.filename, item.mtimeMs]
+        )
+        await client.query(
+          `
+            INSERT INTO file_audio_state(filename, filesize, mtime_ms, hash_version, audio_hash, status, error_message, processed_at)
+            VALUES ($1, $2, $3, $4, NULL, 'pending', NULL, NULL)
+            ON CONFLICT(filename) DO UPDATE SET
+              filesize = excluded.filesize,
+              mtime_ms = excluded.mtime_ms,
+              hash_version = excluded.hash_version,
+              audio_hash = NULL,
+              status = 'pending',
+              error_message = NULL,
+              processed_at = NULL
+          `,
+          [item.filename, item.filesize, item.mtimeMs, AUDIO_HASH_VERSION]
+        )
+        await client.query(`DELETE FROM file_tag_state WHERE filename = $1`, [item.filename])
+        await client.query(`DELETE FROM file_identification_candidates WHERE filename = $1`, [item.filename])
+        await client.query(`DELETE FROM file_identification_state WHERE filename = $1`, [item.filename])
+      }
+      for (const filename of plan.deleted) {
+        await client.query(`DELETE FROM collection_files WHERE filename = $1`, [filename])
+      }
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+    this.status.itemCount = await this.readItemCount()
+    await this.refreshImportQueueCounts()
+    await this.refreshIdentificationQueueCounts()
+    this.emitStatus()
+  }
+
+  public async saveFileTagState(filename: string, data: FileTagStateInput): Promise<void> {
+    await this.ensureReady()
+    await this.pool.query(
+      `
+        INSERT INTO file_tag_state(
+          filename, filesize, mtime_ms, tag_version, source,
+          artist, title, version, album, year, label, catalog_number, track_position,
+          discogs_release_id, discogs_track_position, raw_json, error_message, processed_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17, now())
+        ON CONFLICT(filename) DO UPDATE SET
+          filesize = excluded.filesize,
+          mtime_ms = excluded.mtime_ms,
+          tag_version = excluded.tag_version,
+          source = excluded.source,
+          artist = excluded.artist,
+          title = excluded.title,
+          version = excluded.version,
+          album = excluded.album,
+          year = excluded.year,
+          label = excluded.label,
+          catalog_number = excluded.catalog_number,
+          track_position = excluded.track_position,
+          discogs_release_id = excluded.discogs_release_id,
+          discogs_track_position = excluded.discogs_track_position,
+          raw_json = excluded.raw_json,
+          error_message = excluded.error_message,
+          processed_at = now()
+      `,
+      [
+        filename,
+        data.filesize,
+        data.mtimeMs,
+        LOCAL_TAG_VERSION,
+        data.source,
+        data.artist,
+        data.title,
+        data.version,
+        data.album,
+        data.year,
+        data.label,
+        data.catalogNumber,
+        data.trackPosition,
+        data.discogsReleaseId,
+        data.discogsTrackPosition,
+        normalizeJsonText(data.rawJson),
+        data.errorMessage
+      ]
+    )
   }
 
   public async findRecordingByAudioHash(audioHash: string): Promise<{ recordingId: number; canonical: RecordingCanonical | null } | null> {
@@ -3360,6 +3774,63 @@ export class CollectionService {
   public async wantListList(): Promise<WantListItem[]> {
     await this.ensureReady()
     return this.wantListStore.list()
+  }
+
+  public async wantListListDueForDownload(limit: number): Promise<WantListItem[]> {
+    await this.ensureReady()
+    return this.wantListStore.listDueForDownload(limit)
+  }
+
+  public async downloadAttemptCreate(input: DownloadAttemptCreateInput): Promise<DownloadAttempt> {
+    await this.ensureReady()
+    return this.downloadAttemptStore.create(input)
+  }
+
+  public async downloadAttemptUpdate(id: number, patch: DownloadAttemptPatch): Promise<DownloadAttempt | null> {
+    await this.ensureReady()
+    return this.downloadAttemptStore.update(id, patch)
+  }
+
+  public async downloadAttemptListForWantList(wantListId: number): Promise<DownloadAttempt[]> {
+    await this.ensureReady()
+    return this.downloadAttemptStore.listByWantListId(wantListId)
+  }
+
+  public async downloadAttemptListActive(limit: number): Promise<DownloadAttempt[]> {
+    await this.ensureReady()
+    return this.downloadAttemptStore.listActive(limit)
+  }
+
+  public async wantListSelectDownload(wantListId: number, downloadId: number): Promise<WantListItem | null> {
+    await this.ensureReady()
+    const attempt = (await this.downloadAttemptStore.listByWantListId(wantListId)).find((item) => item.id === downloadId)
+    return attempt ? this.wantListStore.updatePipeline(wantListId, { selectedDownloadId: downloadId }) : null
+  }
+
+  public async withDownloaderLock<T>(work: () => Promise<T>): Promise<T | null> {
+    await this.ensureReady()
+    const client = await this.pool.connect()
+    const lockId = 2026051201
+    try {
+      const locked = (await client.query<{ locked: boolean }>('SELECT pg_try_advisory_lock($1) AS locked', [lockId])).rows[0]?.locked
+      if (!locked) return null
+      try {
+        return await work()
+      } finally {
+        await client.query('SELECT pg_advisory_unlock($1)', [lockId]).catch(() => undefined)
+      }
+    } finally {
+      client.release()
+    }
+  }
+
+  public async getItemById(id: number): Promise<CollectionItemDetails | null> {
+    await this.ensureReady()
+    const row = (await this.pool.query<{ filename: string }>(
+      `SELECT filename FROM collection_files WHERE id = $1`,
+      [id]
+    )).rows[0]
+    return row ? this.getItem(row.filename) : null
   }
 
   public async upgradeCaseAdd(input: UpgradeCaseCreateInput): Promise<UpgradeCase> {
