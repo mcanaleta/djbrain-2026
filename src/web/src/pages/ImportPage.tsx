@@ -21,7 +21,6 @@ export default function ImportPage(): React.JSX.Element {
     clearFoldersResult,
     queueMessage,
     errorMessage,
-    statusLastError,
     refetch,
     headerActions
   } = useImportPageData(submittedQuery)
@@ -61,9 +60,9 @@ export default function ImportPage(): React.JSX.Element {
       />
 
       {queueMessage ? <Notice>{queueMessage}</Notice> : null}
-      {errorMessage || statusLastError ? (
+      {errorMessage ? (
         <Notice tone="error" className="text-sm">
-          {errorMessage ?? statusLastError}
+          {errorMessage}
         </Notice>
       ) : null}
     </div>

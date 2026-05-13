@@ -481,7 +481,6 @@ export function createApp(): express.Express {
     taggerService,
     resolveMusicRelativePath,
     normalizeFilename,
-    getAudioDuration,
     clearEmptyDirsWithin,
     showInFolder,
     openInSystemPlayer,

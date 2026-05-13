@@ -20,7 +20,6 @@ export type NavItem = {
 export const NAV_ITEMS: NavItem[] = [
   { key: 'collection', label: 'Collection', path: '/collection', icon: RowsIcon },
   { key: 'recordings', label: 'Recordings', path: '/recordings', icon: RowsIcon },
-  { key: 'upgrades', label: 'Upgrades', path: '/upgrades', icon: ArchiveIcon },
   { key: 'wantlist', label: 'Want List', path: '/wantlist', icon: BookmarkIcon },
   {
     key: 'discogs-search',
@@ -46,6 +45,10 @@ export const NAV_TITLE_BY_PATH = new Map(NAV_ITEMS.map((item) => [item.path, ite
 export function resolveNavTitle(pathname: string): string {
   if (/^\/discogs\/(?:release|artist|label|master)\/\d+$/u.test(pathname)) {
     return 'Discogs'
+  }
+
+  if (pathname === '/upgrades') {
+    return 'Upgrades'
   }
 
   if (/^\/wantlist\/\d+$/u.test(pathname)) {

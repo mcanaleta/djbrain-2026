@@ -45,6 +45,7 @@ const router = createBrowserRouter(
       <Route path="/discogs/artist/:discogsId" element={<DiscogsArtistPage />} />
       <Route path="/discogs/label/:discogsId" element={<DiscogsLabelPage />} />
       <Route path="/discogs/master/:discogsId" element={<DiscogsMasterPage />} />
+      <Route path="/search-online" element={<Navigate to="/discogs-search" replace />} />
       <Route path="/discogs-search" element={<SearchOnlinePage />} />
       <Route path="/grok-search" element={<GrokSearchPage />} />
       <Route path="/soulseek" element={<SoulseekPage />} />

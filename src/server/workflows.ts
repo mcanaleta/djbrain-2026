@@ -18,6 +18,7 @@ import {
   IMPORT_REVIEW_VERSION
 } from '../shared/analysis-version.ts'
 import { parseImportFilename } from '../shared/import-filename.ts'
+import { parseDurationString } from '../shared/track-matcher.ts'
 import type {
   DiscogsReleaseDownloadResult,
   UpgradeCandidate,
@@ -191,9 +192,10 @@ export function createWantListPipelines(deps: WantListPipelineDeps) {
       return
     }
 
-    const artist = item.artist.trim()
-    const title = item.title.trim()
-    const version = item.version?.trim() || null
+    const recording = item.recordingId ? await service.getRecording(item.recordingId) : null
+    const artist = (recording?.canonical.artist ?? item.artist).trim()
+    const title = (recording?.canonical.title ?? item.title).trim()
+    const version = recording?.canonical.version?.trim() || item.version?.trim() || null
     if (!artist || !title) {
       await service.wantListUpdatePipeline(item.id, {
         pipelineStatus: 'error',
@@ -205,6 +207,7 @@ export function createWantListPipelines(deps: WantListPipelineDeps) {
     try {
       const query =
         normalizeSearchText(queryOverride) || slskdService.buildSearchQuery(artist, title, version)
+      const referenceDurationSeconds = recording?.durationSeconds ?? parseDurationString(item.length ?? '')
       const searchId = await slskdService.startSearch(settings, query)
       await service.wantListUpdatePipeline(item.id, {
         pipelineStatus: 'searching',
@@ -213,7 +216,10 @@ export function createWantListPipelines(deps: WantListPipelineDeps) {
       })
 
       const search = await slskdService.waitForResults(settings, searchId)
-      const candidates = slskdService.extractCandidates(artist, title, version, search)
+      const candidates = slskdService
+        .extractCandidates(artist, title, version, search)
+        .map((candidate) => buildUpgradeCandidate(candidate, referenceDurationSeconds))
+        .sort(compareUpgradeCandidates)
       await service.wantListUpdatePipeline(item.id, {
         pipelineStatus: candidates.length > 0 ? 'results_ready' : 'no_results',
         searchResultCount: candidates.length,
@@ -235,7 +241,16 @@ export function createWantListPipelines(deps: WantListPipelineDeps) {
       return
     }
 
-    if (!item.artist || !item.title || !item.year) {
+    const recording = item.recordingId ? await service.getRecording(item.recordingId) : null
+    if (!item.recordingId || !recording) {
+      await service.wantListUpdatePipeline(itemId, {
+        pipelineStatus: 'import_error',
+        pipelineError: 'Want list item must be associated with a recording before importing.'
+      })
+      return
+    }
+
+    if (!(recording.canonical.artist ?? item.artist) || !(recording.canonical.title ?? item.title) || !(recording.canonical.year ?? item.year)) {
       await service.wantListUpdatePipeline(itemId, {
         pipelineStatus: 'import_error',
         pipelineError:
@@ -250,21 +265,36 @@ export function createWantListPipelines(deps: WantListPipelineDeps) {
     })
 
     try {
-      const match = {
-        releaseId: item.discogsReleaseId ?? 0,
-        releaseTitle: item.album ?? item.title,
-        format: null,
-        artist: item.artist,
-        title: item.title,
-        version: item.version,
-        trackPosition: item.discogsTrackPosition,
-        year: item.year,
-        label: item.label,
-        catalogNumber: null,
-        score: 100
-      }
-
-      const result = await importService.importFileWithKnownMatch(settings, match, localFilePath)
+      const artist = recording.canonical.artist ?? item.artist
+      const title = recording.canonical.title ?? item.title
+      const version = recording.canonical.version ?? item.version
+      const year = recording.canonical.year ?? item.year
+      await service.assignRecording({
+        recordingId: item.recordingId,
+        filenames: [toMusicRelativePath(settings, localFilePath)],
+        canonical: recording.canonical
+      })
+      await service.wantListUpdatePipeline(itemId, { pipelineStatus: 'importing', pipelineError: null })
+      const result =
+        item.discogsReleaseId && item.discogsEntityType !== 'master'
+          ? await importService.importFileWithKnownMatch(
+              settings,
+              {
+                releaseId: item.discogsReleaseId,
+                releaseTitle: item.album ?? item.title,
+                format: null,
+                artist,
+                title,
+                version,
+                trackPosition: item.discogsTrackPosition,
+                year,
+                label: item.label,
+                catalogNumber: null,
+                score: 100
+              },
+              localFilePath
+            )
+          : await importService.importFile(settings, artist, title, version, localFilePath)
 
       if (result.status === 'imported' || result.status === 'imported_upgrade') {
         await service.wantListUpdatePipeline(itemId, {
@@ -279,6 +309,11 @@ export function createWantListPipelines(deps: WantListPipelineDeps) {
           discogsReleaseId: result.match.releaseId,
           discogsTrackPosition: result.match.trackPosition,
           importedFilename: result.existingRelativePath
+        })
+      } else if (result.status === 'needs_review') {
+        await service.wantListUpdatePipeline(itemId, {
+          pipelineStatus: 'needs_review',
+          pipelineError: 'Import match needs review.'
         })
       } else {
         await service.wantListUpdatePipeline(itemId, {

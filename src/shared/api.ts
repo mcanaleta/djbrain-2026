@@ -283,6 +283,7 @@ export type WantListPipelineStatus =
 
 export type WantListItem = {
   id: number
+  recordingId: number | null
   artist: string
   title: string
   version: string | null
@@ -305,6 +306,7 @@ export type WantListItem = {
 }
 
 export type WantListAddInput = {
+  recordingId?: number | null
   artist: string
   title: string
   version?: string | null

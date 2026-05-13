@@ -6,6 +6,7 @@ export async function ensureWantListTable(db: Db): Promise<void> {
   await db.query(`
     CREATE TABLE IF NOT EXISTS want_list (
       id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      recording_id BIGINT REFERENCES recordings(id) ON DELETE CASCADE,
       artist TEXT NOT NULL,
       title TEXT NOT NULL,
       version TEXT,
@@ -26,5 +27,10 @@ export async function ensureWantListTable(db: Db): Promise<void> {
       discogs_entity_type TEXT,
       imported_filename TEXT
     );
+  `)
+
+  await db.query(`
+    ALTER TABLE want_list
+    ADD COLUMN IF NOT EXISTS recording_id BIGINT REFERENCES recordings(id) ON DELETE CASCADE
   `)
 }

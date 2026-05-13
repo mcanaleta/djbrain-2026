@@ -89,6 +89,7 @@ function buildTags(match: DiscogsTrackMatch) {
   return {
     artist: match.artist,
     title: match.title,
+    version: match.version,
     album: match.releaseTitle,
     year: match.year,
     comments: null,

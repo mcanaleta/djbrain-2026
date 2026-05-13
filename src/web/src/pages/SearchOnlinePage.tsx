@@ -72,7 +72,7 @@ export default function SearchOnlinePage(): React.JSX.Element {
   const {
     data: results,
     error: searchError,
-    isPending: isSearching
+    isFetching: isSearching
   } = useQuery({
     queryKey: ['online-search', 'discogs', submittedQuery],
     queryFn: () => api.onlineSearch.search(submittedQuery, 'discogs'),

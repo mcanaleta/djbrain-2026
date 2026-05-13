@@ -110,12 +110,17 @@ export function normalizeWantListInput(input: WantListAddInput): WantListAddInpu
   const title = normalizeWantListText(input.title)
   if (!title) throw new Error('Want list title is required.')
   return {
+    recordingId: typeof input.recordingId === 'number' && input.recordingId > 0 ? Math.trunc(input.recordingId) : null,
     artist,
     title,
     version: normalizeWantListOptionalText(input.version),
     length: normalizeWantListOptionalText(input.length),
+    year: normalizeWantListOptionalText(input.year),
     album: normalizeWantListOptionalText(input.album),
-    label: normalizeWantListOptionalText(input.label)
+    label: normalizeWantListOptionalText(input.label),
+    discogsReleaseId: typeof input.discogsReleaseId === 'number' && input.discogsReleaseId > 0 ? Math.trunc(input.discogsReleaseId) : null,
+    discogsTrackPosition: normalizeWantListOptionalText(input.discogsTrackPosition),
+    discogsEntityType: normalizeWantListOptionalText(input.discogsEntityType)
   }
 }
 

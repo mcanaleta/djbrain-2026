@@ -6,6 +6,7 @@ type Queryable = Pick<Pool, 'query'> | Pick<PoolClient, 'query'>
 
 type WantListRow = {
   id: number | string
+  recording_id: number | string | null
   artist: string
   title: string
   version: string | null
@@ -33,7 +34,7 @@ function toIso(value: Date | string): string {
 
 export class WantListStore {
   private readonly columns = `
-    id, artist, title, version, length, year, album, label, added_at,
+    id, recording_id, artist, title, version, length, year, album, label, added_at,
     pipeline_status, search_id, search_result_count, best_candidates_json,
     download_username, download_filename, pipeline_error,
     discogs_release_id, discogs_track_position, discogs_entity_type, imported_filename
@@ -48,6 +49,7 @@ export class WantListStore {
   private rowToItem(row: WantListRow): WantListItem {
     return {
       id: toNumber(row.id),
+      recordingId: row.recording_id != null ? toNumber(row.recording_id) : null,
       artist: row.artist,
       title: row.title,
       version: row.version ?? null,
@@ -73,20 +75,21 @@ export class WantListStore {
   public async add(input: WantListAddInput): Promise<WantListItem> {
     const normalized = normalizeWantListInput(input)
     const result = await this.db.query<WantListRow>(
-      `INSERT INTO want_list (artist, title, version, length, year, album, label, discogs_release_id, discogs_track_position, discogs_entity_type)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `INSERT INTO want_list (recording_id, artist, title, version, length, year, album, label, discogs_release_id, discogs_track_position, discogs_entity_type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING ${this.columns}`,
       [
+        normalized.recordingId ?? null,
         normalized.artist,
         normalized.title,
         normalized.version ?? null,
         normalized.length ?? null,
-        input.year ?? null,
+        normalized.year ?? null,
         normalized.album ?? null,
         normalized.label ?? null,
-        input.discogsReleaseId ?? null,
-        input.discogsTrackPosition ?? null,
-        input.discogsEntityType ?? null
+        normalized.discogsReleaseId ?? null,
+        normalized.discogsTrackPosition ?? null,
+        normalized.discogsEntityType ?? null
       ]
     )
     return this.rowToItem(result.rows[0])
@@ -102,17 +105,32 @@ export class WantListStore {
     const normalized = normalizeWantListInput(input)
     const result = await this.db.query<WantListRow>(
       `UPDATE want_list
-       SET artist = $1, title = $2, version = $3, length = $4, year = $5, album = $6, label = $7
-       WHERE id = $8
+       SET
+         artist = $1,
+         title = $2,
+         version = $3,
+         length = $4,
+         year = $5,
+         album = $6,
+         label = $7,
+         recording_id = COALESCE($8, recording_id),
+         discogs_release_id = COALESCE($9, discogs_release_id),
+         discogs_track_position = COALESCE($10, discogs_track_position),
+         discogs_entity_type = COALESCE($11, discogs_entity_type)
+       WHERE id = $12
        RETURNING ${this.columns}`,
       [
         normalized.artist,
         normalized.title,
         normalized.version ?? null,
         normalized.length ?? null,
-        input.year ?? null,
+        normalized.year ?? null,
         normalized.album ?? null,
         normalized.label ?? null,
+        normalized.recordingId ?? null,
+        normalized.discogsReleaseId ?? null,
+        normalized.discogsTrackPosition ?? null,
+        normalized.discogsEntityType ?? null,
         id
       ]
     )

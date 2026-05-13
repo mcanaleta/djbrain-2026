@@ -253,7 +253,7 @@ To add a new page:
 |------|------|--------|
 | `/collection` | CollectionPage | Working |
 | `/wantlist` | WantlistPage | Working |
-| `/search-online` | SearchOnlinePage | Working |
+| `/discogs-search` (`/search-online` redirects) | SearchOnlinePage | Working |
 | `/grok-search` | GrokSearchPage | Working |
 | `/discogs/release/:id` | DiscogsEntityPage | Working |
 | `/discogs/artist/:id` | DiscogsEntityPage | Working |

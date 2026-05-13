@@ -24,7 +24,6 @@ export function useImportPageData(submittedQuery: string): {
   clearFoldersResult: string | null
   queueMessage: string | null
   errorMessage: string | null
-  statusLastError: string | null
   refetch: () => Promise<unknown>
   headerActions: HeaderAction[]
 } {
@@ -92,7 +91,6 @@ export function useImportPageData(submittedQuery: string): {
           : settingsError
             ? formatError(settingsError)
             : null),
-    statusLastError: status.lastError,
     refetch: () => refetch(),
     headerActions
   }

@@ -59,7 +59,7 @@ import type {
   RecordingMatchRow,
   SourceClaimMatch
 } from './recording-identity-service.ts'
-import { buildCanonicalNormKey, parseImportReviewClaim } from './recording-identity-service.ts'
+import { buildCanonicalNormKey, buildDiscogsExternalKey, parseImportReviewClaim } from './recording-identity-service.ts'
 
 type CollectionServiceOptions = {
   connectionString: string
@@ -357,6 +357,7 @@ export type CollectionListResult = {
 
 export type WantListItem = {
   id: number
+  recordingId: number | null
   artist: string
   title: string
   version: string | null
@@ -379,6 +380,7 @@ export type WantListItem = {
 }
 
 export type WantListAddInput = {
+  recordingId?: number | null
   artist: string
   title: string
   version?: string | null
@@ -496,23 +498,28 @@ export class CollectionService {
 
   private readFileTags(filename: string): CollectionItemDetails['tags'] | null {
     if (!this.taggerService || !this.settings.musicFolderPath) return null
-    const tags = this.taggerService.readTags(join(this.settings.musicFolderPath, filename))
-    return tags
-      ? {
-          source: 'file_tags',
-          artist: tags.artist || null,
-          title: tags.title || null,
-          version: null,
-          album: tags.album,
-          year: tags.year,
-          comments: tags.comments,
-          label: tags.label,
-          catalogNumber: tags.catalogNumber,
-          trackPosition: tags.trackPosition,
-          discogsReleaseId: tags.discogsReleaseId,
-          discogsTrackPosition: tags.discogsTrackPosition
-        }
-      : null
+    try {
+      const tags = this.taggerService.readTags(join(this.settings.musicFolderPath, filename))
+      return tags
+        ? {
+            source: 'file_tags',
+            artist: tags.artist || null,
+            title: tags.title || null,
+            version: tags.version,
+            album: tags.album,
+            year: tags.year,
+            comments: tags.comments,
+            label: tags.label,
+            catalogNumber: tags.catalogNumber,
+            trackPosition: tags.trackPosition,
+            discogsReleaseId: tags.discogsReleaseId,
+            discogsTrackPosition: tags.discogsTrackPosition
+          }
+        : null
+    } catch (error) {
+      console.warn(`[collection] failed to read tags for ${filename}`, error)
+      return null
+    }
   }
 
   public async reconfigure(settings: AppSettings): Promise<void> {
@@ -3926,17 +3933,46 @@ export class CollectionService {
 
   public async wantListAdd(input: WantListAddInput): Promise<WantListItem> {
     await this.ensureReady()
-    return this.wantListStore.add(input)
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      const store = new WantListStore(client)
+      const added = await store.add({ ...input, recordingId: await this.ensureWantListRecording(input, client) })
+      await client.query('COMMIT')
+      return added
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
   }
 
   public async wantListGet(id: number): Promise<WantListItem | null> {
     await this.ensureReady()
-    return this.wantListStore.get(id)
+    return this.hydrateWantListRecording(await this.wantListStore.get(id))
   }
 
   public async wantListUpdate(id: number, input: WantListAddInput): Promise<WantListItem | null> {
     await this.ensureReady()
-    return this.wantListStore.update(id, input)
+    const current = await this.wantListStore.get(id)
+    if (!current) return null
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      const store = new WantListStore(client)
+      const updated = await store.update(id, {
+        ...input,
+        recordingId: await this.ensureWantListRecording({ ...current, ...input }, client)
+      })
+      await client.query('COMMIT')
+      return updated
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
   }
 
   public async wantListUpdatePipeline(id: number, patch: WantListPipelinePatch): Promise<WantListItem | null> {
@@ -3951,7 +3987,123 @@ export class CollectionService {
 
   public async wantListList(): Promise<WantListItem[]> {
     await this.ensureReady()
-    return this.wantListStore.list()
+    return (await Promise.all((await this.wantListStore.list()).map((item) => this.hydrateWantListRecording(item)))).filter(
+      (item): item is WantListItem => item !== null
+    )
+  }
+
+  private async hydrateWantListRecording(item: WantListItem | null): Promise<WantListItem | null> {
+    if (!item || item.recordingId) return item
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      const store = new WantListStore(client)
+      const updated = await store.update(item.id, { ...item, recordingId: await this.ensureWantListRecording(item, client) })
+      await client.query('COMMIT')
+      return updated ?? item
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+  }
+
+  private async ensureWantListRecording(input: WantListAddInput, client: Pool | PoolClient = this.pool): Promise<number> {
+    if (typeof input.recordingId === 'number' && input.recordingId > 0) return input.recordingId
+    const externalKey =
+      input.discogsReleaseId && input.discogsEntityType !== 'master'
+        ? buildDiscogsExternalKey(input.discogsReleaseId, input.discogsTrackPosition ?? null, input.title)
+        : null
+    if (externalKey) {
+      const matched = (
+        await client.query<{ recordingid: number | bigint }>(
+          `
+            SELECT recording_source_claims.recording_id AS recordingId
+            FROM recording_source_claims
+            JOIN recordings ON recordings.id = recording_source_claims.recording_id
+            WHERE recording_source_claims.external_key = $1
+              AND recordings.merged_into_recording_id IS NULL
+            LIMIT 1
+          `,
+          [externalKey]
+        )
+      ).rows[0]
+      if (matched) return toNumber(matched.recordingid)
+    }
+    const canonical = toCanonical(input.artist, input.title, input.version, input.year ?? null)
+    if (!canonical) throw new Error('Want list artist and title are required.')
+    const existing = (
+      await client.query<{ id: number | bigint }>(
+        `
+          SELECT id
+          FROM recordings
+          WHERE canonical_norm_key = $1
+            AND merged_into_recording_id IS NULL
+          ORDER BY id DESC
+          LIMIT 1
+        `,
+        [buildCanonicalNormKey(canonical)]
+      )
+    ).rows[0]
+    const recordingId =
+      existing
+        ? toNumber(existing.id)
+        : toNumber(
+            (
+              await client.query<{ id: number | bigint }>(
+                `
+                  INSERT INTO recordings(
+                    canonical_artist, canonical_title, canonical_version, canonical_year, duration_seconds, canonical_norm_key,
+                    confidence, review_state, metadata_locked, merged_into_recording_id, updated_at
+                  ) VALUES ($1, $2, $3, $4, NULL, $5, 60, 'auto', FALSE, NULL, now())
+                  RETURNING id
+                `,
+                [canonical.artist, canonical.title, canonical.version, canonical.year, buildCanonicalNormKey(canonical)]
+              )
+            ).rows[0].id
+          )
+    if (externalKey) {
+      await client.query(
+        `
+          INSERT INTO recording_source_claims(
+            recording_id, provider, entity_type, external_key,
+            artist, title, version, release_title, track_position, year, duration_seconds,
+            confidence, raw_json, updated_at
+          ) VALUES ($1, 'discogs', 'release_track', $2, $3, $4, $5, $6, $7, $8, NULL, 100, $9::jsonb, now())
+          ON CONFLICT(provider, entity_type, external_key) DO UPDATE SET
+            recording_id = EXCLUDED.recording_id,
+            artist = COALESCE(EXCLUDED.artist, recording_source_claims.artist),
+            title = COALESCE(EXCLUDED.title, recording_source_claims.title),
+            version = COALESCE(EXCLUDED.version, recording_source_claims.version),
+            release_title = COALESCE(EXCLUDED.release_title, recording_source_claims.release_title),
+            track_position = COALESCE(EXCLUDED.track_position, recording_source_claims.track_position),
+            year = COALESCE(EXCLUDED.year, recording_source_claims.year),
+            confidence = GREATEST(recording_source_claims.confidence, EXCLUDED.confidence),
+            raw_json = COALESCE(EXCLUDED.raw_json, recording_source_claims.raw_json),
+            updated_at = now()
+        `,
+        [
+          recordingId,
+          externalKey,
+          canonical.artist,
+          canonical.title,
+          canonical.version,
+          input.album ?? null,
+          input.discogsTrackPosition ?? null,
+          canonical.year,
+          normalizeJsonText(
+            JSON.stringify({
+              source: 'want_list',
+              discogsEntityType: input.discogsEntityType ?? null,
+              discogsReleaseId: input.discogsReleaseId ?? null
+            })
+          )
+        ]
+      )
+      await this.materializeRecordingDurations([recordingId], client)
+    }
+    return recordingId
   }
 
   public async upgradeCaseAdd(input: UpgradeCaseCreateInput): Promise<UpgradeCase> {

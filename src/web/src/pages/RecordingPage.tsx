@@ -7,6 +7,7 @@ import { KV } from '../components/view/KV'
 import { Notice } from '../components/view/Notice'
 import { ViewSection } from '../components/view/ViewSection'
 import { localFileUrl, usePlayer } from '../context/PlayerContext'
+import { buildRecordingWantListInput, discogsReleaseIdFromExternalKey, findMatchingWantListItem, type RecordingSourceClaim } from '../features/recordings/wantlist'
 import { useAsyncAction } from '../hooks/useAsyncAction'
 import { formatCompactDuration } from '../lib/music-file'
 import { buildCollectionItemHref, buildDiscogsReleaseUrl, buildIdentifyReviewHref, buildMusicBrainzRecordingUrl } from '../lib/urls'
@@ -37,11 +38,10 @@ export default function RecordingPage(): React.JSX.Element {
       year: recording?.canonical.year ?? ''
     })
   }, [recording?.id, recording?.canonical.artist, recording?.canonical.title, recording?.canonical.version, recording?.canonical.year])
-  const discogsReleaseId = useMemo(() => {
-    const key = recording?.sourceClaims.find((claim) => claim.provider === 'discogs' && claim.externalKey.startsWith('discogs:release:'))?.externalKey
-    const match = key?.match(/^discogs:release:(\d+)/i)
-    return match ? Number(match[1]) : null
-  }, [recording])
+  const discogsReleaseId = useMemo(
+    () => discogsReleaseIdFromExternalKey(recording?.sourceClaims.find((claim) => discogsReleaseIdFromExternalKey(claim.externalKey) != null)?.externalKey),
+    [recording]
+  )
   const { data: discogsRelease } = useQuery({
     queryKey: ['discogs', 'release', discogsReleaseId],
     queryFn: () => api.onlineSearch.getDiscogsEntity('release', discogsReleaseId!),
@@ -72,6 +72,18 @@ export default function RecordingPage(): React.JSX.Element {
       errorFallback: 'Failed to use source for recording'
     })
   }
+  const requestBetterVersion = (claim: RecordingSourceClaim | null = null): void => {
+    if (!recording) return
+    void actions.run({
+      key: `want-better-${claim?.id ?? recording.id}`,
+      action: async () => {
+        const input = buildRecordingWantListInput(recording, claim)
+        const existing = findMatchingWantListItem(await api.wantList.list(), input)
+        navigate(`/wantlist/${(existing ?? (await api.wantList.add(input))).id}`)
+      },
+      errorFallback: 'Failed to request better version'
+    })
+  }
 
   return (
     <div className="space-y-4">
@@ -93,6 +105,9 @@ export default function RecordingPage(): React.JSX.Element {
               <div className="flex flex-wrap items-center gap-2">
                 <ActionButton size="sm" tone="primary" disabled={actions.busyAction === 'save-recording'} onClick={saveCanonical}>
                   {actions.busyAction === 'save-recording' ? 'Saving…' : 'Save Recording'}
+                </ActionButton>
+                <ActionButton size="sm" disabled={actions.busyAction === `want-better-${recording.id}`} onClick={() => requestBetterVersion()}>
+                  {actions.busyAction === `want-better-${recording.id}` ? 'Adding…' : 'Request Better Version'}
                 </ActionButton>
                 <span className="text-xs text-zinc-500">Length {formatCompactDuration(recording.durationSeconds)}</span>
               </div>
@@ -206,6 +221,9 @@ export default function RecordingPage(): React.JSX.Element {
                               onClick={() => assignSourceForRecord(claim.id)}
                             >
                               {actions.busyAction === `use-source-${claim.id}` ? 'Updating…' : 'Use For Record'}
+                            </ActionButton>
+                            <ActionButton size="xs" disabled={actions.busyAction === `want-better-${claim.id}`} onClick={() => requestBetterVersion(claim)}>
+                              {actions.busyAction === `want-better-${claim.id}` ? 'Adding…' : 'Want Better'}
                             </ActionButton>
                             {externalUrl ? <a className="text-zinc-400 hover:text-zinc-200" href={externalUrl} target="_blank" rel="noreferrer">Open</a> : null}
                           </div>

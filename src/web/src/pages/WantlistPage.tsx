@@ -7,6 +7,7 @@ import { ActionButton } from '../components/view/ActionButton'
 import { DataTable, type DataTableColumn } from '../components/view/DataTable'
 import { Notice } from '../components/view/Notice'
 import { ViewSection } from '../components/view/ViewSection'
+import { buildRecordingHref } from '../lib/urls'
 import {
   canResetWantListItem,
   formatWantListError,
@@ -72,7 +73,20 @@ export default function WantlistPage(): React.JSX.Element {
         key: 'title',
         header: 'Title',
         cellClassName: 'max-w-[240px] truncate',
-        render: (item) => item.title || '—'
+        render: (item) => (
+          <div className="leading-tight">
+            <div className="truncate">{item.title || '—'}</div>
+            {item.recordingId != null ? (
+              <Link
+                to={buildRecordingHref(item.recordingId)}
+                onClick={(event) => event.stopPropagation()}
+                className="text-[10px] text-zinc-500 hover:text-zinc-200"
+              >
+                Recording #{item.recordingId}
+              </Link>
+            ) : null}
+          </div>
+        )
       },
       {
         key: 'length',

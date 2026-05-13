@@ -7,6 +7,7 @@ import { extname } from 'node:path'
 export type AudioTags = {
   artist: string
   title: string
+  version: string | null
   album: string | null
   year: string | null
   comments: string | null
@@ -49,13 +50,17 @@ export class TaggerService {
   }
 
   readTags(filePath: string): AudioTags | null {
-    if (this.supportsFile(filePath)) {
-      return this.readID3Tags(filePath)
+    try {
+      if (this.supportsFile(filePath)) {
+        return this.readID3Tags(filePath)
+      }
+      if (extname(filePath).toLowerCase() === '.flac') {
+        return this.readFlacTags(filePath)
+      }
+      return null
+    } catch {
+      return null
     }
-    if (extname(filePath).toLowerCase() === '.flac') {
-      return this.readFlacTags(filePath)
-    }
-    return null
   }
 
   private readID3Tags(filePath: string): AudioTags | null {
@@ -78,6 +83,7 @@ export class TaggerService {
     return {
       artist: raw.artist?.trim() || '',
       title: raw.title?.trim() || '',
+      version: findUserValue('VERSION'),
       album: raw.album?.trim() || null,
       year: raw.year?.trim() || null,
       comments: readComment(raw.comment),
@@ -108,6 +114,7 @@ export class TaggerService {
       return {
         artist: findValue('artist') ?? '',
         title: findValue('title') ?? '',
+        version: findValue('VERSION'),
         album: findValue('album'),
         year: findValue('year', 'date'),
         comments: findValue('comment', 'comments', 'description'),
@@ -157,6 +164,13 @@ export class TaggerService {
       userDefinedText.push({
         description: 'DISCOGS_CATALOG_NUMBER',
         value: tags.catalogNumber
+      })
+    }
+
+    if (tags.version !== null) {
+      userDefinedText.push({
+        description: 'VERSION',
+        value: tags.version
       })
     }
 

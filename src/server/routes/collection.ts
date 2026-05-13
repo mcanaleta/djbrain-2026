@@ -35,7 +35,6 @@ type CollectionRouteDeps = {
   taggerService: TaggerService
   resolveMusicRelativePath: (filename: string) => string
   normalizeFilename: (value: string) => string
-  getAudioDuration: (filePath: string) => Promise<number | null>
   clearEmptyDirsWithin: (rootDir: string) => Promise<number>
   showInFolder: (filePath: string) => Promise<void>
   openInSystemPlayer: (filePath: string) => Promise<void>
@@ -66,7 +65,6 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
     taggerService,
     resolveMusicRelativePath,
     normalizeFilename,
-    getAudioDuration,
     clearEmptyDirsWithin,
     showInFolder,
     openInSystemPlayer,
@@ -137,15 +135,7 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
     asyncHandler(async (request, response) => {
       const service = requireCollectionService()
       const query = typeof request.query['query'] === 'string' ? request.query['query'] : ''
-      const result = await service.listDownloads(query)
-      const musicFolderPath = currentSettings().musicFolderPath
-      const items = await Promise.all(
-        result.items.map(async (item) => ({
-          ...item,
-          duration: await getAudioDuration(join(musicFolderPath, item.filename))
-        }))
-      )
-      sendJson(response, 200, { items, total: result.total })
+      sendJson(response, 200, await service.listDownloads(query))
     })
   )
 

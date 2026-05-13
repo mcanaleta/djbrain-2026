@@ -13,6 +13,7 @@ import { QueryBar } from '../components/view/QueryBar'
 import { ViewPanel } from '../components/view/ViewPanel'
 import { ViewSection } from '../components/view/ViewSection'
 import { localFileUrl, usePlayer } from '../context/PlayerContext'
+import { buildRecordingHref } from '../lib/urls'
 import {
   deriveTrackSummaryFromFilename,
   fileBasename,
@@ -296,6 +297,11 @@ export default function WantlistItemPage(): React.JSX.Element {
             {item.artist} / {item.title}
           </h1>
           <WantListStatusBadge status={item.pipelineStatus} />
+          {item.recordingId != null ? (
+            <Link to={buildRecordingHref(item.recordingId)} className="text-xs text-zinc-500 hover:text-zinc-200">
+              Recording #{item.recordingId}
+            </Link>
+          ) : null}
           {item.discogsReleaseId != null ? (
             <Link
               to={`/discogs/${item.discogsEntityType ?? 'release'}/${item.discogsReleaseId}`}
