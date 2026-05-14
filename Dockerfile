@@ -29,6 +29,7 @@ RUN npm ci --omit=dev
 
 # Copy server source (runs with --experimental-strip-types, no transpile needed)
 COPY src/ src/
+COPY scripts/ scripts/
 
 # Copy built frontend from builder stage
 COPY --from=builder /app/dist/ dist/
