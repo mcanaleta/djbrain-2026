@@ -5,7 +5,7 @@ import { Notice } from '../components/view/Notice'
 import { useHeaderActions } from '../context/HeaderActionsContext'
 import { ImportTracksTable } from '../features/import/ImportTracksTable'
 import { useImportPageData } from '../features/import/useImportPageData'
-import { buildImportReviewHref } from '../lib/urls'
+import { buildImportRecordReviewHref } from '../lib/urls'
 
 export default function ImportPage(): React.JSX.Element {
   const navigate = useNavigate()
@@ -56,7 +56,7 @@ export default function ImportPage(): React.JSX.Element {
         rows={groupedRows}
         loading={isLoading}
         musicFolderPath={musicFolderPath}
-        onOpenRow={(row) => navigate(buildImportReviewHref(row.bestFile.filename, submittedQuery))}
+        onOpenRow={(row) => navigate(buildImportRecordReviewHref(row.id, submittedQuery))}
       />
 
       {queueMessage ? <Notice>{queueMessage}</Notice> : null}

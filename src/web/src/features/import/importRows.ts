@@ -1,5 +1,5 @@
 import type { CollectionItem } from '../../../../shared/api'
-import { deriveTrackSummaryFromFilename } from '../../lib/music-file'
+import { deriveTrackSummaryFromFilename } from '../../lib/music-file.ts'
 
 export type ImportRow = CollectionItem & {
   artist: string
@@ -9,6 +9,7 @@ export type ImportRow = CollectionItem & {
 }
 
 export type ImportTracksTableRow = {
+  id: number
   key: string
   artist: string
   title: string
@@ -17,22 +18,20 @@ export type ImportTracksTableRow = {
   replacementFilename: string | null
   betterQualityFound: boolean | null
   fileCount: number
+  files: ImportRow[]
   prep: string
-  bestFile: {
-    filename: string
-    title: string
-    artist: string
-    recordingDiscogsUrl?: string | null
-    recordingMusicBrainzUrl?: string | null
-  }
+  bestFile: ImportRow
 }
 
 function compareImportRows(left: ImportRow, right: ImportRow): number {
   const leftBetter = left.importBetterThanExisting === true ? 1 : 0
   const rightBetter = right.importBetterThanExisting === true ? 1 : 0
   if (leftBetter !== rightBetter) return rightBetter - leftBetter
-  if ((left.importQualityScore ?? -1) !== (right.importQualityScore ?? -1)) {
-    return (right.importQualityScore ?? -1) - (left.importQualityScore ?? -1)
+  if (left.importQualityScore != null && right.importQualityScore != null && left.importQualityScore !== right.importQualityScore) {
+    return right.importQualityScore - left.importQualityScore
+  }
+  if ((left.importQualityScore == null || right.importQualityScore == null) && left.filesize !== right.filesize) {
+    return right.filesize - left.filesize
   }
   if (left.filesize !== right.filesize) return right.filesize - left.filesize
   return left.filename.localeCompare(right.filename)
@@ -62,6 +61,28 @@ function normalizeGroupTitle(value: string): string {
     .replace(/\s+\d{6,}$/, '')
 }
 
+function importGroupKey(row: ImportRow): string {
+  const matchedTitle = row.importMatchTitle
+    ? `${row.importMatchTitle}${row.importMatchVersion ? ` (${row.importMatchVersion})` : ''}`
+    : null
+  if (row.recordingId != null) return `recording:${row.recordingId}`
+  if (row.importMatchArtist && matchedTitle) {
+    return `match:${normalizeGroupText(row.importMatchArtist)}:${normalizeGroupTitle(matchedTitle)}`
+  }
+  return row.importTrackKey || `parsed:${normalizeGroupText(row.artist)}:${normalizeGroupTitle(row.title)}`
+}
+
+function importRecordId(key: string): number {
+  const recordingId = key.match(/^recording:(\d+)$/)?.[1]
+  if (recordingId) return Number(recordingId)
+  let hash = 2166136261
+  for (let index = 0; index < key.length; index += 1) {
+    hash ^= key.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0) || 1
+}
+
 export function buildImportRows(items: CollectionItem[]): ImportRow[] {
   return items.map((item) => {
     const fallback = deriveTrackSummaryFromFilename(item.filename)
@@ -83,10 +104,7 @@ export function buildImportRows(items: CollectionItem[]): ImportRow[] {
 export function groupImportRows(rows: ImportRow[]): ImportTracksTableRow[] {
   const groups = new Map<string, ImportRow[]>()
   for (const row of rows) {
-    const key =
-      (row.recordingId != null ? `recording:${row.recordingId}` : null) ||
-      row.importTrackKey ||
-      `parsed:${normalizeGroupText(row.artist)}:${normalizeGroupTitle(row.title)}`
+    const key = importGroupKey(row)
     const bucket = groups.get(key)
     if (bucket) bucket.push(row)
     else groups.set(key, [row])
@@ -95,6 +113,7 @@ export function groupImportRows(rows: ImportRow[]): ImportTracksTableRow[] {
     .map(([key, group]) => {
       const bestFile = [...group].sort(compareImportRows)[0]
       return {
+        id: importRecordId(key),
         key,
         artist: bestFile.importMatchArtist || bestFile.artist,
         title: bestFile.importMatchTitle
@@ -110,6 +129,7 @@ export function groupImportRows(rows: ImportRow[]): ImportTracksTableRow[] {
             ? false
             : null,
         fileCount: group.length,
+        files: [...group].sort(compareImportRows),
         prep: summarizePrep(group),
         bestFile
       }

@@ -1,45 +1,155 @@
-import { useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import type { ImportReview } from '../../../shared/api'
 import { api } from '../api/client'
 import { ImportReviewDialog } from '../components/ImportReviewDialog'
-import { buildImportHref, buildImportReviewHref } from '../lib/urls'
+import { ActionButton } from '../components/view/ActionButton'
+import { Notice } from '../components/view/Notice'
+import { ImportRecordFilesTable } from '../features/import/ImportRecordFilesTable'
+import { buildImportCommitInputFromReview, type ImportRecordDownloadAction, type ImportRecordFileRow } from '../features/import/importRecordFiles'
+import { buildImportRows, groupImportRows } from '../features/import/importRows'
+import type { TagDraft } from '../lib/importReview'
+import { buildImportHref, buildImportRecordReviewHref } from '../lib/urls'
+
+type ActiveImportReview = { filename: string; review: ImportReview; selectedIndex: number | null; tagDraft: TagDraft }
 
 export default function ImportReviewPage(): React.JSX.Element {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const routeParams = useParams()
   const [searchParams] = useSearchParams()
-  const filename = searchParams.get('filename')
+  const recordIdParam = routeParams.recordId ?? searchParams.get('recordId')
+  const recordId = Number(recordIdParam)
+  const legacyFilename = searchParams.get('filename')
   const query = searchParams.get('query') ?? ''
-  const { data: listResult } = useQuery({
+  const [selectedFilename, setSelectedFilename] = useState<string | null>(null)
+  const [busyAction, setBusyAction] = useState<string | null>(null)
+  const [pendingDeleteFilename, setPendingDeleteFilename] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [activeReview, setActiveReview] = useState<ActiveImportReview | null>(null)
+  const { data: listResult, isPending } = useQuery({
     queryKey: ['collection', 'downloads', query],
     queryFn: () => api.collection.listDownloads(query)
   })
   const items = listResult?.items ?? []
-
-  const currentIndex = useMemo(
-    () => (filename ? items.findIndex((item) => item.filename === filename) : -1),
-    [filename, items]
+  const records = useMemo(() => groupImportRows(buildImportRows(items)), [items])
+  const record = useMemo(
+    () =>
+      Number.isFinite(recordId) && recordId > 0
+        ? records.find((row) => row.id === recordId) ?? null
+        : recordIdParam
+          ? records.find((row) => row.key === recordIdParam) ?? null
+        : legacyFilename
+          ? records.find((row) => row.files.some((file) => file.filename === legacyFilename)) ?? null
+          : null,
+    [legacyFilename, recordId, recordIdParam, records]
   )
-  const currentItem = currentIndex >= 0 ? items[currentIndex] ?? null : null
-  const nextFilename = currentIndex >= 0 ? items[currentIndex + 1]?.filename ?? null : null
+  const { data: collectionTarget = null } = useQuery({
+    queryKey: ['collection', 'item', record?.replacementFilename ?? null],
+    queryFn: () => record?.replacementFilename ? api.collection.get(record.replacementFilename) : Promise.resolve(null),
+    enabled: Boolean(record?.replacementFilename)
+  })
+
+  useEffect(() => {
+    if (!record || routeParams.recordId === String(record.id)) return
+    navigate(buildImportRecordReviewHref(record.id, query), { replace: true })
+  }, [navigate, query, record, routeParams.recordId])
+
+  useEffect(() => {
+    if (!record) return
+    const selectedInRecord = selectedFilename && record.files.some((file) => file.filename === selectedFilename)
+    const legacyInRecord = legacyFilename && record.files.some((file) => file.filename === legacyFilename)
+    if (!selectedInRecord) setSelectedFilename(legacyInRecord ? legacyFilename : record.bestFile.filename)
+  }, [legacyFilename, record, selectedFilename])
 
   const importHref = buildImportHref(query)
-  const nextHref = nextFilename ? buildImportReviewHref(nextFilename, query) : importHref
+  const currentIndex = record ? records.findIndex((row) => row.key === record.key) : -1
+  const selectedItem = record?.files.find((file) => file.filename === selectedFilename) ?? record?.bestFile ?? null
+  const nextRecord = currentIndex >= 0 ? records[currentIndex + 1] ?? null : null
+  const nextHref = nextRecord ? buildImportRecordReviewHref(nextRecord.id, query) : importHref
 
   const handleResolved = (): void => {
     navigate(nextHref, { replace: true })
   }
 
+  const refreshDownloads = async (): Promise<void> => {
+    await queryClient.invalidateQueries({ queryKey: ['collection', 'downloads'] })
+  }
+
+  const handleFileAction = async (action: ImportRecordDownloadAction, row: ImportRecordFileRow): Promise<void> => {
+    if (row.kind !== 'download') return
+    setSelectedFilename(row.filename)
+    setActionError(null)
+    if (action === 'delete' && pendingDeleteFilename !== row.filename) {
+      setPendingDeleteFilename(row.filename)
+      return
+    }
+    const key = `${action}:${row.filename}`
+    setBusyAction(key)
+    try {
+      if (action === 'delete') {
+        await api.collection.deleteFile(row.filename)
+        const remaining = record?.files.filter((file) => file.filename !== row.filename) ?? []
+        if (remaining.length === 0) handleResolved()
+        else {
+          setSelectedFilename(remaining[0]?.filename ?? null)
+          await refreshDownloads()
+        }
+        return
+      }
+      const active = activeReview?.filename === row.filename ? activeReview : null
+      const review = active?.review ?? await api.collection.getImportReview(row.filename)
+      const input = buildImportCommitInputFromReview(
+        review,
+        action === 'replace' ? 'replace_existing' : 'import_new',
+        collectionTarget?.filename ?? null,
+        active?.selectedIndex ?? review.selectedCandidateIndex,
+        active?.tagDraft
+      )
+      if (!input) throw new Error('No Discogs candidate available for this file.')
+      await api.collection.commitImport(input)
+      handleResolved()
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Unexpected import action error')
+    } finally {
+      setBusyAction(null)
+      setPendingDeleteFilename(null)
+    }
+  }
+
+  if (isPending) {
+    return <Notice>Loading import record...</Notice>
+  }
+
+  if (!record) {
+    return (
+      <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
+        <Notice tone="warning">Import record not found.</Notice>
+        <ActionButton size="xs" onClick={() => navigate(importHref)}>Back To Import</ActionButton>
+      </div>
+    )
+  }
+
   return (
-    <div>
+    <div className="space-y-2">
+      <ImportRecordFilesTable
+        record={record}
+        collectionTarget={collectionTarget}
+        selectedFilename={selectedItem?.filename ?? null}
+        busyAction={busyAction}
+        pendingDeleteFilename={pendingDeleteFilename}
+        onAction={(action, row) => { void handleFileAction(action, row) }}
+        onCancelDelete={() => setPendingDeleteFilename(null)}
+        onSelect={setSelectedFilename}
+      />
+      {actionError ? <Notice tone="error">{actionError}</Notice> : null}
       <ImportReviewDialog
-        filename={filename}
-        currentItem={currentItem}
+        filename={selectedItem?.filename ?? null}
         queuePosition={currentIndex >= 0 ? currentIndex + 1 : null}
-        queueTotal={items.length || null}
+        queueTotal={records.length || null}
         onClose={() => navigate(importHref)}
-        onCommitted={handleResolved}
-        onDeleted={handleResolved}
+        onReviewChange={setActiveReview}
       />
     </div>
   )

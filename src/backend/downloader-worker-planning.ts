@@ -64,6 +64,25 @@ function remoteKey(username: string | null, filename: string | null, size: numbe
   return `${username ?? ''}\n${filename ?? ''}\n${size ?? 0}`
 }
 
+export function downloadAttemptStatusFromSlskdState(state: string | null): DownloadAttemptStatus | null {
+  if (!state) return null
+  const value = state.toLowerCase()
+  if (value.includes('rejected') || value.includes('errored')) return 'failed'
+  if (value.includes('cancelled')) return 'cancelled'
+  if (value.includes('timedout') || value.includes('timed out')) return 'timeout'
+  if (value.includes('completed')) return 'downloaded'
+  return 'downloading'
+}
+
+export function wantListStatusAfterAttempt(
+  status: DownloadAttemptStatus,
+  hasDownloadedAttempt: boolean,
+  errorMessage: string | null
+) {
+  if (status === 'downloaded' || hasDownloadedAttempt) return { pipelineStatus: 'downloaded' as const, pipelineError: null }
+  return errorMessage ? { pipelineStatus: 'error' as const, pipelineError: errorMessage } : null
+}
+
 export function buildDownloadRequests(input: BuildDownloadRequestsInput): DownloadRequestPlan[] {
   const attempted = new Set(input.existingAttempts.map((item) => remoteKey(item.username, item.remoteFilename, item.remoteSize)))
   const activeCount = input.existingAttempts.filter((item) => ACTIVE_ATTEMPT_STATUSES.has(item.status)).length

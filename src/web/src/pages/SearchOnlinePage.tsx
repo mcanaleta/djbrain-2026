@@ -69,14 +69,15 @@ export default function SearchOnlinePage(): React.JSX.Element {
   const submittedQuery = searchParams.get('q') ?? ''
   const [inputValue, setInputValue] = useState(submittedQuery)
   const { data: settings, error: settingsError, isPending: isLoadingSettings } = useSettingsQuery()
+  const canSearch = Boolean(submittedQuery) && !isLoadingSettings
   const {
     data: results,
     error: searchError,
-    isPending: isSearching
+    isFetching: isSearching
   } = useQuery({
     queryKey: ['online-search', 'discogs', submittedQuery],
     queryFn: () => api.onlineSearch.search(submittedQuery, 'discogs'),
-    enabled: Boolean(submittedQuery) && !isLoadingSettings
+    enabled: canSearch
   })
   const hasDiscogsToken = Boolean(settings?.discogsUserToken.trim())
   const errorMessage = settingsError ? formatError(settingsError) : searchError ? formatError(searchError) : null
@@ -121,7 +122,7 @@ export default function SearchOnlinePage(): React.JSX.Element {
         </Notice>
       ) : null}
 
-      {isSearching ? (
+      {canSearch && isSearching ? (
         <Notice>Searching…</Notice>
       ) : results ? (
         results.items.length > 0 ? (

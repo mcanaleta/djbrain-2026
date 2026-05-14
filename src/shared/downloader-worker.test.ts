@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
   buildDownloadRequests,
+  downloadAttemptStatusFromSlskdState,
+  wantListStatusAfterAttempt,
   buildUpgradeWantedMigration,
   type DownloadAttemptSeed,
   type WantedDownloadCandidate
@@ -77,5 +79,27 @@ describe('buildUpgradeWantedMigration', () => {
     assert.equal(migration.attempts[0]?.originArtist, 'Farmdoctors')
     assert.equal(migration.attempts[0]?.localFilename, 'soulseek/complete/Farmdoctors/el-guebo.flac')
     assert.equal(migration.attempts[0]?.status, 'downloaded')
+  })
+})
+
+describe('downloadAttemptStatusFromSlskdState', () => {
+  it('does not treat rejected or errored completed transfers as downloads', () => {
+    assert.equal(downloadAttemptStatusFromSlskdState('Completed, Succeeded'), 'downloaded')
+    assert.equal(downloadAttemptStatusFromSlskdState('Completed, Rejected'), 'failed')
+    assert.equal(downloadAttemptStatusFromSlskdState('Completed, Errored'), 'failed')
+    assert.equal(downloadAttemptStatusFromSlskdState('Completed, TimedOut'), 'timeout')
+  })
+})
+
+describe('wantListStatusAfterAttempt', () => {
+  it('keeps a wanted record downloaded when another parallel candidate fails', () => {
+    assert.deepEqual(wantListStatusAfterAttempt('timeout', true, 'timed out'), {
+      pipelineStatus: 'downloaded',
+      pipelineError: null
+    })
+    assert.deepEqual(wantListStatusAfterAttempt('timeout', false, 'timed out'), {
+      pipelineStatus: 'error',
+      pipelineError: 'timed out'
+    })
   })
 })

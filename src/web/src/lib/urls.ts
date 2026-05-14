@@ -26,8 +26,8 @@ export const musicBrainzRecordingUrlFromExternalKey = (externalKey?: string | nu
 export const buildImportHref = (query?: string | null): string =>
   query ? `/import?query=${encodeURIComponent(query)}` : '/import'
 
-export const buildImportReviewHref = (filename: string, query?: string | null): string =>
-  `/import/review?filename=${encodeURIComponent(filename)}${query ? `&query=${encodeURIComponent(query)}` : ''}`
+export const buildImportRecordReviewHref = (recordId: number, query?: string | null): string =>
+  `/import/review/${encodeURIComponent(String(recordId))}${query ? `?query=${encodeURIComponent(query)}` : ''}`
 
 export const buildIdentifyReviewHref = (filename: string, scope: IdentifyScope): string =>
   `/identify?scope=${scope}&filename=${encodeURIComponent(filename)}`

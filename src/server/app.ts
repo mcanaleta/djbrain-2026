@@ -20,10 +20,12 @@ import { IdentificationBackgroundService } from '../backend/identification-backg
 import { MusicBrainzService } from '../backend/musicbrainz-service.ts'
 import { RecordingIdentityService } from '../backend/recording-identity-service.ts'
 import { YouTubeApiService } from '../backend/youtube-api-service.ts'
+import { DatabaseInspector } from '../backend/database-inspector.ts'
 import type { DiscogsTrackMatch } from '../shared/discogs-match.ts'
 import type { FileIdentificationState, ImportTagPreview } from '../shared/api.ts'
 import { formatError, HttpError, sendJson } from './http.ts'
 import { registerCollectionRoutes } from './routes/collection.ts'
+import { registerDatabaseRoutes } from './routes/database.ts'
 import { registerMediaRoutes } from './routes/media.ts'
 import { registerSearchRoutes } from './routes/search.ts'
 import { registerUpgradeRoutes } from './routes/upgrades.ts'
@@ -110,6 +112,7 @@ const upgradeActions = createUpgradeActions({
 })
 
 let collectionService: CollectionService | null = null
+let databaseInspector: DatabaseInspector | null = null
 let recordingIdentityService: RecordingIdentityService | null = null
 let importReviewBackgroundService: ImportReviewBackgroundService | null = null
 let identificationBackgroundService: IdentificationBackgroundService | null = null
@@ -483,6 +486,8 @@ export function createApp(): express.Express {
     applyTagOverrides
   })
 
+  registerDatabaseRoutes(app, { requireDatabaseInspector })
+
   registerWantListRoutes(app, {
     requireCollectionService,
     normalizeSearchText,
@@ -552,8 +557,12 @@ export async function start(): Promise<void> {
   await importProcessingQueue.start()
   await identificationProcessingQueue.start()
 
+  const postgresUrl = process.env['DJBRAIN_POSTGRES_URL']?.trim() || ''
+  if (!postgresUrl) {
+    throw new Error('DJBRAIN_POSTGRES_URL is required. SQLite has been removed.')
+  }
   collectionService = new CollectionService({
-    connectionString: process.env['DJBRAIN_POSTGRES_URL']?.trim() || '',
+    connectionString: postgresUrl,
     onImportQueueChanged: automationEnabled
       ? () => {
         void importReviewBackgroundService?.syncQueue()
@@ -565,9 +574,7 @@ export async function start(): Promise<void> {
       }
       : undefined
   })
-  if (!process.env['DJBRAIN_POSTGRES_URL']?.trim()) {
-    throw new Error('DJBRAIN_POSTGRES_URL is required. SQLite has been removed.')
-  }
+  databaseInspector = new DatabaseInspector(postgresUrl)
   await collectionService.reconfigure(currentSettings())
   recordingIdentityService = new RecordingIdentityService({
     collectionService,
@@ -623,6 +630,7 @@ export async function start(): Promise<void> {
   const shutdown = (): void => {
     server.close(() => {
       collectionService?.dispose()
+      void databaseInspector?.dispose()
       void importProcessingQueue.stop()
       void identificationProcessingQueue.stop()
       process.exit(0)
@@ -637,6 +645,13 @@ function requireCollectionService(): CollectionService {
     throw new Error('Collection service not initialized')
   }
   return collectionService
+}
+
+function requireDatabaseInspector(): DatabaseInspector {
+  if (!databaseInspector) {
+    throw new Error('Database inspector not initialized')
+  }
+  return databaseInspector
 }
 
 function requireRecordingIdentityService(): RecordingIdentityService {

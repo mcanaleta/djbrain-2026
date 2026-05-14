@@ -175,6 +175,7 @@ export default function WantlistItemPage(): React.JSX.Element {
           <div className="space-y-0.5 leading-tight">
             <div className="truncate text-[11px] font-medium text-zinc-100" title={attemptLabel(attempt)}>{fileBasename(attemptLabel(attempt))}</div>
             <div className="truncate text-[10px] text-zinc-500" title={attempt.username ?? ''}>{attempt.username ?? 'local'} · {formatFileSize(attempt.localFilesize ?? attempt.remoteSize ?? 0)}</div>
+            {attempt.errorMessage ? <div className="truncate text-[10px] text-amber-300" title={attempt.errorMessage}>{attempt.errorMessage}</div> : null}
           </div>
         )
       },

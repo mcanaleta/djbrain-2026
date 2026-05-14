@@ -4,6 +4,7 @@ export type DiscogsTrack = {
   position?: string
   title: string
   duration?: string
+  artists?: string[]
 }
 
 export type DiscogsEntityReference = {

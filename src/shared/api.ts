@@ -2,6 +2,7 @@ import type { DiscogsArtist, DiscogsLabel, DiscogsMaster, DiscogsRelease } from 
 import type { DiscogsTrackMatch } from './discogs-match'
 import type { GrokSearchResponse } from './grok-search'
 import type { OnlineSearchResponse, OnlineSearchScope } from './online-search'
+import type { DatabaseRowDetails, DatabaseTableRows, DatabaseTableSummary } from './database-inspector'
 
 export type AppSettings = {
   musicFolderPath: string
@@ -24,6 +25,7 @@ export type CollectionItem = {
   isDownload?: boolean
   bitrateKbps?: number | null
   qualityScore?: number | null
+  audioAnalysis?: AudioAnalysis | null
   recordingId?: number | null
   recordingDiscogsUrl?: string | null
   recordingMusicBrainzUrl?: string | null
@@ -174,6 +176,7 @@ export type FileIdentificationState = {
   chosenClaimId: number | null
   identifyVersion: number
   explanationJson: string | null
+  verifiedAt: string | null
   processedAt: string | null
   errorMessage: string | null
   recordingCanonical: RecordingCanonical | null
@@ -187,6 +190,7 @@ export type RecordingSummary = {
   reviewState: 'auto' | 'confirmed' | 'merged'
   metadataLocked: boolean
   mergedIntoRecordingId: number | null
+  durationSeconds: number | null
   fileCount: number
   claimCount: number
 }
@@ -568,6 +572,11 @@ export type DJBrainApi = {
     clearEmptyFolders: () => Promise<number>
     showInFinder: (filename: string) => Promise<void>
     openInPlayer: (filename: string) => Promise<void>
+  }
+  database: {
+    listTables: () => Promise<DatabaseTableSummary[]>
+    listRows: (table: string, input?: { filter?: string; limit?: number; offset?: number }) => Promise<DatabaseTableRows>
+    getRow: (table: string, key: string) => Promise<DatabaseRowDetails | null>
   }
   upgrades: {
     list: () => Promise<UpgradeCase[]>

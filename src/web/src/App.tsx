@@ -8,6 +8,9 @@ import {
 import AppShell from './layout/AppShell'
 import CollectionPage from './pages/CollectionPage'
 import CollectionItemPage from './pages/CollectionItemPage'
+import DatabaseRowPage from './pages/DatabaseRowPage'
+import DatabaseTablePage from './pages/DatabaseTablePage'
+import DatabaseTablesPage from './pages/DatabaseTablesPage'
 import WantlistPage from './pages/WantlistPage'
 import WantlistItemPage from './pages/WantlistItemPage'
 import DiscogsReleasePage from './pages/DiscogsReleasePage'
@@ -30,6 +33,9 @@ const router = createBrowserRouter(
       <Route path="/collection" element={<CollectionPage />} />
       <Route path="/collection/item/:itemId" element={<CollectionItemPage />} />
       <Route path="/collection/item" element={<CollectionItemPage />} />
+      <Route path="/database" element={<DatabaseTablesPage />} />
+      <Route path="/database/:table" element={<DatabaseTablePage />} />
+      <Route path="/database/:table/:key" element={<DatabaseRowPage />} />
       <Route path="/wantlist" element={<WantlistPage />} />
       <Route path="/wantlist/:wantId" element={<WantlistItemPage />} />
       <Route path="/discogs/release/:discogsId" element={<DiscogsReleasePage />} />
@@ -41,6 +47,7 @@ const router = createBrowserRouter(
       <Route path="/soulseek" element={<SoulseekPage />} />
       <Route path="/spotify" element={<SpotifyPage />} />
       <Route path="/import" element={<ImportPage />} />
+      <Route path="/import/review/:recordId" element={<ImportReviewPage />} />
       <Route path="/import/review" element={<ImportReviewPage />} />
       <Route path="/identify" element={<IdentifyPage />} />
       <Route path="/dropbox" element={<DropboxPage />} />

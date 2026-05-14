@@ -23,6 +23,7 @@ type CollectionRow = {
   isDownload?: boolean
   bitrateKbps?: number | null
   qualityScore?: number | null
+  audioAnalysis?: CollectionItem['audioAnalysis']
   recordingId?: number | bigint | null
   recordingDiscogsUrl?: string | null
   recordingMusicBrainzUrl?: string | null
@@ -184,6 +185,7 @@ export function toListResult(rows: CollectionRow[]): CollectionListResult {
     isDownload: row.isDownload ?? false,
     bitrateKbps: row.bitrateKbps ?? null,
     qualityScore: row.qualityScore ?? null,
+    audioAnalysis: row.audioAnalysis ?? null,
     recordingId: row.recordingId == null ? null : toNumber(row.recordingId),
     recordingDiscogsUrl: row.recordingDiscogsUrl ?? null,
     recordingMusicBrainzUrl: row.recordingMusicBrainzUrl ?? null,

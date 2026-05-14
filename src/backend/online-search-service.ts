@@ -598,7 +598,8 @@ function normalizeTracklist(value: unknown): DiscogsTrack[] {
     return {
       position: normalizeOptionalText(item.position),
       title,
-      duration: normalizeOptionalText(item.duration)
+      duration: normalizeOptionalText(item.duration),
+      artists: normalizeReferences(item.artists, 'artist').map((artist) => artist.name)
     }
   })
 

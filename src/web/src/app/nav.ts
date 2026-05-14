@@ -7,7 +7,8 @@ import {
   MagnifyingGlassIcon,
   MixerHorizontalIcon,
   RowsIcon,
-  SewingPinIcon
+  SewingPinIcon,
+  TableIcon
 } from '@radix-ui/react-icons'
 
 export type NavItem = {
@@ -19,6 +20,7 @@ export type NavItem = {
 
 export const NAV_ITEMS: NavItem[] = [
   { key: 'collection', label: 'Collection', path: '/collection', icon: RowsIcon },
+  { key: 'database', label: 'Database', path: '/database', icon: TableIcon },
   { key: 'wantlist', label: 'Want List', path: '/wantlist', icon: BookmarkIcon },
   {
     key: 'discogs-search',
@@ -60,6 +62,10 @@ export function resolveNavTitle(pathname: string): string {
 
   if (pathname === '/collection/item' || /^\/collection\/item\/\d+$/u.test(pathname)) {
     return 'Track'
+  }
+
+  if (/^\/database(?:\/|$)/u.test(pathname)) {
+    return 'Database'
   }
 
   return NAV_TITLE_BY_PATH.get(pathname as `/${string}`) ?? 'DJBrain'

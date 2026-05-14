@@ -352,6 +352,7 @@ export default function CollectionItemPage(): React.JSX.Element {
                     { label: 'Parsed', value: `${item.identification.parsedArtist || '—'} · ${item.identification.parsedTitle || '—'}${item.identification.parsedVersion ? ` (${item.identification.parsedVersion})` : ''}` },
                     { label: 'Tags', value: `${item.identification.tagArtist || '—'} · ${item.identification.tagTitle || '—'}${item.identification.tagVersion ? ` (${item.identification.tagVersion})` : ''}` },
                     { label: 'Audio hash', value: item.identification.audioHash || '—' },
+                    { label: 'Verified', value: fmtDate(item.identification.verifiedAt) },
                     { label: 'Processed', value: fmtDate(item.identification.processedAt) },
                     { label: 'Error', value: item.identification.errorMessage || '—' }
                   ]}

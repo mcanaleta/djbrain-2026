@@ -47,6 +47,7 @@ import type {
 } from './recording-identity-service.ts'
 import { buildCanonicalNormKey } from './recording-identity-service.ts'
 import type { LocalSongFileState, SongsOnlySyncPlan } from './local-song-sync.ts'
+import { pickImportReviewLocalMatch } from '../shared/import-review-local-match.ts'
 
 type FileTagStateInput = {
   filesize: number
@@ -262,6 +263,7 @@ export type CollectionItem = {
   isDownload?: boolean
   bitrateKbps?: number | null
   qualityScore?: number | null
+  audioAnalysis?: AudioAnalysis | null
   recordingId?: number | null
   recordingDiscogsUrl?: string | null
   recordingMusicBrainzUrl?: string | null
@@ -824,6 +826,7 @@ export class CollectionService {
         chosenclaimid: number | bigint | null
         identifyversion: number | bigint
         explanationjson: unknown | null
+        verifiedat: Date | string | null
         processedat: Date | string | null
         errormessage: string | null
       }>(
@@ -844,6 +847,7 @@ export class CollectionService {
             chosen_claim_id AS chosenClaimId,
             identify_version AS identifyVersion,
             explanation_json AS explanationJson,
+            verified_at AS verifiedAt,
             processed_at AS processedAt,
             error_message AS errorMessage
           FROM file_identification_state
@@ -933,6 +937,7 @@ export class CollectionService {
           chosenClaimId: identificationRow.chosenclaimid == null ? null : toNumber(identificationRow.chosenclaimid),
           identifyVersion: toNumber(identificationRow.identifyversion),
           explanationJson: identificationRow.explanationjson == null ? null : JSON.stringify(identificationRow.explanationjson),
+          verifiedAt: toIso(identificationRow.verifiedat),
           processedAt: toIso(identificationRow.processedat),
           errorMessage: identificationRow.errormessage,
           recordingCanonical,
@@ -1130,17 +1135,20 @@ export class CollectionService {
       rows.map(async (row) => {
         const review = parseImportReview(row.importreviewjson)
         const candidate = review?.candidates[review.selectedCandidateIndex ?? 0] ?? review?.candidates[0] ?? null
+        const localMatch = pickImportReviewLocalMatch(review)
+        const localCanonical = localMatch?.recordingCanonical ?? null
+        const existingFilename = candidate?.exactExistingFilename ?? localMatch?.filename ?? null
         const sourceFilesize = toNumber(row.filesize)
         const sourceAnalysis = await this.readCachedAudioAnalysisByFilename(row.filename)
         const sourceQuality = await this.readFileQuality(row.filename, sourceFilesize)
-        const existingFilesize = candidate?.exactExistingFilename
-          ? await this.readCollectionFilesize(candidate.exactExistingFilename)
+        const existingFilesize = existingFilename
+          ? await this.readCollectionFilesize(existingFilename)
           : null
-        const existingAnalysis = candidate?.exactExistingFilename
-          ? await this.readCachedAudioAnalysisByFilename(candidate.exactExistingFilename)
+        const existingAnalysis = existingFilename
+          ? await this.readCachedAudioAnalysisByFilename(existingFilename)
           : null
-        const existingQuality = candidate?.exactExistingFilename
-          ? await this.readFileQuality(candidate.exactExistingFilename, existingFilesize)
+        const existingQuality = existingFilename
+          ? await this.readFileQuality(existingFilename, existingFilesize)
           : null
         const sourceAnalysisQualityScore = computeAnalysisQualityScore(sourceAnalysis)
         const existingAnalysisQualityScore = computeAnalysisQualityScore(existingAnalysis)
@@ -1152,6 +1160,7 @@ export class CollectionService {
           duration: sourceAnalysis?.durationSeconds ?? null,
           bitrateKbps: sourceAnalysis?.bitrateKbps ?? null,
           qualityScore: sourceAnalysisQualityScore,
+          audioAnalysis: sourceAnalysis,
           recordingId: row.recordingid == null ? null : toNumber(row.recordingid),
           recordingDiscogsUrl: recordingSourceUrlFromExternalKey(row.recordingdiscogsexternalkey),
           recordingMusicBrainzUrl: recordingSourceUrlFromExternalKey(row.recordingmusicbrainzexternalkey),
@@ -1169,13 +1178,13 @@ export class CollectionService {
           importYear: row.importyear,
           importError: row.importerror,
           importTrackKey: review ? buildImportTrackKey(review) : null,
-          importMatchArtist: candidate?.match.artist ?? null,
-          importMatchTitle: candidate?.match.title ?? null,
-          importMatchVersion: candidate?.match.version ?? null,
-          importMatchYear: candidate?.match.year ?? null,
+          importMatchArtist: candidate?.match.artist ?? localCanonical?.artist ?? null,
+          importMatchTitle: candidate?.match.title ?? localCanonical?.title ?? null,
+          importMatchVersion: candidate?.match.version ?? localCanonical?.version ?? null,
+          importMatchYear: candidate?.match.year ?? localCanonical?.year ?? null,
           importReleaseTitle: candidate?.match.releaseTitle ?? null,
           importTrackPosition: candidate?.match.trackPosition ?? null,
-          importExactExistingFilename: candidate?.exactExistingFilename ?? null,
+          importExactExistingFilename: existingFilename,
           importBetterThanExisting:
             !sourceQuality || !existingQuality ? null : compareQuality(sourceQuality, existingQuality) === 'better',
           importExistingQualityScore: existingAnalysisQualityScore,
@@ -1326,6 +1335,7 @@ export class CollectionService {
         canonical_version TEXT,
         canonical_year TEXT,
         canonical_norm_key TEXT,
+        duration_seconds DOUBLE PRECISION,
         confidence INTEGER NOT NULL DEFAULT 0,
         review_state TEXT NOT NULL DEFAULT 'auto',
         metadata_locked BOOLEAN NOT NULL DEFAULT FALSE,
@@ -1389,6 +1399,7 @@ export class CollectionService {
         chosen_claim_id BIGINT REFERENCES recording_source_claims(id) ON DELETE SET NULL,
         identify_version INTEGER NOT NULL DEFAULT ${IDENTIFY_VERSION},
         explanation_json JSONB,
+        verified_at TIMESTAMPTZ,
         error_message TEXT,
         processed_at TIMESTAMPTZ
       );
@@ -1411,6 +1422,32 @@ export class CollectionService {
 
       CREATE INDEX IF NOT EXISTS file_identification_candidates_filename_idx
       ON file_identification_candidates(filename, score DESC, id);
+
+      CREATE TABLE IF NOT EXISTS file_identification_archive (
+        filename TEXT PRIMARY KEY,
+        filesize BIGINT NOT NULL,
+        mtime_ms BIGINT NOT NULL,
+        recording_id BIGINT,
+        audio_hash TEXT,
+        status TEXT NOT NULL,
+        assignment_method TEXT,
+        confidence INTEGER,
+        parsed_artist TEXT,
+        parsed_title TEXT,
+        parsed_version TEXT,
+        parsed_year TEXT,
+        tag_artist TEXT,
+        tag_title TEXT,
+        tag_version TEXT,
+        chosen_claim_id BIGINT,
+        identify_version INTEGER NOT NULL,
+        explanation_json JSONB,
+        verified_at TIMESTAMPTZ,
+        error_message TEXT,
+        processed_at TIMESTAMPTZ,
+        candidates_json JSONB,
+        archived_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
 
       CREATE INDEX IF NOT EXISTS collection_files_filename_lower_idx
       ON collection_files((lower(filename)));
@@ -1528,6 +1565,8 @@ export class CollectionService {
       ALTER TABLE want_list ADD COLUMN IF NOT EXISTS last_search_at TIMESTAMPTZ;
       ALTER TABLE want_list ADD COLUMN IF NOT EXISTS next_search_at TIMESTAMPTZ;
       ALTER TABLE want_list ADD COLUMN IF NOT EXISTS selected_download_id BIGINT;
+      ALTER TABLE recordings ADD COLUMN IF NOT EXISTS duration_seconds DOUBLE PRECISION;
+      ALTER TABLE file_identification_state ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
 
       INSERT INTO want_list (
         want_kind, artist, title, version, year, album, label, added_at, pipeline_status,
@@ -1592,6 +1631,178 @@ export class CollectionService {
             AND existing_attempt.local_filename = candidate->>'filename'
         );
     `)
+    await this.materializeRecordingDurations()
+  }
+
+  private async materializeRecordingDurations(recordingIds?: number[], client?: Pool | PoolClient): Promise<void> {
+    const db = client ?? this.pool
+    const values = recordingIds?.length ? [recordingIds] : []
+    const whereSql = recordingIds?.length ? 'WHERE recordings.id = ANY($1::bigint[])' : ''
+    await db.query(
+      `
+        UPDATE recordings
+        SET duration_seconds = candidate.duration_seconds, updated_at = now()
+        FROM (
+          SELECT recordings.id,
+            COALESCE(
+              (
+                SELECT duration_seconds
+                FROM recording_source_claims
+                WHERE recording_id = recordings.id AND duration_seconds IS NOT NULL
+                ORDER BY confidence DESC, updated_at DESC, id DESC
+                LIMIT 1
+              ),
+              (
+                SELECT duration_seconds
+                FROM audio_assets
+                WHERE recording_id = recordings.id AND duration_seconds IS NOT NULL
+                ORDER BY confidence DESC, updated_at DESC, audio_hash
+                LIMIT 1
+              )
+            ) AS duration_seconds
+          FROM recordings
+          ${whereSql}
+        ) candidate
+        WHERE recordings.id = candidate.id
+          AND recordings.duration_seconds IS DISTINCT FROM candidate.duration_seconds
+      `,
+      values
+    )
+  }
+
+  private async archiveIdentificationStateWithClient(client: PoolClient, filenames: string[]): Promise<void> {
+    const unique = [...new Set(filenames.filter(Boolean))]
+    if (unique.length === 0) return
+    await client.query(
+      `
+        WITH candidates AS (
+          SELECT filename, jsonb_agg(jsonb_build_object(
+            'provider', provider,
+            'entityType', entity_type,
+            'externalKey', external_key,
+            'proposedRecordingId', proposed_recording_id,
+            'score', score,
+            'disposition', disposition,
+            'payloadJson', payload_json
+          ) ORDER BY score DESC, id) AS candidates_json
+          FROM file_identification_candidates
+          WHERE filename = ANY($1::text[])
+          GROUP BY filename
+        )
+        INSERT INTO file_identification_archive(
+          filename, filesize, mtime_ms, recording_id, audio_hash, status, assignment_method, confidence,
+          parsed_artist, parsed_title, parsed_version, parsed_year, tag_artist, tag_title, tag_version,
+          chosen_claim_id, identify_version, explanation_json, verified_at, error_message, processed_at,
+          candidates_json, archived_at
+        )
+        SELECT
+          state.filename, state.filesize, state.mtime_ms, state.recording_id, state.audio_hash, state.status,
+          state.assignment_method, state.confidence, state.parsed_artist, state.parsed_title, state.parsed_version,
+          state.parsed_year, state.tag_artist, state.tag_title, state.tag_version, state.chosen_claim_id,
+          state.identify_version, state.explanation_json, state.verified_at, state.error_message, state.processed_at,
+          COALESCE(candidates.candidates_json, '[]'::jsonb), now()
+        FROM file_identification_state state
+        LEFT JOIN candidates ON candidates.filename = state.filename
+        WHERE state.filename = ANY($1::text[])
+        ON CONFLICT(filename) DO UPDATE SET
+          filesize = EXCLUDED.filesize,
+          mtime_ms = EXCLUDED.mtime_ms,
+          recording_id = EXCLUDED.recording_id,
+          audio_hash = EXCLUDED.audio_hash,
+          status = EXCLUDED.status,
+          assignment_method = EXCLUDED.assignment_method,
+          confidence = EXCLUDED.confidence,
+          parsed_artist = EXCLUDED.parsed_artist,
+          parsed_title = EXCLUDED.parsed_title,
+          parsed_version = EXCLUDED.parsed_version,
+          parsed_year = EXCLUDED.parsed_year,
+          tag_artist = EXCLUDED.tag_artist,
+          tag_title = EXCLUDED.tag_title,
+          tag_version = EXCLUDED.tag_version,
+          chosen_claim_id = EXCLUDED.chosen_claim_id,
+          identify_version = EXCLUDED.identify_version,
+          explanation_json = EXCLUDED.explanation_json,
+          verified_at = EXCLUDED.verified_at,
+          error_message = EXCLUDED.error_message,
+          processed_at = EXCLUDED.processed_at,
+          candidates_json = EXCLUDED.candidates_json,
+          archived_at = now()
+      `,
+      [unique]
+    )
+  }
+
+  private async restoreArchivedIdentificationWithClient(
+    client: PoolClient,
+    filename: string,
+    change: Pick<SyncChange, 'filesize' | 'mtimeMs'>
+  ): Promise<boolean> {
+    const restored = await client.query<{ recordingid: number | bigint | null }>(
+      `
+        INSERT INTO file_identification_state(
+          filename, filesize, mtime_ms, recording_id, audio_hash, status, assignment_method, confidence,
+          parsed_artist, parsed_title, parsed_version, parsed_year, tag_artist, tag_title, tag_version,
+          chosen_claim_id, identify_version, explanation_json, verified_at, error_message, processed_at
+        )
+        SELECT
+          $1, $2, $3,
+          CASE WHEN archive.recording_id IS NOT NULL AND EXISTS (SELECT 1 FROM recordings WHERE id = archive.recording_id) THEN archive.recording_id ELSE NULL END,
+          archive.audio_hash, archive.status, archive.assignment_method, archive.confidence,
+          archive.parsed_artist, archive.parsed_title, archive.parsed_version, archive.parsed_year,
+          archive.tag_artist, archive.tag_title, archive.tag_version,
+          CASE WHEN archive.chosen_claim_id IS NOT NULL AND EXISTS (SELECT 1 FROM recording_source_claims WHERE id = archive.chosen_claim_id) THEN archive.chosen_claim_id ELSE NULL END,
+          archive.identify_version, archive.explanation_json, archive.verified_at, archive.error_message, archive.processed_at
+        FROM file_identification_archive archive
+        WHERE archive.filename = $1
+          AND archive.filesize = $2
+          AND (archive.recording_id IS NOT NULL OR archive.assignment_method IS NOT NULL OR archive.verified_at IS NOT NULL OR archive.status IN ('ready', 'needs_review'))
+        ON CONFLICT(filename) DO UPDATE SET
+          filesize = EXCLUDED.filesize,
+          mtime_ms = EXCLUDED.mtime_ms,
+          recording_id = EXCLUDED.recording_id,
+          audio_hash = EXCLUDED.audio_hash,
+          status = EXCLUDED.status,
+          assignment_method = EXCLUDED.assignment_method,
+          confidence = EXCLUDED.confidence,
+          parsed_artist = EXCLUDED.parsed_artist,
+          parsed_title = EXCLUDED.parsed_title,
+          parsed_version = EXCLUDED.parsed_version,
+          parsed_year = EXCLUDED.parsed_year,
+          tag_artist = EXCLUDED.tag_artist,
+          tag_title = EXCLUDED.tag_title,
+          tag_version = EXCLUDED.tag_version,
+          chosen_claim_id = EXCLUDED.chosen_claim_id,
+          identify_version = EXCLUDED.identify_version,
+          explanation_json = EXCLUDED.explanation_json,
+          verified_at = EXCLUDED.verified_at,
+          error_message = EXCLUDED.error_message,
+          processed_at = EXCLUDED.processed_at
+        RETURNING recording_id AS recordingId
+      `,
+      [filename, change.filesize, change.mtimeMs]
+    )
+    if (!restored.rowCount) return false
+    await client.query(`DELETE FROM file_identification_candidates WHERE filename = $1`, [filename])
+    await client.query(
+      `
+        INSERT INTO file_identification_candidates(
+          filename, provider, entity_type, external_key, proposed_recording_id, score, disposition, payload_json, processed_at
+        )
+        SELECT
+          $1, candidate.provider, candidate."entityType", candidate."externalKey",
+          CASE WHEN candidate."proposedRecordingId" IS NOT NULL AND EXISTS (SELECT 1 FROM recordings WHERE id = candidate."proposedRecordingId") THEN candidate."proposedRecordingId" ELSE NULL END,
+          candidate.score, candidate.disposition, candidate."payloadJson", now()
+        FROM file_identification_archive archive
+        CROSS JOIN LATERAL jsonb_to_recordset(COALESCE(archive.candidates_json, '[]'::jsonb)) AS candidate(
+          provider text, "entityType" text, "externalKey" text, "proposedRecordingId" bigint, score int, disposition text, "payloadJson" jsonb
+        )
+        WHERE archive.filename = $1 AND archive.filesize = $2
+      `,
+      [filename, change.filesize]
+    )
+    const recordingId = restored.rows[0]?.recordingid
+    if (recordingId != null) await this.materializeRecordingDurations([toNumber(recordingId)], client)
+    return true
   }
 
   private async runSyncPass(): Promise<string | null> {
@@ -1662,6 +1873,7 @@ export class CollectionService {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      await this.archiveIdentificationStateWithClient(client, [...changed.keys(), ...removed])
 
       for (const [filename, change] of changed.entries()) {
         await client.query(
@@ -2143,8 +2355,8 @@ export class CollectionService {
               filename, filesize, mtime_ms, recording_id, audio_hash, status, assignment_method, confidence,
               parsed_artist, parsed_title, parsed_version, parsed_year,
               tag_artist, tag_title, tag_version, chosen_claim_id,
-              identify_version, explanation_json, error_message, processed_at
-            ) VALUES ($1, $2, $3, NULL, $4, 'pending', NULL, NULL, $5, $6, $7, $8, NULL, NULL, NULL, NULL, $9, NULL, NULL, NULL)
+              identify_version, explanation_json, verified_at, error_message, processed_at
+            ) VALUES ($1, $2, $3, NULL, $4, 'pending', NULL, NULL, $5, $6, $7, $8, NULL, NULL, NULL, NULL, $9, NULL, NULL, NULL, NULL)
             ON CONFLICT(filename) DO UPDATE SET
               filesize = excluded.filesize,
               mtime_ms = excluded.mtime_ms,
@@ -2162,6 +2374,7 @@ export class CollectionService {
               chosen_claim_id = NULL,
               identify_version = excluded.identify_version,
               explanation_json = NULL,
+              verified_at = NULL,
               error_message = NULL,
               processed_at = NULL
           `,
@@ -2359,18 +2572,23 @@ export class CollectionService {
         )
       }
 
+      const fileDurationSeconds =
+        data.acceptedClaims.find((claim) => claim.durationSeconds != null && (claim.provider === 'tags' || claim.provider === 'filename'))?.durationSeconds ??
+        data.acceptedClaims.find((claim) => claim.durationSeconds != null)?.durationSeconds ??
+        null
       if (recordingId && data.audioHash) {
         await client.query(
           `
             INSERT INTO audio_assets(audio_hash, recording_id, duration_seconds, assigned_by, confidence, updated_at)
-            VALUES ($1, $2, NULL, $3, $4, now())
+            VALUES ($1, $2, $3, $4, $5, now())
             ON CONFLICT(audio_hash) DO UPDATE SET
               recording_id = EXCLUDED.recording_id,
+              duration_seconds = COALESCE(EXCLUDED.duration_seconds, audio_assets.duration_seconds),
               assigned_by = EXCLUDED.assigned_by,
               confidence = EXCLUDED.confidence,
               updated_at = now()
           `,
-          [data.audioHash, recordingId, data.assignmentMethod ?? 'manual', data.confidence ?? 0]
+          [data.audioHash, recordingId, fileDurationSeconds, data.assignmentMethod ?? 'manual', data.confidence ?? 0]
         )
       }
 
@@ -2401,8 +2619,8 @@ export class CollectionService {
             filename, filesize, mtime_ms, recording_id, audio_hash, status, assignment_method, confidence,
             parsed_artist, parsed_title, parsed_version, parsed_year,
             tag_artist, tag_title, tag_version, chosen_claim_id,
-            identify_version, explanation_json, error_message, processed_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb, NULL, now())
+            identify_version, explanation_json, verified_at, error_message, processed_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb, NULL, NULL, now())
           ON CONFLICT(filename) DO UPDATE SET
             filesize = excluded.filesize,
             mtime_ms = excluded.mtime_ms,
@@ -2421,6 +2639,7 @@ export class CollectionService {
             chosen_claim_id = excluded.chosen_claim_id,
             identify_version = excluded.identify_version,
             explanation_json = excluded.explanation_json,
+            verified_at = file_identification_state.verified_at,
             error_message = NULL,
             processed_at = now()
         `,
@@ -2445,6 +2664,7 @@ export class CollectionService {
           normalizeJsonText(data.explanationJson)
         ]
       )
+      if (recordingId) await this.materializeRecordingDurations([recordingId], client)
       await client.query('COMMIT')
     } catch (error) {
       await client.query('ROLLBACK')
@@ -2468,8 +2688,8 @@ export class CollectionService {
           filename, filesize, mtime_ms, recording_id, audio_hash, status, assignment_method, confidence,
           parsed_artist, parsed_title, parsed_version, parsed_year,
           tag_artist, tag_title, tag_version, chosen_claim_id,
-          identify_version, explanation_json, error_message, processed_at
-        ) VALUES ($1, $2, $3, NULL, NULL, 'error', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, $4, NULL, $5, now())
+          identify_version, explanation_json, verified_at, error_message, processed_at
+        ) VALUES ($1, $2, $3, NULL, NULL, 'error', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, $4, NULL, NULL, $5, now())
         ON CONFLICT(filename) DO UPDATE SET
           filesize = excluded.filesize,
           mtime_ms = excluded.mtime_ms,
@@ -2479,6 +2699,7 @@ export class CollectionService {
           chosen_claim_id = NULL,
           identify_version = excluded.identify_version,
           explanation_json = NULL,
+          verified_at = file_identification_state.verified_at,
           error_message = excluded.error_message,
           processed_at = now()
       `,
@@ -2525,6 +2746,7 @@ export class CollectionService {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      await this.archiveIdentificationStateWithClient(client, [...changed.map((item) => item.filename), ...plan.deleted])
       for (const item of changed) {
         await client.query(
           `
@@ -2558,8 +2780,10 @@ export class CollectionService {
           [item.filename, item.filesize, item.mtimeMs, AUDIO_HASH_VERSION]
         )
         await client.query(`DELETE FROM file_tag_state WHERE filename = $1`, [item.filename])
-        await client.query(`DELETE FROM file_identification_candidates WHERE filename = $1`, [item.filename])
-        await client.query(`DELETE FROM file_identification_state WHERE filename = $1`, [item.filename])
+        if (!(await this.restoreArchivedIdentificationWithClient(client, item.filename, item))) {
+          await client.query(`DELETE FROM file_identification_candidates WHERE filename = $1`, [item.filename])
+          await client.query(`DELETE FROM file_identification_state WHERE filename = $1`, [item.filename])
+        }
       }
       for (const filename of plan.deleted) {
         await client.query(`DELETE FROM collection_files WHERE filename = $1`, [filename])
@@ -2830,6 +3054,7 @@ export class CollectionService {
         reviewstate: RecordingSummary['reviewState']
         metadatalocked: boolean
         mergedintorecordingid: number | bigint | null
+        durationseconds: number | null
         filecount: number | bigint
         claimcount: number | bigint
       }>(
@@ -2844,6 +3069,7 @@ export class CollectionService {
             recordings.review_state AS reviewState,
             recordings.metadata_locked AS metadataLocked,
             recordings.merged_into_recording_id AS mergedIntoRecordingId,
+            recordings.duration_seconds AS durationSeconds,
             COUNT(DISTINCT file_identification_state.filename) AS fileCount,
             COUNT(DISTINCT recording_source_claims.id) AS claimCount
           FROM recordings
@@ -2867,6 +3093,7 @@ export class CollectionService {
       reviewState: row.reviewstate,
       metadataLocked: row.metadatalocked,
       mergedIntoRecordingId: row.mergedintorecordingid == null ? null : toNumber(row.mergedintorecordingid),
+      durationSeconds: row.durationseconds == null ? null : Number(row.durationseconds),
       fileCount: toNumber(row.filecount),
       claimCount: toNumber(row.claimcount)
     }))
@@ -2975,7 +3202,7 @@ export class CollectionService {
       await this.pool.query(
         `
           UPDATE file_identification_state
-          SET status = 'needs_review', assignment_method = NULL, confidence = NULL, recording_id = NULL, chosen_claim_id = NULL, processed_at = now()
+          SET status = 'needs_review', assignment_method = NULL, confidence = NULL, recording_id = NULL, chosen_claim_id = NULL, verified_at = NULL, processed_at = now()
           WHERE filename = $1
         `,
         [filename]
@@ -3031,6 +3258,7 @@ export class CollectionService {
               ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 100, $12::jsonb, now())
               ON CONFLICT(provider, entity_type, external_key) DO UPDATE SET
                 recording_id = EXCLUDED.recording_id,
+                duration_seconds = COALESCE(EXCLUDED.duration_seconds, recording_source_claims.duration_seconds),
                 confidence = GREATEST(recording_source_claims.confidence, EXCLUDED.confidence),
                 raw_json = COALESCE(EXCLUDED.raw_json, recording_source_claims.raw_json),
                 updated_at = now()
@@ -3055,14 +3283,15 @@ export class CollectionService {
           await client.query(
             `
               INSERT INTO audio_assets(audio_hash, recording_id, duration_seconds, assigned_by, confidence, updated_at)
-              VALUES ($1, $2, NULL, 'manual', 100, now())
+              VALUES ($1, $2, $3, 'manual', 100, now())
               ON CONFLICT(audio_hash) DO UPDATE SET
                 recording_id = EXCLUDED.recording_id,
+                duration_seconds = COALESCE(EXCLUDED.duration_seconds, audio_assets.duration_seconds),
                 assigned_by = 'manual',
                 confidence = 100,
                 updated_at = now()
             `,
-            [item.fileAudioState.audioHash, recordingId]
+            [item.fileAudioState.audioHash, recordingId, item.parsedAudioAnalysis?.durationSeconds ?? null]
           )
         }
         await client.query(
@@ -3082,12 +3311,14 @@ export class CollectionService {
               assignment_method = 'manual',
               confidence = 100,
               chosen_claim_id = NULL,
+              verified_at = now(),
               error_message = NULL,
               processed_at = now()
             WHERE filename = $1
           `,
           [filename, recordingId]
         )
+        await this.materializeRecordingDurations([recordingId], client)
         await client.query('COMMIT')
       } catch (error) {
         await client.query('ROLLBACK')
@@ -3191,33 +3422,43 @@ export class CollectionService {
               assignment_method = 'manual',
               confidence = 100,
               chosen_claim_id = NULL,
+              verified_at = now(),
               processed_at = now(),
               error_message = NULL
             WHERE filename = $1
           `,
           [filename, recordingId]
         )
-        const audioHash = (
-          await client.query<{ audiohash: string | null }>(
-            `SELECT audio_hash AS audioHash FROM file_identification_state WHERE filename = $1`,
-            [filename]
+        const assetRow = (
+          await client.query<{ audiohash: string | null; durationseconds: number | null }>(
+            `
+              SELECT file_identification_state.audio_hash AS audioHash, audio_analysis_cache.duration_seconds AS durationSeconds
+              FROM file_identification_state
+              LEFT JOIN audio_analysis_cache
+                ON audio_analysis_cache.audio_hash = file_identification_state.audio_hash
+               AND audio_analysis_cache.analysis_version = $2
+              WHERE file_identification_state.filename = $1
+            `,
+            [filename, AUDIO_ANALYSIS_VERSION]
           )
-        ).rows[0]?.audiohash
-        if (audioHash) {
+        ).rows[0]
+        if (assetRow?.audiohash) {
           await client.query(
             `
               INSERT INTO audio_assets(audio_hash, recording_id, duration_seconds, assigned_by, confidence, updated_at)
-              VALUES ($1, $2, NULL, 'manual', 100, now())
+              VALUES ($1, $2, $3, 'manual', 100, now())
               ON CONFLICT(audio_hash) DO UPDATE SET
                 recording_id = EXCLUDED.recording_id,
+                duration_seconds = COALESCE(EXCLUDED.duration_seconds, audio_assets.duration_seconds),
                 assigned_by = 'manual',
                 confidence = 100,
                 updated_at = now()
             `,
-            [audioHash, recordingId]
+            [assetRow.audiohash, recordingId, assetRow.durationseconds]
           )
         }
       }
+      await this.materializeRecordingDurations([recordingId], client)
       await client.query('COMMIT')
       await this.refreshIdentificationQueueCounts()
       this.emitStatus()
@@ -3318,6 +3559,7 @@ export class CollectionService {
         `,
         [sourceRecordingId, targetRecordingId]
       )
+      await this.materializeRecordingDurations([targetRecordingId, sourceRecordingId], client)
       await client.query('COMMIT')
       return await this.getRecording(targetRecordingId)
     } catch (error) {
@@ -3562,6 +3804,7 @@ export class CollectionService {
     if (changed.size === 0 && removed.length === 0) return false
 
     for (const [filename, change] of changed) {
+      if (await this.restoreArchivedIdentificationWithClient(client, filename, change)) continue
       const parsed = parseImportFilename(filename)
       await client.query(
         `
@@ -3569,8 +3812,8 @@ export class CollectionService {
             filename, filesize, mtime_ms, recording_id, audio_hash, status, assignment_method, confidence,
             parsed_artist, parsed_title, parsed_version, parsed_year,
             tag_artist, tag_title, tag_version, chosen_claim_id,
-            identify_version, explanation_json, error_message, processed_at
-          ) VALUES ($1, $2, $3, NULL, NULL, 'pending', NULL, NULL, $4, $5, $6, $7, NULL, NULL, NULL, NULL, $8, NULL, NULL, NULL)
+            identify_version, explanation_json, verified_at, error_message, processed_at
+          ) VALUES ($1, $2, $3, NULL, NULL, 'pending', NULL, NULL, $4, $5, $6, $7, NULL, NULL, NULL, NULL, $8, NULL, NULL, NULL, NULL)
           ON CONFLICT(filename) DO UPDATE SET
             filesize = excluded.filesize,
             mtime_ms = excluded.mtime_ms,
@@ -3588,6 +3831,7 @@ export class CollectionService {
             chosen_claim_id = NULL,
             identify_version = excluded.identify_version,
             explanation_json = NULL,
+            verified_at = NULL,
             error_message = NULL,
             processed_at = NULL
         `,

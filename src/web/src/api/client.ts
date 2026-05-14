@@ -381,6 +381,13 @@ export const api: DJBrainApi = {
         body: JSON.stringify({ filename })
       })
   },
+  database: {
+    listTables: () => request('/api/database/tables'),
+    listRows: (table, input) =>
+      request(`/api/database/tables/${encodeURIComponent(table)}/rows?filter=${encodeURIComponent(input?.filter ?? '')}&limit=${encodeURIComponent(String(input?.limit ?? 50))}&offset=${encodeURIComponent(String(input?.offset ?? 0))}`),
+    getRow: (table, key) =>
+      request(`/api/database/tables/${encodeURIComponent(table)}/rows/${encodeURIComponent(key)}`)
+  },
   upgrades: {
     list: () => request<UpgradeCase[]>('/api/upgrades'),
     open: (collectionFilename: string) =>

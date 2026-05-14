@@ -97,7 +97,7 @@ export function CollectionItemModelView({
   const trackPosition = discogsClaim?.trackPosition ?? item.tags?.discogsTrackPosition ?? null
   const chosenClaim = recording?.sourceClaims.find((claim) => claim.id === item.identification?.chosenClaimId) ?? null
   const fileDuration = analysis?.durationSeconds ?? null
-  const recordDuration = chosenClaim?.durationSeconds ?? null
+  const recordDuration = recording?.durationSeconds ?? chosenClaim?.durationSeconds ?? null
   const { data: discogsRelease, error: discogsError, isPending: isDiscogsLoading } = useQuery({
     queryKey: ['discogs-release', releaseId],
     queryFn: () => api.onlineSearch.getDiscogsEntity('release', releaseId as number),

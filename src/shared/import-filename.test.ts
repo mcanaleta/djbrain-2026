@@ -82,4 +82,28 @@ describe('parseImportFilename', () => {
       }
     )
   })
+
+  it('strips stacked disc and track prefixes from download filenames', () => {
+    assert.deepEqual(
+      parseImportFilename('hasoulseek/complete/Clubland X-treme Hardcore 4 (2007)/1-02 Darren Styles & Francis Hill - Come Running.flac'),
+      {
+        artist: 'Darren Styles & Francis Hill',
+        title: 'Come Running',
+        version: null,
+        year: '2007'
+      }
+    )
+  })
+
+  it('strips catalog prefixes before artist-title parsing', () => {
+    assert.deepEqual(
+      parseImportFilename("hasoulseek/complete/Recovered MP3 Renamed/NRR 040. Mega 'Lo Mania - Close Your Eyes (Vocal Mix) .mp3"),
+      {
+        artist: "Mega 'Lo Mania",
+        title: 'Close Your Eyes',
+        version: 'Vocal Mix',
+        year: null
+      }
+    )
+  })
 })

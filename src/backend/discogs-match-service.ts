@@ -1,6 +1,6 @@
 import type { AppSettings } from './settings-store.ts'
 import type { OnlineSearchService } from './online-search-service.ts'
-import type { DiscogsRelease, DiscogsMaster, DiscogsEntity } from '../shared/discogs.ts'
+import type { DiscogsRelease, DiscogsMaster, DiscogsEntity, DiscogsTrack } from '../shared/discogs.ts'
 import type { DiscogsTrackMatch } from '../shared/discogs-match.ts'
 import { DISCOGS_CONFIDENT_THRESHOLD } from '../shared/discogs-match.ts'
 import { parseTrackTitle } from '../shared/track-title-parser.ts'
@@ -75,17 +75,21 @@ function scoreTrackTitle(
 
 type TrackableEntity = DiscogsRelease | DiscogsMaster
 
-function scoreArtist(entity: TrackableEntity, targetArtist: string): number {
+function scoreArtistNames(artists: string[], targetArtist: string): number {
   const normTarget = norm(targetArtist)
   if (!normTarget) return 0
 
-  for (const candidate of entity.artists) {
+  for (const candidate of artists) {
     const normCandidate = norm(candidate)
     if (normCandidate === normTarget) return 20
     if (normCandidate.includes(normTarget) || normTarget.includes(normCandidate)) return 12
   }
 
   return 0
+}
+
+function scoreArtist(entity: TrackableEntity, targetArtist: string): number {
+  return scoreArtistNames(entity.artists, targetArtist)
 }
 
 function extractLabel(entity: TrackableEntity): string | null {
@@ -107,6 +111,10 @@ function resolveArtist(entity: TrackableEntity, fallback: string): string {
     return entity.artists.join(', ')
   }
   return fallback
+}
+
+function resolveTrackArtist(track: DiscogsTrack, entity: TrackableEntity, fallback: string): string {
+  return track.artists?.length ? track.artists.join(', ') : resolveArtist(entity, fallback)
 }
 
 function scoreRelease(entity: TrackableEntity, title: string): number {
@@ -173,8 +181,6 @@ export class DiscogsMatchService {
       if (!isTrackable(entity)) continue
       if (!entity.tracklist.length) continue
 
-      const artistScore = scoreArtist(entity, artist)
-
       // Find best matching track in the tracklist
       let bestTrack: (typeof entity.tracklist)[number] | null = null
       let bestTrackScore = 0
@@ -189,6 +195,7 @@ export class DiscogsMatchService {
 
       if (!bestTrack || bestTrackScore === 0) continue
 
+      const artistScore = Math.max(scoreArtist(entity, artist), scoreArtistNames(bestTrack.artists ?? [], artist))
       const totalScore = artistScore + bestTrackScore + scoreRelease(entity, title)
       console.log(
         `[discogs-match] ${type}/${result.id} "${entity.title}": artistScore=${artistScore} trackScore=${bestTrackScore} total=${totalScore} track="${bestTrack.title}"`
@@ -198,7 +205,7 @@ export class DiscogsMatchService {
         releaseId: entity.id,
         releaseTitle: entity.title,
         format: entity.type === 'release' ? entity.formats[0] ?? null : null,
-        artist: resolveArtist(entity, artist),
+        artist: resolveTrackArtist(bestTrack, entity, artist),
         title: bestTrack.title,
         version: null,
         trackPosition: bestTrack.position ?? null,

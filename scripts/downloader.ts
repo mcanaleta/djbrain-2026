@@ -8,7 +8,7 @@ import { OnlineSearchService } from '../src/backend/online-search-service.ts'
 import { readSettings, type AppSettings } from '../src/backend/settings-store.ts'
 import { SlskdService, type SlskdCandidate } from '../src/backend/slskd-service.ts'
 import { TaggerService } from '../src/backend/tagger-service.ts'
-import { buildDownloadRequests } from '../src/backend/downloader-worker-planning.ts'
+import { buildDownloadRequests, downloadAttemptStatusFromSlskdState, wantListStatusAfterAttempt } from '../src/backend/downloader-worker-planning.ts'
 
 type Options = {
   intervalSeconds: number
@@ -50,14 +50,6 @@ function nextSearchAt(candidateCount: number): string {
   return new Date(Date.now() + (candidateCount > 0 ? 60 : 360) * 60_000).toISOString()
 }
 
-function terminalStatus(state: string | null): DownloadAttempt['status'] | null {
-  if (state?.startsWith('Completed')) return 'downloaded'
-  if (state?.startsWith('Cancelled')) return 'cancelled'
-  if (state?.startsWith('TimedOut')) return 'timeout'
-  if (state?.startsWith('Errored') || state?.startsWith('Rejected')) return 'failed'
-  return state ? 'downloading' : null
-}
-
 async function monitorAttempt(
   settings: AppSettings,
   service: CollectionService,
@@ -74,15 +66,24 @@ async function monitorAttempt(
       await slskd.downloadFile(settings, attempt.username, attempt.remoteFilename, attempt.remoteSize)
       await service.downloadAttemptUpdate(attempt.id, { status: 'requested', requestedAt: new Date().toISOString(), errorMessage: null })
     } catch (error) {
-      await service.downloadAttemptUpdate(attempt.id, { status: 'failed', errorMessage: error instanceof Error ? error.message : 'Download request failed' })
+      const errorMessage = error instanceof Error ? error.message : 'Download request failed'
+      await service.downloadAttemptUpdate(attempt.id, { status: 'failed', errorMessage })
+      if (attempt.wantListId) await service.wantListUpdatePipeline(attempt.wantListId, { pipelineStatus: 'error', pipelineError: errorMessage })
     }
     return
   }
 
-  const status = terminalStatus(await slskd.getDownloadState(settings, attempt.username, attempt.remoteFilename))
+  const state = await slskd.getDownloadState(settings, attempt.username, attempt.remoteFilename)
+  const status = downloadAttemptStatusFromSlskdState(state)
   if (!status || dryRun) return
   if (status !== 'downloaded') {
-    await service.downloadAttemptUpdate(attempt.id, { status, errorMessage: status === 'failed' ? 'slskd transfer failed' : null })
+    const errorMessage = ['failed', 'timeout', 'cancelled'].includes(status) ? `slskd transfer ${state ?? status}` : null
+    await service.downloadAttemptUpdate(attempt.id, { status, errorMessage })
+    if (attempt.wantListId) {
+      const attempts = await service.downloadAttemptListForWantList(attempt.wantListId)
+      const patch = wantListStatusAfterAttempt(status, attempts.some((item) => item.status === 'downloaded'), errorMessage)
+      if (patch) await service.wantListUpdatePipeline(attempt.wantListId, patch)
+    }
     return
   }
 

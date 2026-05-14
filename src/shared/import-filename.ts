@@ -16,10 +16,16 @@ function normalizeText(value: string): string {
 }
 
 function stripTrackPrefix(value: string): string {
-  return value
-    .replace(/^\(?[a-z]?\d+[a-z]?\)?[._\-\s]+/i, '')
-    .replace(/^track\s*\d+[._\-\s]*/i, '')
-    .trim()
+  let next = value.trim()
+  for (;;) {
+    const previous = next
+    next = next
+      .replace(/^track\s*\d+[._\-\s]*/i, '')
+      .replace(/^\(?[a-z]?\d+[a-z]?\)?[._\-\s]+/i, '')
+      .replace(/^[a-z]{2,}\s*\d{2,}[._\-\s]+/i, '')
+      .trim()
+    if (next === previous) return next
+  }
 }
 
 function stripTrackMarker(value: string): string {

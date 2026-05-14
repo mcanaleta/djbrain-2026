@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CollectionItem, CollectionItemDetails, DownloadAttempt, SlskdCandidate, WantListItem } from '../../../../shared/api'
 import type { OnlineSearchItem } from '../../../../shared/online-search'
+import { shouldPollWantListItem } from '../../../../shared/want-list-polling'
 import { api } from '../../api/client'
 import { extractYouTubeId } from '../../lib/youtube'
 import {
@@ -297,6 +298,27 @@ export function useWantListItemPage(wantId: string | undefined) {
       }
     })
   }, [loadDownloadAttempts, loadSoulseekResults, numericId])
+
+  useEffect(() => {
+    if (!item || !shouldPollWantListItem(item.pipelineStatus)) return
+    const timer = window.setInterval(() => {
+      void (async () => {
+        try {
+          const updated = await api.wantList.get(item.id)
+          if (updated) {
+            setItem(updated)
+            if (updated.searchId !== item.searchId || updated.searchResultCount !== item.searchResultCount) {
+              await loadSoulseekResults(updated.id)
+            }
+          }
+          await loadDownloadAttempts(item.id)
+        } catch (error) {
+          setActionError(formatWantListError(error, 'Failed to refresh downloader state'))
+        }
+      })()
+    }, 5_000)
+    return () => window.clearInterval(timer)
+  }, [item, loadDownloadAttempts, loadSoulseekResults])
 
   const save = useCallback(async (): Promise<void> => {
     if (!item || !editState) {
