@@ -110,7 +110,16 @@ function soulseekFolderLabel(filename: string): string {
 }
 
 function attemptLabel(attempt: DownloadAttempt): string {
-  return attempt.localFilename ?? attempt.remoteFilename ?? `Download ${attempt.id}`
+  return attempt.localFilename ?? attempt.expectedLocalFilename ?? attempt.remoteFilename ?? `Download ${attempt.id}`
+}
+
+function attemptStatusLabel(attempt: DownloadAttempt): string {
+  return attempt.status === 'downloaded' && !attempt.localFilename ? 'awaiting scan' : attempt.status
+}
+
+function attemptStatusTone(attempt: DownloadAttempt): 'success' | 'danger' | 'muted' {
+  if (attempt.status === 'downloaded') return attempt.localFilename ? 'success' : 'muted'
+  return attempt.status === 'failed' ? 'danger' : 'muted'
 }
 
 export default function WantlistItemPage(): React.JSX.Element {
@@ -165,7 +174,7 @@ export default function WantlistItemPage(): React.JSX.Element {
         key: 'status',
         header: 'Status',
         cellClassName: 'w-[92px] whitespace-nowrap',
-        render: (attempt) => <Pill tone={attempt.status === 'downloaded' ? 'success' : attempt.status === 'failed' ? 'danger' : 'muted'}>{attempt.status}</Pill>
+        render: (attempt) => <Pill tone={attemptStatusTone(attempt)}>{attemptStatusLabel(attempt)}</Pill>
       },
       {
         key: 'file',
@@ -175,6 +184,7 @@ export default function WantlistItemPage(): React.JSX.Element {
           <div className="space-y-0.5 leading-tight">
             <div className="truncate text-[11px] font-medium text-zinc-100" title={attemptLabel(attempt)}>{fileBasename(attemptLabel(attempt))}</div>
             <div className="truncate text-[10px] text-zinc-500" title={attempt.username ?? ''}>{attempt.username ?? 'local'} · {formatFileSize(attempt.localFilesize ?? attempt.remoteSize ?? 0)}</div>
+            {!attempt.localFilename && attempt.expectedLocalFilename ? <div className="truncate text-[10px] text-sky-300" title={attempt.expectedLocalFilename}>Expected {attempt.expectedLocalFilename}</div> : null}
             {attempt.errorMessage ? <div className="truncate text-[10px] text-amber-300" title={attempt.errorMessage}>{attempt.errorMessage}</div> : null}
           </div>
         )

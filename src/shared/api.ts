@@ -320,6 +320,7 @@ export type DownloadAttempt = {
   uploadSpeed: number | null
   isLocked: boolean
   rawCandidateJson: string | null
+  expectedLocalFilename: string | null
   localFilename: string | null
   localFilesize: number | null
   errorMessage: string | null

@@ -28,12 +28,7 @@ services:
         condition: service_started
       postgres:
         condition: service_healthy
-    volumes:
-      - djbrain-data:/data
-      - ${DJBRAIN_HOST_MUSIC_PATH:-/home/marc/Dropbox/music}:/music
     env_file: .env.docker
-    environment:
-      DJBRAIN_DATA_DIR: /data
     extra_hosts:
       - "host.docker.internal:host-gateway"
     profiles: ["downloader"]

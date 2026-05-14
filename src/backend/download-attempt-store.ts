@@ -31,6 +31,7 @@ type DownloadAttemptRow = {
   upload_speed: number | string | null
   is_locked: boolean | null
   raw_candidate_json: string | null
+  expected_local_filename: string | null
   local_filename: string | null
   local_filesize: number | string | null
   error_message: string | null
@@ -66,13 +67,14 @@ export type DownloadAttemptCreateInput = {
   uploadSpeed?: number | null
   isLocked?: boolean | null
   rawCandidateJson?: string | null
+  expectedLocalFilename?: string | null
   localFilename?: string | null
   localFilesize?: number | null
   errorMessage?: string | null
 }
 
 export type DownloadAttemptPatch = Partial<Pick<DownloadAttemptCreateInput,
-  'status' | 'slskdSearchId' | 'localFilename' | 'localFilesize' | 'errorMessage'
+  'status' | 'slskdSearchId' | 'expectedLocalFilename' | 'localFilename' | 'localFilesize' | 'errorMessage'
 >> & {
   requestedAt?: string | null
   completedAt?: string | null
@@ -92,7 +94,7 @@ export class DownloadAttemptStore {
     origin_source_collection_filename, origin_discogs_release_id, origin_discogs_track_position,
     search_query, slskd_search_id, username, remote_filename, remote_size,
     bitrate, duration_seconds, extension, score, queue_length, has_free_upload_slot, upload_speed,
-    is_locked, raw_candidate_json, local_filename, local_filesize, error_message,
+    is_locked, raw_candidate_json, expected_local_filename, local_filename, local_filesize, error_message,
     requested_at, completed_at, created_at, updated_at
   `
 
@@ -128,6 +130,7 @@ export class DownloadAttemptStore {
       uploadSpeed: row.upload_speed == null ? null : toNumber(row.upload_speed),
       isLocked: row.is_locked ?? false,
       rawCandidateJson: row.raw_candidate_json ?? null,
+      expectedLocalFilename: row.expected_local_filename ?? null,
       localFilename: row.local_filename ?? null,
       localFilesize: row.local_filesize == null ? null : toNumber(row.local_filesize),
       errorMessage: row.error_message ?? null,
@@ -145,10 +148,10 @@ export class DownloadAttemptStore {
          origin_source_collection_filename, origin_discogs_release_id, origin_discogs_track_position,
          search_query, slskd_search_id, username, remote_filename, remote_size,
          bitrate, duration_seconds, extension, score, queue_length, has_free_upload_slot, upload_speed,
-         is_locked, raw_candidate_json, local_filename, local_filesize, error_message,
+         is_locked, raw_candidate_json, expected_local_filename, local_filename, local_filesize, error_message,
          requested_at, completed_at
        )
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,
          CASE WHEN $2 IN ('requested','downloading') THEN now() ELSE NULL END,
          CASE WHEN $2 = 'downloaded' THEN now() ELSE NULL END)
        RETURNING ${this.columns}`,
@@ -178,6 +181,7 @@ export class DownloadAttemptStore {
         input.uploadSpeed ?? null,
         input.isLocked ?? false,
         input.rawCandidateJson ?? null,
+        input.expectedLocalFilename ?? null,
         input.localFilename ?? null,
         input.localFilesize ?? null,
         input.errorMessage ?? null
@@ -195,6 +199,7 @@ export class DownloadAttemptStore {
     }
     if ('status' in patch) set('status', patch.status ?? 'queued')
     if ('slskdSearchId' in patch) set('slskd_search_id', patch.slskdSearchId ?? null)
+    if ('expectedLocalFilename' in patch) set('expected_local_filename', patch.expectedLocalFilename ?? null)
     if ('localFilename' in patch) set('local_filename', patch.localFilename ?? null)
     if ('localFilesize' in patch) set('local_filesize', patch.localFilesize ?? null)
     if ('errorMessage' in patch) set('error_message', patch.errorMessage ?? null)

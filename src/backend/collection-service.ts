@@ -22,6 +22,7 @@ import {
 } from './collection-scanner.ts'
 import { WantListStore } from './want-list-store.ts'
 import { DownloadAttemptStore, type DownloadAttemptCreateInput, type DownloadAttemptPatch } from './download-attempt-store.ts'
+import { buildExpectedDownloadFilename } from './downloader-worker-planning.ts'
 import { UpgradeCaseStore, type UpgradeCaseCreateInput, type UpgradeCasePatch } from './upgrade-case-store.ts'
 import type {
   AudioAnalysis,
@@ -65,6 +66,13 @@ type FileTagStateInput = {
   discogsTrackPosition: string | null
   rawJson: string | null
   errorMessage: string | null
+}
+
+type DownloadAttemptOrigin = {
+  artist: string | null
+  title: string | null
+  version: string | null
+  year: string | null
 }
 
 type CollectionServiceOptions = {
@@ -390,6 +398,7 @@ export type DownloadAttempt = {
   uploadSpeed: number | null
   isLocked: boolean
   rawCandidateJson: string | null
+  expectedLocalFilename: string | null
   localFilename: string | null
   localFilesize: number | null
   errorMessage: string | null
@@ -1539,6 +1548,7 @@ export class CollectionService {
         upload_speed BIGINT,
         is_locked BOOLEAN NOT NULL DEFAULT FALSE,
         raw_candidate_json TEXT,
+        expected_local_filename TEXT,
         local_filename TEXT,
         local_filesize BIGINT,
         error_message TEXT,
@@ -1553,6 +1563,12 @@ export class CollectionService {
 
       CREATE INDEX IF NOT EXISTS download_attempts_status_idx
       ON download_attempts(status, updated_at, id);
+
+      ALTER TABLE download_attempts ADD COLUMN IF NOT EXISTS expected_local_filename TEXT;
+
+      CREATE INDEX IF NOT EXISTS download_attempts_expected_local_filename_idx
+      ON download_attempts(expected_local_filename)
+      WHERE expected_local_filename IS NOT NULL AND local_filename IS NULL;
 
       CREATE UNIQUE INDEX IF NOT EXISTS download_attempts_remote_once_idx
       ON download_attempts(want_list_id, username, remote_filename, remote_size)
@@ -1597,7 +1613,7 @@ export class CollectionService {
       INSERT INTO download_attempts (
         want_list_id, status, origin_artist, origin_title, origin_version, origin_year, origin_album, origin_label,
         origin_source_collection_filename, search_query, username, remote_filename, remote_size, duration_seconds,
-        raw_candidate_json, local_filename, local_filesize, completed_at
+        raw_candidate_json, expected_local_filename, local_filename, local_filesize, completed_at
       )
       SELECT
         wanted.id,
@@ -1615,6 +1631,7 @@ export class CollectionService {
         NULLIF(candidate->>'filesize', '')::bigint,
         NULLIF(candidate->>'durationSeconds', '')::double precision,
         candidate::text,
+        candidate->>'filename',
         candidate->>'filename',
         NULLIF(candidate->>'filesize', '')::bigint,
         now()
@@ -1898,6 +1915,7 @@ export class CollectionService {
         await client.query('DELETE FROM collection_files WHERE filename = $1', [filename])
       }
 
+      await this.syncDownloadAttemptFileLinksWithClient(client, changed, removed)
       const touchedImportQueue = await this.syncImportReviewCacheWithClient(client, changed, removed)
       const touchedIdentificationQueue = await this.syncIdentificationStateWithClient(client, changed, removed)
       await this.syncFileAnalysisStateWithClient(client, changed, removed)
@@ -3741,6 +3759,71 @@ export class CollectionService {
     return true
   }
 
+  private async syncDownloadAttemptFileLinksWithClient(
+    client: PoolClient,
+    changed: Map<string, SyncChange>,
+    removed: string[]
+  ): Promise<void> {
+    for (const filename of removed) {
+      await client.query(
+        `UPDATE download_attempts SET local_filename = NULL, local_filesize = NULL, updated_at = now() WHERE local_filename = $1`,
+        [filename]
+      )
+    }
+
+    for (const [filename, change] of changed.entries()) {
+      if (!isDownloadRelativeFilename(filename, this.settings.downloadFolderPaths)) continue
+      const row = (await client.query<{ id: number | string; wantlistid: number | string | null }>(
+        `
+          WITH matches AS (
+            SELECT id, want_list_id
+            FROM download_attempts
+            WHERE local_filename IS NULL
+              AND expected_local_filename IS NOT NULL
+              AND (
+                expected_local_filename = $1
+                OR lower(regexp_replace(expected_local_filename, '\\.wav$', '.flac', 'i')) = lower($1)
+              )
+          ),
+          chosen AS (
+            SELECT * FROM matches WHERE (SELECT COUNT(*) FROM matches) = 1
+          )
+          UPDATE download_attempts target
+          SET local_filename = $1,
+              local_filesize = $2,
+              status = 'downloaded',
+              completed_at = COALESCE(target.completed_at, now()),
+              error_message = NULL,
+              updated_at = now()
+          FROM chosen
+          WHERE target.id = chosen.id
+          RETURNING target.id, target.want_list_id AS wantlistid
+        `,
+        [filename, change.filesize]
+      )).rows[0]
+      if (row?.wantlistid != null) {
+        await client.query(
+          `UPDATE want_list SET pipeline_status = 'downloaded', selected_download_id = COALESCE(selected_download_id, $2), updated_at = now() WHERE id = $1`,
+          [toNumber(row.wantlistid), toNumber(row.id)]
+        )
+      }
+    }
+  }
+
+  private async readDownloadAttemptOriginWithClient(client: PoolClient, filename: string): Promise<DownloadAttemptOrigin | null> {
+    const row = (await client.query<DownloadAttemptOrigin>(
+      `
+        SELECT origin_artist AS "artist", origin_title AS "title", origin_version AS "version", origin_year AS "year"
+        FROM download_attempts
+        WHERE local_filename = $1
+        ORDER BY completed_at DESC NULLS LAST, updated_at DESC, id DESC
+        LIMIT 1
+      `,
+      [filename]
+    )).rows[0]
+    return row ?? null
+  }
+
   private async syncImportReviewCacheWithClient(
     client: PoolClient,
     changed: Map<string, SyncChange>,
@@ -3756,6 +3839,7 @@ export class CollectionService {
 
     for (const [filename, change] of changedDownloads) {
       const parsed = parseImportFilename(filename)
+      const origin = await this.readDownloadAttemptOriginWithClient(client, filename)
       await client.query(
         `
           INSERT INTO import_review_cache(
@@ -3781,10 +3865,10 @@ export class CollectionService {
           change.filesize,
           change.mtimeMs,
           IMPORT_REVIEW_VERSION,
-          parsed?.artist ?? null,
-          parsed?.title ?? null,
-          parsed?.version ?? null,
-          parsed?.year ?? null
+          origin?.artist ?? parsed?.artist ?? null,
+          origin?.title ?? parsed?.title ?? null,
+          origin?.version ?? parsed?.version ?? null,
+          origin?.year ?? parsed?.year ?? null
         ]
       )
     }
@@ -3806,6 +3890,9 @@ export class CollectionService {
     for (const [filename, change] of changed) {
       if (await this.restoreArchivedIdentificationWithClient(client, filename, change)) continue
       const parsed = parseImportFilename(filename)
+      const origin = isDownloadRelativeFilename(filename, this.settings.downloadFolderPaths)
+        ? await this.readDownloadAttemptOriginWithClient(client, filename)
+        : null
       await client.query(
         `
           INSERT INTO file_identification_state(
@@ -3839,10 +3926,10 @@ export class CollectionService {
           filename,
           change.filesize,
           change.mtimeMs,
-          parsed?.artist ?? null,
-          parsed?.title ?? null,
-          parsed?.version ?? null,
-          parsed?.year ?? null,
+          origin?.artist ?? parsed?.artist ?? null,
+          origin?.title ?? parsed?.title ?? null,
+          origin?.version ?? parsed?.version ?? null,
+          origin?.year ?? parsed?.year ?? null,
           IDENTIFY_VERSION
         ]
       )
@@ -4028,6 +4115,10 @@ export class CollectionService {
   public async downloadAttemptCreate(input: DownloadAttemptCreateInput): Promise<DownloadAttempt> {
     await this.ensureReady()
     return this.downloadAttemptStore.create(input)
+  }
+
+  public expectedDownloadFilename(remoteFilename: string | null): string | null {
+    return buildExpectedDownloadFilename(this.settings.downloadFolderPaths, remoteFilename)
   }
 
   public async downloadAttemptUpdate(id: number, patch: DownloadAttemptPatch): Promise<DownloadAttempt | null> {

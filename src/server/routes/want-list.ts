@@ -165,6 +165,7 @@ export function registerWantListRoutes(app: Express, deps: WantListRouteDeps): v
           hasFreeUploadSlot: candidate?.hasFreeUploadSlot ?? null,
           uploadSpeed: candidate?.uploadSpeed ?? null,
           isLocked: candidate?.isLocked ?? false,
+          expectedLocalFilename: service.expectedDownloadFilename(filename),
           rawCandidateJson: candidate ? JSON.stringify(candidate) : null
         })
       }

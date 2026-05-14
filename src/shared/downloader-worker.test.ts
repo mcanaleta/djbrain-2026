@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
   buildDownloadRequests,
+  buildExpectedDownloadFilename,
   downloadAttemptStatusFromSlskdState,
   wantListStatusAfterAttempt,
   buildUpgradeWantedMigration,
@@ -24,6 +25,20 @@ const candidate = (filename: string, score: number, locked: boolean = false): Wa
 })
 
 describe('buildDownloadRequests', () => {
+  it('adds the expected collection path for each requested download', () => {
+    const requests = buildDownloadRequests({
+      wantListId: 7,
+      query: 'artist title',
+      searchId: 'search-1',
+      targetDownloadCount: 1,
+      downloadFolderPaths: ['hasoulseek/complete'],
+      candidates: [candidate('#MAKINA/Mega`Lo Mania - Close Your Eyes.mp3', 90)],
+      existingAttempts: []
+    })
+
+    assert.equal(requests[0]?.expectedLocalFilename, 'hasoulseek/complete/#MAKINA/Mega`Lo Mania - Close Your Eyes.mp3')
+  })
+
   it('picks top unlocked candidates up to remaining target slots', () => {
     const requests = buildDownloadRequests({
       wantListId: 7,
@@ -79,6 +94,19 @@ describe('buildUpgradeWantedMigration', () => {
     assert.equal(migration.attempts[0]?.originArtist, 'Farmdoctors')
     assert.equal(migration.attempts[0]?.localFilename, 'soulseek/complete/Farmdoctors/el-guebo.flac')
     assert.equal(migration.attempts[0]?.status, 'downloaded')
+  })
+})
+
+describe('buildExpectedDownloadFilename', () => {
+  it('derives a Dropbox-relative expected path without touching disk', () => {
+    assert.equal(
+      buildExpectedDownloadFilename(['soulseek/complete'], '@@peer\\Soulseek Downloads\\complete\\Folder\\Track.flac'),
+      'soulseek/complete/Folder/Track.flac'
+    )
+  })
+
+  it('uses null when no completed-download prefix is configured', () => {
+    assert.equal(buildExpectedDownloadFilename([], 'Track.mp3'), null)
   })
 })
 

@@ -7,7 +7,7 @@ describe('shouldPollWantListItem', () => {
     assert.equal(shouldPollWantListItem('queued'), true)
     assert.equal(shouldPollWantListItem('searching'), true)
     assert.equal(shouldPollWantListItem('downloading'), true)
-    assert.equal(shouldPollWantListItem('downloaded'), false)
+    assert.equal(shouldPollWantListItem('downloaded'), true)
     assert.equal(shouldPollWantListItem('error'), false)
   })
 })

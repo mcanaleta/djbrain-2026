@@ -1,4 +1,5 @@
 import type { UpgradeCaseStatus, UpgradeLocalCandidate } from '../shared/api.ts'
+import { basenameOfFilename, getDownloadFolderPrefixes, normalizeFilename } from './collection-service-helpers.ts'
 
 export type WantedDownloadCandidate = {
   username: string
@@ -46,6 +47,7 @@ export type DownloadRequestPlan = {
   hasFreeUploadSlot: boolean | null
   uploadSpeed: number | null
   isLocked: boolean
+  expectedLocalFilename: string | null
   rawCandidateJson: string
 }
 
@@ -54,6 +56,7 @@ type BuildDownloadRequestsInput = {
   query: string
   searchId: string
   targetDownloadCount: number
+  downloadFolderPaths?: string[]
   candidates: WantedDownloadCandidate[]
   existingAttempts: DownloadAttemptSeed[]
 }
@@ -62,6 +65,17 @@ const ACTIVE_ATTEMPT_STATUSES = new Set<DownloadAttemptStatus>(['queued', 'reque
 
 function remoteKey(username: string | null, filename: string | null, size: number | null): string {
   return `${username ?? ''}\n${filename ?? ''}\n${size ?? 0}`
+}
+
+export function buildExpectedDownloadFilename(downloadFolderPaths: string[], remoteFilename: string | null): string | null {
+  const prefix = getDownloadFolderPrefixes(downloadFolderPaths)[0]
+  const normalized = remoteFilename ? normalizeFilename(remoteFilename).replace(/^\/+/, '') : ''
+  if (!prefix || !normalized) return null
+  const segments = normalized.split('/').filter(Boolean)
+  const completeIndex = segments.map((segment) => segment.toLowerCase()).lastIndexOf('complete')
+  const unsafeRoot = segments[0]?.includes(':') || segments[0]?.startsWith('@@')
+  const tail = completeIndex >= 0 ? segments.slice(completeIndex + 1) : unsafeRoot ? [basenameOfFilename(normalized)] : segments
+  return normalizeFilename(`${prefix}/${tail.join('/') || basenameOfFilename(normalized)}`)
 }
 
 export function downloadAttemptStatusFromSlskdState(state: string | null): DownloadAttemptStatus | null {
@@ -107,6 +121,7 @@ export function buildDownloadRequests(input: BuildDownloadRequestsInput): Downlo
       hasFreeUploadSlot: candidate.hasFreeUploadSlot,
       uploadSpeed: candidate.uploadSpeed,
       isLocked: candidate.isLocked,
+      expectedLocalFilename: buildExpectedDownloadFilename(input.downloadFolderPaths ?? [], candidate.filename),
       rawCandidateJson: JSON.stringify(candidate)
     }))
 }

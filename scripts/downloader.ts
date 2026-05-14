@@ -1,14 +1,7 @@
-import { stat } from 'node:fs/promises'
-import { relative, resolve } from 'node:path'
 import { CollectionService, type DownloadAttempt, type WantListItem } from '../src/backend/collection-service.ts'
-import { normalizeFilename } from '../src/backend/collection-service-helpers.ts'
-import { DiscogsMatchService } from '../src/backend/discogs-match-service.ts'
-import { ImportService } from '../src/backend/import-service.ts'
-import { OnlineSearchService } from '../src/backend/online-search-service.ts'
 import { readSettings, type AppSettings } from '../src/backend/settings-store.ts'
 import { SlskdService, type SlskdCandidate } from '../src/backend/slskd-service.ts'
-import { TaggerService } from '../src/backend/tagger-service.ts'
-import { buildDownloadRequests, downloadAttemptStatusFromSlskdState, wantListStatusAfterAttempt } from '../src/backend/downloader-worker-planning.ts'
+import { buildDownloadRequests, buildExpectedDownloadFilename, downloadAttemptStatusFromSlskdState, wantListStatusAfterAttempt } from '../src/backend/downloader-worker-planning.ts'
 
 type Options = {
   intervalSeconds: number
@@ -36,14 +29,8 @@ function readOptions(): Options {
 function requireConfig(settings: AppSettings): string {
   const dbUrl = process.env.DJBRAIN_POSTGRES_URL?.trim()
   if (!dbUrl) throw new Error('DJBRAIN_POSTGRES_URL is required.')
-  if (!settings.musicFolderPath) throw new Error('DJBRAIN_MUSIC_FOLDER_PATH is required.')
-  if (!settings.downloadFolderPaths.length) throw new Error('DJBRAIN_DOWNLOAD_FOLDER_PATHS is required.')
   if (!settings.slskdBaseURL || !settings.slskdApiKey) throw new Error('DJBRAIN_SLSKD_BASE_URL and DJBRAIN_SLSKD_API_KEY are required.')
   return dbUrl
-}
-
-function toMusicRelativePath(settings: AppSettings, absolutePath: string): string {
-  return normalizeFilename(relative(settings.musicFolderPath, absolutePath))
 }
 
 function nextSearchAt(candidateCount: number): string {
@@ -54,7 +41,6 @@ async function monitorAttempt(
   settings: AppSettings,
   service: CollectionService,
   slskd: SlskdService,
-  importService: ImportService,
   attempt: DownloadAttempt,
   dryRun: boolean
 ): Promise<void> {
@@ -76,38 +62,24 @@ async function monitorAttempt(
   const state = await slskd.getDownloadState(settings, attempt.username, attempt.remoteFilename)
   const status = downloadAttemptStatusFromSlskdState(state)
   if (!status || dryRun) return
-  if (status !== 'downloaded') {
-    const errorMessage = ['failed', 'timeout', 'cancelled'].includes(status) ? `slskd transfer ${state ?? status}` : null
-    await service.downloadAttemptUpdate(attempt.id, { status, errorMessage })
-    if (attempt.wantListId) {
-      const attempts = await service.downloadAttemptListForWantList(attempt.wantListId)
-      const patch = wantListStatusAfterAttempt(status, attempts.some((item) => item.status === 'downloaded'), errorMessage)
-      if (patch) await service.wantListUpdatePipeline(attempt.wantListId, patch)
-    }
-    return
-  }
-
-  const localPath = await importService.resolveLocalPath(settings, attempt.remoteFilename)
-  if (!localPath) {
-    await service.downloadAttemptUpdate(attempt.id, { status: 'missing_local', errorMessage: 'Download completed but no local file was found.' })
-    return
-  }
-  const localStats = await stat(localPath)
+  const errorMessage = ['failed', 'timeout', 'cancelled'].includes(status) ? `slskd transfer ${state ?? status}` : null
   await service.downloadAttemptUpdate(attempt.id, {
-    status: 'downloaded',
-    localFilename: toMusicRelativePath(settings, localPath),
-    localFilesize: localStats.size,
-    completedAt: new Date().toISOString(),
-    errorMessage: null
+    status,
+    expectedLocalFilename: attempt.expectedLocalFilename ?? buildExpectedDownloadFilename(settings.downloadFolderPaths, attempt.remoteFilename),
+    completedAt: status === 'downloaded' ? new Date().toISOString() : attempt.completedAt,
+    errorMessage
   })
-  if (attempt.wantListId) await service.wantListUpdatePipeline(attempt.wantListId, { pipelineStatus: 'downloaded' })
+  if (attempt.wantListId) {
+    const attempts = await service.downloadAttemptListForWantList(attempt.wantListId)
+    const patch = wantListStatusAfterAttempt(status, attempts.some((item) => item.status === 'downloaded'), errorMessage)
+    if (patch) await service.wantListUpdatePipeline(attempt.wantListId, patch)
+  }
 }
 
 async function searchWant(
   settings: AppSettings,
   service: CollectionService,
   slskd: SlskdService,
-  importService: ImportService,
   want: WantListItem,
   dryRun: boolean
 ): Promise<void> {
@@ -126,6 +98,7 @@ async function searchWant(
       query,
       searchId,
       targetDownloadCount: want.targetDownloadCount,
+      downloadFolderPaths: settings.downloadFolderPaths,
       candidates: candidates as SlskdCandidate[],
       existingAttempts: attempts
     })
@@ -162,9 +135,10 @@ async function searchWant(
         hasFreeUploadSlot: plan.hasFreeUploadSlot,
         uploadSpeed: plan.uploadSpeed,
         isLocked: plan.isLocked,
+        expectedLocalFilename: plan.expectedLocalFilename,
         rawCandidateJson: plan.rawCandidateJson
       })
-      await monitorAttempt(settings, service, slskd, importService, attempt, false)
+      await monitorAttempt(settings, service, slskd, attempt, false)
     }
   } catch (error) {
     await service.wantListUpdatePipeline(want.id, {
@@ -175,29 +149,27 @@ async function searchWant(
   }
 }
 
-async function tick(settings: AppSettings, service: CollectionService, slskd: SlskdService, importService: ImportService, options: Options): Promise<void> {
+async function tick(settings: AppSettings, service: CollectionService, slskd: SlskdService, options: Options): Promise<void> {
   const active = await service.downloadAttemptListActive(options.limit)
   console.log(`[downloader] active=${active.length} dryRun=${options.dryRun}`)
-  for (const attempt of active) await monitorAttempt(settings, service, slskd, importService, attempt, options.dryRun)
+  for (const attempt of active) await monitorAttempt(settings, service, slskd, attempt, options.dryRun)
 
   const wants = await service.wantListListDueForDownload(options.limit)
   console.log(`[downloader] due=${wants.length}`)
-  for (const want of wants) await searchWant(settings, service, slskd, importService, want, options.dryRun)
+  for (const want of wants) await searchWant(settings, service, slskd, want, options.dryRun)
 }
 
 async function main(): Promise<void> {
-  const rawSettings = readSettings()
-  const settings = { ...rawSettings, musicFolderPath: rawSettings.musicFolderPath ? resolve(rawSettings.musicFolderPath) : '' }
+  const settings = readSettings()
   const options = readOptions()
   const service = new CollectionService({ connectionString: requireConfig(settings), debounceMs: 1_000 })
   const slskd = new SlskdService()
-  const importService = new ImportService(new DiscogsMatchService(), new TaggerService(), new OnlineSearchService())
   let stopped = false
   process.on('SIGINT', () => { stopped = true })
   process.on('SIGTERM', () => { stopped = true })
   try {
     while (!stopped) {
-      const result = await service.withDownloaderLock(() => tick(settings, service, slskd, importService, options))
+      const result = await service.withDownloaderLock(() => tick(settings, service, slskd, options))
       if (result === null) console.log('[downloader] another worker holds the lock')
       await sleep(options.intervalSeconds * 1_000)
     }
