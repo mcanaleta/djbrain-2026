@@ -34,13 +34,8 @@ COPY scripts/ scripts/
 # Copy built frontend from builder stage
 COPY --from=builder /app/dist/ dist/
 
-# Data directory: SQLite DB, cache, logs
-# Mount a volume here for persistence
+# Data directory for local runtime state when a service opts into one.
 ENV DJBRAIN_DATA_DIR=/data
-
-# Music library: mount your music folder here
-# Configure via DJBRAIN_* env vars → musicFolderPath = /music
-VOLUME ["/data", "/music"]
 
 EXPOSE 5180
 
