@@ -52,7 +52,11 @@ type LeaseRow = {
 const toIso = (value: Date | string): string => value instanceof Date ? value.toISOString() : String(value)
 
 export class ProcessLeaseStore {
-  constructor(private readonly pool: Pool) {}
+  private readonly pool: Pool
+
+  constructor(pool: Pool) {
+    this.pool = pool
+  }
 
   private row(row: LeaseRow): ProcessLease {
     const leaseExpiresAt = toIso(row.leaseexpiresat)
