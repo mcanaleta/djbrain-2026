@@ -42,6 +42,19 @@ describe('readProcessWorkerOptions', () => {
     assert.equal(options.leaseMs, 10_000)
     assert.equal(options.dryRun, true)
   })
+
+  it('keeps the lease alive longer than the polling interval', () => {
+    const options = readProcessWorkerOptions({
+      args: ['--interval-seconds', '300'],
+      env: {},
+      hostname: 'host',
+      pid: 123,
+      defaultIntervalSeconds: 60,
+      defaultLimit: 10
+    })
+
+    assert.equal(options.leaseMs, 305_000)
+  })
 })
 
 describe('shouldRunServerStartupSync', () => {

@@ -41,15 +41,16 @@ function readBoolean(value: string | undefined, fallback: boolean): boolean {
 export function readProcessWorkerOptions(input: ProcessWorkerOptionsInput): ProcessWorkerOptions {
   const interval = readNumber(input.args, input.env, '--interval-seconds', input.defaultIntervalSeconds)
   const limit = readNumber(input.args, input.env, '--limit', input.defaultLimit)
-  const leaseSeconds = readNumber(input.args, input.env, '--lease-seconds', 45)
+  const intervalSeconds = Math.max(5, interval)
+  const leaseSeconds = readNumber(input.args, input.env, '--lease-seconds', intervalSeconds + 5)
   return {
-    intervalSeconds: Math.max(5, interval),
+    intervalSeconds,
     limit: Math.max(1, limit),
     dryRun: input.args.includes('--dry-run'),
     ownerId: readArg(input.args, '--owner-id') ?? input.env.DJBRAIN_PROCESS_OWNER_ID?.trim() ?? `${input.hostname}:${input.pid}`,
     priority: Math.max(0, readNumber(input.args, input.env, '--priority', 10)),
     takeover: input.args.includes('--takeover') || input.env.DJBRAIN_PROCESS_TAKEOVER === '1',
-    leaseMs: Math.max(10, leaseSeconds) * 1_000
+    leaseMs: Math.max(10, intervalSeconds + 5, leaseSeconds) * 1_000
   }
 }
 
