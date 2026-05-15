@@ -1,4 +1,4 @@
-import type { AudioAnalysis, CollectionItemDetails, ImportCommitInput, ImportReview } from '../../../../shared/api'
+import type { AudioAnalysis, CollectionItemDetails, ImportCommitInput, ImportFileResult, ImportReview } from '../../../../shared/api'
 import { toTagDraft, toTagPreview, type TagDraft } from '../../lib/importReview.ts'
 import type { ImportRow, ImportTracksTableRow } from './importRows'
 
@@ -47,6 +47,58 @@ export function buildImportRecordFileRows(record: ImportTracksTableRow, collecti
 
 export function getImportRecordDownloadActions(hasCollectionTarget: boolean): ImportRecordDownloadAction[] {
   return hasCollectionTarget ? ['import', 'replace', 'delete'] : ['import', 'delete']
+}
+
+export type ImportActionConfirmation = {
+  title: string
+  confirmLabel: string
+  lines: string[]
+}
+
+function tagLine(input: ImportCommitInput): string {
+  const tags = input.tags
+  return [tags?.artist, tags?.title ? `${tags.title}${tags.discogsTrackPosition ? ` [${tags.discogsTrackPosition}]` : ''}` : null, tags?.year].filter(Boolean).join(' - ')
+}
+
+export function buildImportActionConfirmation(
+  action: Extract<ImportRecordDownloadAction, 'import' | 'replace'>,
+  row: ImportRecordFileRow,
+  collectionTarget: CollectionItemDetails | null,
+  input: ImportCommitInput,
+  destinationRelativePath: string | null
+): ImportActionConfirmation {
+  const destination = destinationRelativePath ?? input.replaceFilename ?? 'the selected songs path'
+  return action === 'replace'
+    ? {
+        title: 'Replace Collection File',
+        confirmLabel: 'Replace',
+        lines: [
+          `Source download: ${row.filename}`,
+          `Replace target: ${collectionTarget?.filename ?? input.replaceFilename ?? 'current collection file'}`,
+          'The current collection file will be archived first.',
+          'The chosen download will be converted to MP3 320 when needed and written with the selected tags.',
+          `Tags: ${tagLine(input) || 'selected review tags'}`,
+          'After completion this page will stay on this review and refresh the files.'
+        ]
+      }
+    : {
+        title: 'Import Download',
+        confirmLabel: 'Import',
+        lines: [
+          `Source download: ${row.filename}`,
+          `Create collection file: ${destination}`,
+          'The chosen download will be converted to MP3 320 when needed and written with the selected tags.',
+          `Tags: ${tagLine(input) || 'selected review tags'}`,
+          'After completion this page will stay on this review and refresh the files.'
+        ]
+      }
+}
+
+export function importResultTargetFilename(result: ImportFileResult): string | null {
+  if (result.status === 'imported' || result.status === 'imported_upgrade') return result.destRelativePath
+  if (result.status === 'replaced') return result.replacedRelativePath
+  if (result.status === 'skipped_existing') return result.existingRelativePath
+  return null
 }
 
 export function buildImportCommitInputFromReview(

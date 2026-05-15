@@ -396,23 +396,16 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
             return importService.importFile(settings, parsed.artist, parsed.title, parsed.version, absolutePath)
           })()
 
-      void service.syncNow().then(async () => {
-        if (!syncMediaItem) {
-          await syncMediaCatalog?.()
-          return
-        }
+      await service.syncNow()
+      if (syncMediaItem) {
         const changed = new Set<string>()
-        if (result.status === 'imported' || result.status === 'imported_upgrade') {
-          changed.add(normalizeFilename(result.destRelativePath))
-        }
-        if (result.status === 'replaced') {
-          changed.add(normalizeFilename(result.replacedRelativePath))
-        }
-        if (result.status === 'skipped_existing') {
-          changed.add(normalizeFilename(result.existingRelativePath))
-        }
+        if (result.status === 'imported' || result.status === 'imported_upgrade') changed.add(normalizeFilename(result.destRelativePath))
+        if (result.status === 'replaced') changed.add(normalizeFilename(result.replacedRelativePath))
+        if (result.status === 'skipped_existing') changed.add(normalizeFilename(result.existingRelativePath))
         await Promise.all([...changed].map((item) => syncMediaItem(item)))
-      })
+      } else {
+        await syncMediaCatalog?.()
+      }
 
       if (result.status === 'imported') {
         sendJson(response, 200, { status: 'imported', destRelativePath: result.destRelativePath })

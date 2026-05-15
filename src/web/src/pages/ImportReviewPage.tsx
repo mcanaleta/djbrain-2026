@@ -1,18 +1,28 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import type { ImportReview } from '../../../shared/api'
+import type { ImportCommitInput, ImportReview } from '../../../shared/api'
 import { api } from '../api/client'
 import { ImportReviewDialog } from '../components/ImportReviewDialog'
 import { ActionButton } from '../components/view/ActionButton'
 import { Notice } from '../components/view/Notice'
+import { ImportActionConfirmDialog } from '../features/import/ImportActionConfirmDialog'
 import { ImportRecordFilesTable } from '../features/import/ImportRecordFilesTable'
-import { buildImportCommitInputFromReview, type ImportRecordDownloadAction, type ImportRecordFileRow } from '../features/import/importRecordFiles'
+import {
+  buildImportActionConfirmation,
+  buildImportCommitInputFromReview,
+  importResultTargetFilename,
+  type ImportActionConfirmation,
+  type ImportRecordDownloadAction,
+  type ImportRecordFileRow
+} from '../features/import/importRecordFiles'
 import { buildImportRows, groupImportRows } from '../features/import/importRows'
 import type { TagDraft } from '../lib/importReview'
 import { buildImportHref, buildImportRecordReviewHref } from '../lib/urls'
 
 type ActiveImportReview = { filename: string; review: ImportReview; selectedIndex: number | null; tagDraft: TagDraft }
+type CommitAction = Extract<ImportRecordDownloadAction, 'import' | 'replace'>
+type PendingCommitAction = { action: CommitAction; row: ImportRecordFileRow; input: ImportCommitInput; confirmation: ImportActionConfirmation }
 
 export default function ImportReviewPage(): React.JSX.Element {
   const navigate = useNavigate()
@@ -27,7 +37,10 @@ export default function ImportReviewPage(): React.JSX.Element {
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [pendingDeleteFilename, setPendingDeleteFilename] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null)
   const [activeReview, setActiveReview] = useState<ActiveImportReview | null>(null)
+  const [pendingCommit, setPendingCommit] = useState<PendingCommitAction | null>(null)
+  const [committedTargetFilename, setCommittedTargetFilename] = useState<string | null>(null)
   const { data: listResult, isPending } = useQuery({
     queryKey: ['collection', 'downloads', query],
     queryFn: () => api.collection.listDownloads(query)
@@ -45,10 +58,11 @@ export default function ImportReviewPage(): React.JSX.Element {
           : null,
     [legacyFilename, recordId, recordIdParam, records]
   )
+  const collectionTargetFilename = record?.replacementFilename ?? committedTargetFilename
   const { data: collectionTarget = null } = useQuery({
-    queryKey: ['collection', 'item', record?.replacementFilename ?? null],
-    queryFn: () => record?.replacementFilename ? api.collection.get(record.replacementFilename) : Promise.resolve(null),
-    enabled: Boolean(record?.replacementFilename)
+    queryKey: ['collection', 'item', collectionTargetFilename ?? null],
+    queryFn: () => collectionTargetFilename ? api.collection.get(collectionTargetFilename) : Promise.resolve(null),
+    enabled: Boolean(collectionTargetFilename)
   })
 
   useEffect(() => {
@@ -63,6 +77,12 @@ export default function ImportReviewPage(): React.JSX.Element {
     if (!selectedInRecord) setSelectedFilename(legacyInRecord ? legacyFilename : record.bestFile.filename)
   }, [legacyFilename, record, selectedFilename])
 
+  useEffect(() => {
+    setActionSuccess(null)
+    setPendingCommit(null)
+    setCommittedTargetFilename(null)
+  }, [record?.key])
+
   const importHref = buildImportHref(query)
   const currentIndex = record ? records.findIndex((row) => row.key === record.key) : -1
   const selectedItem = record?.files.find((file) => file.filename === selectedFilename) ?? record?.bestFile ?? null
@@ -73,14 +93,19 @@ export default function ImportReviewPage(): React.JSX.Element {
     navigate(nextHref, { replace: true })
   }
 
-  const refreshDownloads = async (): Promise<void> => {
-    await queryClient.invalidateQueries({ queryKey: ['collection', 'downloads'] })
+  const refreshDownloads = async (targetFilename?: string | null): Promise<void> => {
+    await api.collection.syncNow()
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['collection', 'downloads'] }),
+      targetFilename ? queryClient.invalidateQueries({ queryKey: ['collection', 'item', targetFilename] }) : Promise.resolve()
+    ])
   }
 
   const handleFileAction = async (action: ImportRecordDownloadAction, row: ImportRecordFileRow): Promise<void> => {
     if (row.kind !== 'download') return
     setSelectedFilename(row.filename)
     setActionError(null)
+    setActionSuccess(null)
     if (action === 'delete' && pendingDeleteFilename !== row.filename) {
       setPendingDeleteFilename(row.filename)
       return
@@ -100,21 +125,49 @@ export default function ImportReviewPage(): React.JSX.Element {
       }
       const active = activeReview?.filename === row.filename ? activeReview : null
       const review = active?.review ?? await api.collection.getImportReview(row.filename)
+      const selectedIndex = active?.selectedIndex ?? review.selectedCandidateIndex
+      const candidate = review.candidates[selectedIndex ?? 0] ?? review.candidates[0] ?? null
       const input = buildImportCommitInputFromReview(
         review,
         action === 'replace' ? 'replace_existing' : 'import_new',
         collectionTarget?.filename ?? null,
-        active?.selectedIndex ?? review.selectedCandidateIndex,
+        selectedIndex,
         active?.tagDraft
       )
       if (!input) throw new Error('No Discogs candidate available for this file.')
-      await api.collection.commitImport(input)
-      handleResolved()
+      if (action === 'replace' && !collectionTarget) throw new Error('No collection target is loaded for replacement.')
+      setPendingCommit({
+        action,
+        row,
+        input,
+        confirmation: buildImportActionConfirmation(action as CommitAction, row, collectionTarget, input, candidate?.destinationRelativePath ?? null)
+      })
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Unexpected import action error')
     } finally {
       setBusyAction(null)
       setPendingDeleteFilename(null)
+    }
+  }
+
+  const confirmPendingCommit = async (): Promise<void> => {
+    if (!pendingCommit) return
+    const key = `${pendingCommit.action}:${pendingCommit.row.filename}`
+    setBusyAction(key)
+    setActionError(null)
+    setActionSuccess(null)
+    try {
+      const result = await api.collection.commitImport(pendingCommit.input)
+      const targetFilename = importResultTargetFilename(result)
+      if (targetFilename) setCommittedTargetFilename(targetFilename)
+      await refreshDownloads(targetFilename ?? collectionTarget?.filename ?? null)
+      setActionSuccess(`${pendingCommit.confirmation.confirmLabel} finished. Files refreshed.`)
+      setPendingCommit(null)
+      setSelectedFilename(pendingCommit.row.filename)
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Unexpected import action error')
+    } finally {
+      setBusyAction(null)
     }
   }
 
@@ -144,12 +197,19 @@ export default function ImportReviewPage(): React.JSX.Element {
         onSelect={setSelectedFilename}
       />
       {actionError ? <Notice tone="error">{actionError}</Notice> : null}
+      {actionSuccess ? <Notice tone="success">{actionSuccess}</Notice> : null}
       <ImportReviewDialog
         filename={selectedItem?.filename ?? null}
         queuePosition={currentIndex >= 0 ? currentIndex + 1 : null}
         queueTotal={records.length || null}
         onClose={() => navigate(importHref)}
         onReviewChange={setActiveReview}
+      />
+      <ImportActionConfirmDialog
+        confirmation={pendingCommit?.confirmation ?? null}
+        busy={busyAction === `${pendingCommit?.action}:${pendingCommit?.row.filename}`}
+        onCancel={() => { if (!busyAction) setPendingCommit(null) }}
+        onConfirm={() => { void confirmPendingCommit() }}
       />
     </div>
   )

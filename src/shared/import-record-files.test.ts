@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { CollectionItem, CollectionItemDetails, ImportReview } from './api.ts'
-import { buildImportCommitInputFromReview, buildImportRecordFileRows, getImportRecordDownloadActions } from '../web/src/features/import/importRecordFiles.ts'
+import {
+  buildImportActionConfirmation,
+  buildImportCommitInputFromReview,
+  buildImportRecordFileRows,
+  getImportRecordDownloadActions,
+  importResultTargetFilename
+} from '../web/src/features/import/importRecordFiles.ts'
 import { buildImportRows, groupImportRows } from '../web/src/features/import/importRows.ts'
 
 const target: CollectionItemDetails = {
@@ -92,5 +98,29 @@ describe('buildImportRecordFileRows', () => {
     assert.equal(buildImportCommitInputFromReview(review, 'import_new', null)?.replaceFilename, null)
     assert.equal(buildImportCommitInputFromReview(review, 'replace_existing', target.filename)?.replaceFilename, target.filename)
     assert.equal(buildImportCommitInputFromReview(review, 'import_new', null, 1)?.match?.releaseId, 2)
+  })
+
+  it('explains import and replace confirmations before committing', () => {
+    const row = buildImportRecordFileRows(groupImportRows(buildImportRows([item('hasoulseek/one.flac', 'a', 2)]))[0]!, target)[1]!
+    const input = {
+      filename: row.filename,
+      mode: 'replace_existing' as const,
+      replaceFilename: target.filename,
+      tags: { artist: 'A', title: 'T', album: 'R', year: '1995', label: null, catalogNumber: null, trackPosition: 'A1', discogsReleaseId: 1, discogsTrackPosition: 'A1' }
+    }
+    const replace = buildImportActionConfirmation('replace', row, target, input, 'songs/1995/A - T.mp3')
+    const direct = buildImportActionConfirmation('import', row, null, { ...input, mode: 'import_new', replaceFilename: null }, 'songs/1995/A - T.mp3')
+
+    assert.match(replace.title, /Replace/)
+    assert.ok(replace.lines.some((line) => line.includes(target.filename)))
+    assert.ok(replace.lines.some((line) => line.includes('MP3 320')))
+    assert.ok(direct.lines.some((line) => line.includes('Create collection file')))
+    assert.ok(direct.lines.some((line) => line.includes('stay on this review')))
+  })
+
+  it('keeps the refreshed collection target from import results', () => {
+    assert.equal(importResultTargetFilename({ status: 'imported', destRelativePath: 'songs/a.mp3' }), 'songs/a.mp3')
+    assert.equal(importResultTargetFilename({ status: 'replaced', replacedRelativePath: 'songs/b.mp3' }), 'songs/b.mp3')
+    assert.equal(importResultTargetFilename({ status: 'needs_review' }), null)
   })
 })
