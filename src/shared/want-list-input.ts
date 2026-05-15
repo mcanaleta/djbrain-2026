@@ -11,6 +11,7 @@ export function buildReplacementWantInput(item: CollectionItemDetails): WantList
   const tags = item.tags
   return {
     wantKind: 'replacement',
+    recordingId: item.recordingId,
     artist: text(canonical?.artist) ?? text(tags?.artist) ?? text(item.importReview?.parsedArtist) ?? parsed?.artist ?? 'Unknown Artist',
     title: text(canonical?.title) ?? text(tags?.title) ?? text(item.importReview?.parsedTitle) ?? parsed?.title ?? item.filename,
     version: text(canonical?.version) ?? text(tags?.version) ?? text(item.importReview?.parsedVersion) ?? parsed?.version ?? null,

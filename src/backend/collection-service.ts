@@ -71,11 +71,13 @@ type FileTagStateInput = {
   errorMessage: string | null
 }
 
-type DownloadAttemptOrigin = {
+export type DownloadAttemptOrigin = {
+  recordingId: number | null
   artist: string | null
   title: string | null
   version: string | null
   year: string | null
+  sourceCollectionFilename: string | null
 }
 
 type CollectionServiceOptions = {
@@ -143,6 +145,23 @@ export function buildDownloadExistingMatchCanonical(input: {
   const cached = toCanonical(input.importArtist, input.importTitle, input.importVersion, input.importYear)
   const canonical = cached?.artist && cached.title ? cached : parseImportFilename(input.filename)
   return canonical?.artist && canonical.title ? canonical : null
+}
+
+export function buildDownloadOriginIdentificationSeed(
+  origin: DownloadAttemptOrigin | null,
+  parsed: { artist: string | null; title: string | null; version: string | null; year: string | null } | null
+) {
+  const linked = origin?.recordingId != null
+  return {
+    recordingId: origin?.recordingId ?? null,
+    status: linked ? 'ready' as const : 'pending' as const,
+    assignmentMethod: linked ? 'manual' as const : null,
+    confidence: linked ? 100 : null,
+    parsedArtist: origin?.artist ?? parsed?.artist ?? null,
+    parsedTitle: origin?.title ?? parsed?.title ?? null,
+    parsedVersion: origin?.version ?? parsed?.version ?? null,
+    parsedYear: origin?.year ?? parsed?.year ?? null
+  }
 }
 
 function buildFtsQuery(value: string): string {
@@ -322,6 +341,7 @@ export type CollectionListResult = {
 export type WantListItem = {
   id: number
   wantKind: 'missing' | 'replacement'
+  recordingId: number | null
   artist: string
   title: string
   version: string | null
@@ -351,6 +371,7 @@ export type WantListItem = {
 
 export type WantListAddInput = {
   wantKind?: 'missing' | 'replacement'
+  recordingId?: number | null
   artist: string
   title: string
   version?: string | null
@@ -368,6 +389,7 @@ export type WantListAddInput = {
 
 export type WantListPipelinePatch = {
   pipelineStatus?: string
+  recordingId?: number | null
   sourceCollectionFilename?: string | null
   targetDownloadCount?: number
   autoDownloadEnabled?: boolean
@@ -391,6 +413,7 @@ export type DownloadAttempt = {
   id: number
   wantListId: number | null
   status: DownloadAttemptStatus
+  originRecordingId: number | null
   originArtist: string
   originTitle: string
   originVersion: string | null
@@ -1119,6 +1142,7 @@ export class CollectionService {
         importyear: string | null
         importerror: string | null
         importreviewjson: string | null
+        downloadoriginsourcecollectionfilename: string | null
       }>(
         `
           SELECT
@@ -1154,11 +1178,20 @@ export class CollectionService {
             import_review_cache.parsed_version AS importVersion,
             import_review_cache.parsed_year AS importYear,
             import_review_cache.error_message AS importError,
-            import_review_cache.review_json AS importReviewJson
+            import_review_cache.review_json AS importReviewJson,
+            download_origin.originSourceCollectionFilename AS downloadOriginSourceCollectionFilename
           FROM collection_files
           LEFT JOIN file_identification_state ON file_identification_state.filename = collection_files.filename
           LEFT JOIN recordings ON recordings.id = file_identification_state.recording_id
           LEFT JOIN import_review_cache ON import_review_cache.filename = collection_files.filename
+          LEFT JOIN LATERAL (
+            SELECT COALESCE(download_attempts.origin_source_collection_filename, want_list.source_collection_filename) AS originSourceCollectionFilename
+            FROM download_attempts
+            LEFT JOIN want_list ON want_list.id = download_attempts.want_list_id
+            WHERE download_attempts.local_filename = collection_files.filename
+            ORDER BY download_attempts.completed_at DESC NULLS LAST, download_attempts.updated_at DESC, download_attempts.id DESC
+            LIMIT 1
+          ) download_origin ON TRUE
           WHERE ${whereSql}
           ORDER BY ${ftsQuery ? 'score DESC,' : ''} lower(collection_files.filename)
           ${ftsQuery ? `LIMIT $${nextParam + 1}::int` : ''}
@@ -1182,7 +1215,7 @@ export class CollectionService {
               importYear: row.importyear
             }), prefixes)
         const localCanonical = localMatch?.recordingCanonical ?? null
-        const existingFilename = candidate?.exactExistingFilename ?? localMatch?.filename ?? parsedExistingFilename
+        const existingFilename = row.downloadoriginsourcecollectionfilename ?? candidate?.exactExistingFilename ?? localMatch?.filename ?? parsedExistingFilename
         const sourceFilesize = toNumber(row.filesize)
         const sourceAnalysis = await this.readCachedAudioAnalysisByFilename(row.filename)
         const sourceQuality = await this.readFileQuality(row.filename, sourceFilesize)
@@ -1506,6 +1539,7 @@ export class CollectionService {
       CREATE TABLE IF NOT EXISTS want_list (
         id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
         want_kind TEXT NOT NULL DEFAULT 'missing',
+        recording_id BIGINT REFERENCES recordings(id) ON DELETE SET NULL,
         artist TEXT NOT NULL,
         title TEXT NOT NULL,
         version TEXT,
@@ -1564,6 +1598,7 @@ export class CollectionService {
         id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
         want_list_id BIGINT,
         status TEXT NOT NULL DEFAULT 'queued',
+        origin_recording_id BIGINT REFERENCES recordings(id) ON DELETE SET NULL,
         origin_artist TEXT NOT NULL,
         origin_title TEXT NOT NULL,
         origin_version TEXT,
@@ -1614,21 +1649,83 @@ export class CollectionService {
       WHERE want_list_id IS NOT NULL AND username IS NOT NULL AND remote_filename IS NOT NULL;
 
       ALTER TABLE want_list ADD COLUMN IF NOT EXISTS want_kind TEXT NOT NULL DEFAULT 'missing';
+      ALTER TABLE want_list ADD COLUMN IF NOT EXISTS recording_id BIGINT REFERENCES recordings(id) ON DELETE SET NULL;
       ALTER TABLE want_list ADD COLUMN IF NOT EXISTS source_collection_filename TEXT;
       ALTER TABLE want_list ADD COLUMN IF NOT EXISTS target_download_count INTEGER NOT NULL DEFAULT 3;
       ALTER TABLE want_list ADD COLUMN IF NOT EXISTS auto_download_enabled BOOLEAN NOT NULL DEFAULT TRUE;
       ALTER TABLE want_list ADD COLUMN IF NOT EXISTS last_search_at TIMESTAMPTZ;
       ALTER TABLE want_list ADD COLUMN IF NOT EXISTS next_search_at TIMESTAMPTZ;
       ALTER TABLE want_list ADD COLUMN IF NOT EXISTS selected_download_id BIGINT;
+      ALTER TABLE download_attempts ADD COLUMN IF NOT EXISTS origin_recording_id BIGINT REFERENCES recordings(id) ON DELETE SET NULL;
       ALTER TABLE recordings ADD COLUMN IF NOT EXISTS duration_seconds DOUBLE PRECISION;
       ALTER TABLE file_identification_state ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
 
+      UPDATE want_list wanted
+      SET recording_id = file_identification_state.recording_id
+      FROM file_identification_state
+      WHERE wanted.recording_id IS NULL
+        AND wanted.source_collection_filename = file_identification_state.filename
+        AND file_identification_state.recording_id IS NOT NULL;
+
+      UPDATE download_attempts attempts
+      SET origin_recording_id = source.recording_id
+      FROM (
+        SELECT download_attempts.id, COALESCE(wanted.recording_id, file_identification_state.recording_id) AS recording_id
+        FROM download_attempts
+        LEFT JOIN want_list wanted ON wanted.id = download_attempts.want_list_id
+        LEFT JOIN file_identification_state
+          ON file_identification_state.filename = COALESCE(download_attempts.origin_source_collection_filename, wanted.source_collection_filename)
+        WHERE download_attempts.origin_recording_id IS NULL
+          AND COALESCE(wanted.recording_id, file_identification_state.recording_id) IS NOT NULL
+      ) source
+      WHERE attempts.id = source.id;
+
+      UPDATE file_identification_state state
+      SET recording_id = attempts.origin_recording_id,
+          audio_hash = COALESCE(state.audio_hash, (
+            SELECT file_audio_state.audio_hash
+            FROM file_audio_state
+            WHERE file_audio_state.filename = state.filename
+              AND file_audio_state.status = 'ready'
+              AND file_audio_state.audio_hash IS NOT NULL
+            LIMIT 1
+          )),
+          status = 'ready',
+          assignment_method = 'manual',
+          confidence = 100,
+          verified_at = COALESCE(state.verified_at, now()),
+          error_message = NULL,
+          processed_at = now()
+      FROM download_attempts attempts
+      WHERE attempts.local_filename = state.filename
+        AND attempts.origin_recording_id IS NOT NULL
+        AND state.recording_id IS DISTINCT FROM attempts.origin_recording_id;
+
+      INSERT INTO audio_assets(audio_hash, recording_id, duration_seconds, assigned_by, confidence, updated_at)
+      SELECT DISTINCT file_audio_state.audio_hash, attempts.origin_recording_id, audio_analysis_cache.duration_seconds, 'manual', 100, now()
+      FROM download_attempts attempts
+      JOIN file_audio_state
+        ON file_audio_state.filename = attempts.local_filename
+       AND file_audio_state.status = 'ready'
+       AND file_audio_state.audio_hash IS NOT NULL
+      LEFT JOIN audio_analysis_cache
+        ON audio_analysis_cache.audio_hash = file_audio_state.audio_hash
+       AND audio_analysis_cache.analysis_version = ${AUDIO_ANALYSIS_VERSION}
+      WHERE attempts.origin_recording_id IS NOT NULL
+      ON CONFLICT(audio_hash) DO UPDATE SET
+        recording_id = EXCLUDED.recording_id,
+        duration_seconds = COALESCE(EXCLUDED.duration_seconds, audio_assets.duration_seconds),
+        assigned_by = EXCLUDED.assigned_by,
+        confidence = EXCLUDED.confidence,
+        updated_at = now();
+
       INSERT INTO want_list (
-        want_kind, artist, title, version, year, album, label, added_at, pipeline_status,
+        want_kind, recording_id, artist, title, version, year, album, label, added_at, pipeline_status,
         best_candidates_json, source_collection_filename, target_download_count, auto_download_enabled
       )
       SELECT
         'replacement',
+        file_identification_state.recording_id,
         COALESCE(NULLIF(search_artist, ''), 'Unknown Artist'),
         COALESCE(NULLIF(search_title, ''), collection_filename),
         search_version,
@@ -1642,6 +1739,7 @@ export class CollectionService {
         3,
         TRUE
       FROM upgrade_cases upgrade_cases_source
+      LEFT JOIN file_identification_state ON file_identification_state.filename = upgrade_cases_source.collection_filename
       WHERE NOT EXISTS (
         SELECT 1
         FROM want_list existing_want
@@ -1650,13 +1748,14 @@ export class CollectionService {
       );
 
       INSERT INTO download_attempts (
-        want_list_id, status, origin_artist, origin_title, origin_version, origin_year, origin_album, origin_label,
+        want_list_id, status, origin_recording_id, origin_artist, origin_title, origin_version, origin_year, origin_album, origin_label,
         origin_source_collection_filename, search_query, username, remote_filename, remote_size, duration_seconds,
         raw_candidate_json, expected_local_filename, local_filename, local_filesize, completed_at
       )
       SELECT
         wanted.id,
         'downloaded',
+        wanted.recording_id,
         wanted.artist,
         wanted.title,
         wanted.version,
@@ -2426,6 +2525,71 @@ export class CollectionService {
         if (!needsQueue) continue
 
         const parsed = parseImportFilename(filename)
+        const origin = isDownloadRelativeFilename(filename, this.settings.downloadFolderPaths)
+          ? await this.readDownloadAttemptOriginWithClient(client, filename)
+          : null
+        const seed = buildDownloadOriginIdentificationSeed(origin, parsed)
+        if (seed.recordingId != null) {
+          await client.query(
+            `
+              INSERT INTO file_identification_state(
+                filename, filesize, mtime_ms, recording_id, audio_hash, status, assignment_method, confidence,
+                parsed_artist, parsed_title, parsed_version, parsed_year,
+                tag_artist, tag_title, tag_version, chosen_claim_id,
+                identify_version, explanation_json, verified_at, error_message, processed_at
+              ) VALUES ($1, $2, $3, $4, $5, 'ready', 'manual', 100, $6, $7, $8, $9, NULL, NULL, NULL, NULL, $10, NULL, now(), NULL, now())
+              ON CONFLICT(filename) DO UPDATE SET
+                filesize = excluded.filesize,
+                mtime_ms = excluded.mtime_ms,
+                recording_id = excluded.recording_id,
+                audio_hash = excluded.audio_hash,
+                status = 'ready',
+                assignment_method = 'manual',
+                confidence = 100,
+                parsed_artist = excluded.parsed_artist,
+                parsed_title = excluded.parsed_title,
+                parsed_version = excluded.parsed_version,
+                parsed_year = excluded.parsed_year,
+                identify_version = excluded.identify_version,
+                verified_at = COALESCE(file_identification_state.verified_at, now()),
+                error_message = NULL,
+                processed_at = now()
+            `,
+            [
+              filename,
+              toNumber(stateRow.filesize),
+              toNumber(stateRow.mtimems),
+              seed.recordingId,
+              currentAudioHash,
+              seed.parsedArtist,
+              seed.parsedTitle,
+              seed.parsedVersion,
+              seed.parsedYear,
+              IDENTIFY_VERSION
+            ]
+          )
+          if (currentAudioHash) {
+            await client.query(
+              `
+                INSERT INTO audio_assets(audio_hash, recording_id, duration_seconds, assigned_by, confidence, updated_at)
+                SELECT $1, $2, audio_analysis_cache.duration_seconds, 'manual', 100, now()
+                FROM (SELECT 1) seed
+                LEFT JOIN audio_analysis_cache
+                  ON audio_analysis_cache.audio_hash = $1
+                 AND audio_analysis_cache.analysis_version = $3
+                ON CONFLICT(audio_hash) DO UPDATE SET
+                  recording_id = EXCLUDED.recording_id,
+                  duration_seconds = COALESCE(EXCLUDED.duration_seconds, audio_assets.duration_seconds),
+                  assigned_by = EXCLUDED.assigned_by,
+                  confidence = EXCLUDED.confidence,
+                  updated_at = now()
+              `,
+              [currentAudioHash, seed.recordingId, AUDIO_ANALYSIS_VERSION]
+            )
+          }
+          await client.query(`DELETE FROM file_identification_candidates WHERE filename = $1`, [filename])
+          continue
+        }
         await client.query(
           `
             INSERT INTO file_identification_state(
@@ -2460,10 +2624,10 @@ export class CollectionService {
             toNumber(stateRow.filesize),
             toNumber(stateRow.mtimems),
             currentAudioHash,
-            parsed?.artist ?? null,
-            parsed?.title ?? null,
-            parsed?.version ?? null,
-            parsed?.year ?? null,
+            seed.parsedArtist,
+            seed.parsedTitle,
+            seed.parsedVersion,
+            seed.parsedYear,
             IDENTIFY_VERSION
           ]
         )
@@ -3873,6 +4037,7 @@ export class CollectionService {
           SET local_filename = $1,
               local_filesize = $2,
               status = 'downloaded',
+              origin_recording_id = COALESCE(target.origin_recording_id, (SELECT recording_id FROM want_list WHERE id = target.want_list_id)),
               completed_at = COALESCE(target.completed_at, now()),
               error_message = NULL,
               updated_at = now()
@@ -3894,10 +4059,17 @@ export class CollectionService {
   private async readDownloadAttemptOriginWithClient(client: PoolClient, filename: string): Promise<DownloadAttemptOrigin | null> {
     const row = (await client.query<DownloadAttemptOrigin>(
       `
-        SELECT origin_artist AS "artist", origin_title AS "title", origin_version AS "version", origin_year AS "year"
+        SELECT
+          COALESCE(download_attempts.origin_recording_id, want_list.recording_id) AS "recordingId",
+          origin_artist AS "artist",
+          origin_title AS "title",
+          origin_version AS "version",
+          origin_year AS "year",
+          COALESCE(download_attempts.origin_source_collection_filename, want_list.source_collection_filename) AS "sourceCollectionFilename"
         FROM download_attempts
+        LEFT JOIN want_list ON want_list.id = download_attempts.want_list_id
         WHERE local_filename = $1
-        ORDER BY completed_at DESC NULLS LAST, updated_at DESC, id DESC
+        ORDER BY completed_at DESC NULLS LAST, download_attempts.updated_at DESC, download_attempts.id DESC
         LIMIT 1
       `,
       [filename]
@@ -3974,6 +4146,7 @@ export class CollectionService {
       const origin = isDownloadRelativeFilename(filename, this.settings.downloadFolderPaths)
         ? await this.readDownloadAttemptOriginWithClient(client, filename)
         : null
+      const seed = buildDownloadOriginIdentificationSeed(origin, parsed)
       await client.query(
         `
           INSERT INTO file_identification_state(
@@ -3981,14 +4154,15 @@ export class CollectionService {
             parsed_artist, parsed_title, parsed_version, parsed_year,
             tag_artist, tag_title, tag_version, chosen_claim_id,
             identify_version, explanation_json, verified_at, error_message, processed_at
-          ) VALUES ($1, $2, $3, NULL, NULL, 'pending', NULL, NULL, $4, $5, $6, $7, NULL, NULL, NULL, NULL, $8, NULL, NULL, NULL, NULL)
+          ) VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, $9, $10, $11, NULL, NULL, NULL, NULL, $12, NULL, CASE WHEN $4 IS NULL THEN NULL ELSE now() END, NULL, CASE WHEN $4 IS NULL THEN NULL ELSE now() END)
           ON CONFLICT(filename) DO UPDATE SET
             filesize = excluded.filesize,
             mtime_ms = excluded.mtime_ms,
             audio_hash = NULL,
-            status = 'pending',
-            assignment_method = NULL,
-            confidence = NULL,
+            recording_id = excluded.recording_id,
+            status = excluded.status,
+            assignment_method = excluded.assignment_method,
+            confidence = excluded.confidence,
             parsed_artist = excluded.parsed_artist,
             parsed_title = excluded.parsed_title,
             parsed_version = excluded.parsed_version,
@@ -3999,18 +4173,22 @@ export class CollectionService {
             chosen_claim_id = NULL,
             identify_version = excluded.identify_version,
             explanation_json = NULL,
-            verified_at = NULL,
+            verified_at = excluded.verified_at,
             error_message = NULL,
-            processed_at = NULL
+            processed_at = excluded.processed_at
         `,
         [
           filename,
           change.filesize,
           change.mtimeMs,
-          origin?.artist ?? parsed?.artist ?? null,
-          origin?.title ?? parsed?.title ?? null,
-          origin?.version ?? parsed?.version ?? null,
-          origin?.year ?? parsed?.year ?? null,
+          seed.recordingId,
+          seed.status,
+          seed.assignmentMethod,
+          seed.confidence,
+          seed.parsedArtist,
+          seed.parsedTitle,
+          seed.parsedVersion,
+          seed.parsedYear,
           IDENTIFY_VERSION
         ]
       )

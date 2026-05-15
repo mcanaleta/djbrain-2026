@@ -240,6 +240,7 @@ export type WantKind = 'missing' | 'replacement'
 export type WantListItem = {
   id: number
   wantKind: WantKind
+  recordingId: number | null
   artist: string
   title: string
   version: string | null
@@ -269,6 +270,7 @@ export type WantListItem = {
 
 export type WantListAddInput = {
   wantKind?: WantKind
+  recordingId?: number | null
   artist: string
   title: string
   version?: string | null
@@ -298,6 +300,7 @@ export type DownloadAttempt = {
   id: number
   wantListId: number | null
   status: DownloadAttemptStatus
+  originRecordingId: number | null
   originArtist: string
   originTitle: string
   originVersion: string | null

@@ -29,12 +29,14 @@ function item(partial: Partial<CollectionItemDetails>): CollectionItemDetails {
 describe('buildReplacementWantInput', () => {
   it('creates a replacement want record from canonical metadata and source filename', () => {
     const input = buildReplacementWantInput(item({
+      recordingId: 77,
       recordingCanonical: { artist: 'Darren Styles & Francis Hill', title: 'Come Running', version: null, year: '2008' },
       tags: { source: 'id3', artist: 'Tag Artist', title: 'Tag Title', version: null, album: 'Album', year: '2007', label: 'Label', catalogNumber: null, trackPosition: null, discogsReleaseId: 123, discogsTrackPosition: 'A1' }
     }))
 
     assert.deepEqual(input, {
       wantKind: 'replacement',
+      recordingId: 77,
       artist: 'Darren Styles & Francis Hill',
       title: 'Come Running',
       version: null,

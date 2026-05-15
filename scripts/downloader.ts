@@ -107,6 +107,7 @@ async function searchWant(
       const attempt = await service.downloadAttemptCreate({
         wantListId: want.id,
         status: 'queued',
+        originRecordingId: want.recordingId,
         originArtist: want.artist,
         originTitle: want.title,
         originVersion: want.version,

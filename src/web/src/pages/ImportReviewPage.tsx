@@ -37,7 +37,7 @@ export default function ImportReviewPage(): React.JSX.Element {
   const record = useMemo(
     () =>
       Number.isFinite(recordId) && recordId > 0
-        ? records.find((row) => row.id === recordId) ?? null
+        ? records.find((row) => row.id === recordId || row.legacyIds.includes(recordId)) ?? null
         : recordIdParam
           ? records.find((row) => row.key === recordIdParam) ?? null
         : legacyFilename

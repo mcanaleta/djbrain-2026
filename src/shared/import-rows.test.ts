@@ -78,4 +78,15 @@ describe('groupImportRows', () => {
     assert.equal(href.includes('%3A'), false)
     assert.equal(href.includes('filename='), false)
   })
+
+  it('keeps legacy parsed ids as aliases when a download is assigned to a recording', () => {
+    const rows = groupImportRows(buildImportRows([{
+      ...item("hasoulseek/complete/UnknownAlbum/A1 - Jog - Future (Remix '98).flac", ''),
+      recordingId: 1932,
+      recordingCanonical: { artist: 'Jog', title: 'Future', version: "Remix '98", year: '1998' }
+    }]))
+
+    assert.equal(rows[0]?.id, 1932)
+    assert.ok(rows[0]?.legacyIds.includes(2926488223))
+  })
 })

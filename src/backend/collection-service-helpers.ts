@@ -112,6 +112,7 @@ export function normalizeWantListInput(input: WantListAddInput): WantListAddInpu
   const targetDownloadCount = Number.isFinite(input.targetDownloadCount) ? Math.trunc(Number(input.targetDownloadCount)) : 3
   return {
     wantKind: input.wantKind === 'replacement' ? 'replacement' : 'missing',
+    recordingId: input.recordingId ?? null,
     artist,
     title,
     version: normalizeWantListOptionalText(input.version),

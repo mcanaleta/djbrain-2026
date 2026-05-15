@@ -8,6 +8,7 @@ type DownloadAttemptRow = {
   id: number | string
   want_list_id: number | string | null
   status: DownloadAttemptStatus
+  origin_recording_id: number | string | null
   origin_artist: string
   origin_title: string
   origin_version: string | null
@@ -44,6 +45,7 @@ type DownloadAttemptRow = {
 export type DownloadAttemptCreateInput = {
   wantListId: number | null
   status: DownloadAttemptStatus
+  originRecordingId?: number | null
   originArtist: string
   originTitle: string
   originVersion?: string | null
@@ -90,7 +92,7 @@ export class DownloadAttemptStore {
 
   private readonly columns = `
     id, want_list_id, status,
-    origin_artist, origin_title, origin_version, origin_year, origin_album, origin_label,
+    origin_recording_id, origin_artist, origin_title, origin_version, origin_year, origin_album, origin_label,
     origin_source_collection_filename, origin_discogs_release_id, origin_discogs_track_position,
     search_query, slskd_search_id, username, remote_filename, remote_size,
     bitrate, duration_seconds, extension, score, queue_length, has_free_upload_slot, upload_speed,
@@ -107,6 +109,7 @@ export class DownloadAttemptStore {
       id: toNumber(row.id),
       wantListId: row.want_list_id == null ? null : toNumber(row.want_list_id),
       status: row.status,
+      originRecordingId: row.origin_recording_id == null ? null : toNumber(row.origin_recording_id),
       originArtist: row.origin_artist,
       originTitle: row.origin_title,
       originVersion: row.origin_version ?? null,
@@ -144,20 +147,21 @@ export class DownloadAttemptStore {
   public async create(input: DownloadAttemptCreateInput): Promise<DownloadAttempt> {
     const row = (await this.db.query<DownloadAttemptRow>(
       `INSERT INTO download_attempts (
-         want_list_id, status, origin_artist, origin_title, origin_version, origin_year, origin_album, origin_label,
+         want_list_id, status, origin_recording_id, origin_artist, origin_title, origin_version, origin_year, origin_album, origin_label,
          origin_source_collection_filename, origin_discogs_release_id, origin_discogs_track_position,
          search_query, slskd_search_id, username, remote_filename, remote_size,
          bitrate, duration_seconds, extension, score, queue_length, has_free_upload_slot, upload_speed,
          is_locked, raw_candidate_json, expected_local_filename, local_filename, local_filesize, error_message,
          requested_at, completed_at
        )
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,
          CASE WHEN $2 IN ('requested','downloading') THEN now() ELSE NULL END,
          CASE WHEN $2 = 'downloaded' THEN now() ELSE NULL END)
        RETURNING ${this.columns}`,
       [
         input.wantListId,
         input.status,
+        input.originRecordingId ?? null,
         input.originArtist,
         input.originTitle,
         input.originVersion ?? null,

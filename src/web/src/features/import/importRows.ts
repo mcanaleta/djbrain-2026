@@ -10,6 +10,7 @@ export type ImportRow = CollectionItem & {
 
 export type ImportTracksTableRow = {
   id: number
+  legacyIds: number[]
   key: string
   artist: string
   title: string
@@ -62,14 +63,25 @@ function normalizeGroupTitle(value: string): string {
 }
 
 function importGroupKey(row: ImportRow): string {
+  if (row.recordingId != null) return `recording:${row.recordingId}`
+  return importFallbackGroupKey(row)
+}
+
+function importFallbackGroupKey(row: ImportRow): string {
   const matchedTitle = row.importMatchTitle
     ? `${row.importMatchTitle}${row.importMatchVersion ? ` (${row.importMatchVersion})` : ''}`
     : null
-  if (row.recordingId != null) return `recording:${row.recordingId}`
   if (row.importMatchArtist && matchedTitle) {
     return `match:${normalizeGroupText(row.importMatchArtist)}:${normalizeGroupTitle(matchedTitle)}`
   }
   return row.importTrackKey || `parsed:${normalizeGroupText(row.artist)}:${normalizeGroupTitle(row.title)}`
+}
+
+function importLegacyGroupKeys(row: ImportRow): string[] {
+  return [...new Set([
+    importFallbackGroupKey(row),
+    `parsed:${normalizeGroupText(row.artist)}:${normalizeGroupTitle(row.title)}`
+  ])]
 }
 
 function importRecordId(key: string): number {
@@ -112,14 +124,17 @@ export function groupImportRows(rows: ImportRow[]): ImportTracksTableRow[] {
   return [...groups.entries()]
     .map(([key, group]) => {
       const bestFile = [...group].sort(compareImportRows)[0]
+      const id = importRecordId(key)
+      const usesRecording = key.startsWith('recording:')
       return {
-        id: importRecordId(key),
+        id,
+        legacyIds: [...new Set(group.flatMap((row) => importLegacyGroupKeys(row).map(importRecordId)).filter((legacyId) => legacyId !== id))],
         key,
-        artist: bestFile.importMatchArtist || bestFile.artist,
-        title: bestFile.importMatchTitle
+        artist: usesRecording ? bestFile.artist : bestFile.importMatchArtist || bestFile.artist,
+        title: !usesRecording && bestFile.importMatchTitle
           ? `${bestFile.importMatchTitle}${bestFile.importMatchVersion ? ` (${bestFile.importMatchVersion})` : ''}`
           : bestFile.title,
-        year: bestFile.importMatchYear || bestFile.year,
+        year: usesRecording ? bestFile.year : bestFile.importMatchYear || bestFile.year,
         releaseTitle: bestFile.importReleaseTitle ?? null,
         replacementFilename:
           group.find((row) => row.importExactExistingFilename)?.importExactExistingFilename ?? null,

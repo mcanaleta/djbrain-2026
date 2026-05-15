@@ -128,6 +128,7 @@ export function buildDownloadRequests(input: BuildDownloadRequestsInput): Downlo
 
 export type UpgradeWantedMigrationInput = {
   id: number
+  recordingId?: number | null
   collectionFilename: string
   status: UpgradeCaseStatus
   searchArtist: string
@@ -138,6 +139,7 @@ export type UpgradeWantedMigrationInput = {
 
 export function buildUpgradeWantedMigration(input: UpgradeWantedMigrationInput) {
   const want = {
+    recordingId: input.recordingId ?? null,
     artist: input.searchArtist,
     title: input.searchTitle,
     version: input.searchVersion,
@@ -147,6 +149,7 @@ export function buildUpgradeWantedMigration(input: UpgradeWantedMigrationInput) 
   }
   const attempts = input.localCandidates.map((candidate) => ({
     status: 'downloaded' as const,
+    originRecordingId: input.recordingId ?? null,
     originArtist: input.searchArtist,
     originTitle: input.searchTitle,
     originVersion: input.searchVersion,

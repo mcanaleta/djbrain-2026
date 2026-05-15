@@ -143,6 +143,7 @@ export function registerWantListRoutes(app: Express, deps: WantListRouteDeps): v
         await service.downloadAttemptCreate({
           wantListId: id,
           status: 'queued',
+          originRecordingId: item.recordingId,
           originArtist: item.artist,
           originTitle: item.title,
           originVersion: item.version,

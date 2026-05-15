@@ -74,6 +74,7 @@ describe('buildUpgradeWantedMigration', () => {
   it('converts upgrade local candidates into downloaded attempts with origin snapshots', () => {
     const migration = buildUpgradeWantedMigration({
       id: 4,
+      recordingId: 88,
       collectionFilename: 'songs/1996/Farmdoctors - El Guebo.mp3',
       status: 'downloaded',
       searchArtist: 'Farmdoctors',
@@ -90,7 +91,9 @@ describe('buildUpgradeWantedMigration', () => {
     })
 
     assert.equal(migration.want.wantKind, 'replacement')
+    assert.equal(migration.want.recordingId, 88)
     assert.equal(migration.want.sourceCollectionFilename, 'songs/1996/Farmdoctors - El Guebo.mp3')
+    assert.equal(migration.attempts[0]?.originRecordingId, 88)
     assert.equal(migration.attempts[0]?.originArtist, 'Farmdoctors')
     assert.equal(migration.attempts[0]?.localFilename, 'soulseek/complete/Farmdoctors/el-guebo.flac')
     assert.equal(migration.attempts[0]?.status, 'downloaded')

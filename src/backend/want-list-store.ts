@@ -7,6 +7,7 @@ type Queryable = Pick<Pool, 'query'> | Pick<PoolClient, 'query'>
 type WantListRow = {
   id: number | string
   want_kind: string | null
+  recording_id: number | string | null
   artist: string
   title: string
   version: string | null
@@ -40,7 +41,7 @@ function toIso(value: Date | string): string {
 
 export class WantListStore {
   private readonly columns = `
-    id, want_kind, artist, title, version, length, year, album, label, added_at,
+    id, want_kind, recording_id, artist, title, version, length, year, album, label, added_at,
     pipeline_status, source_collection_filename, target_download_count, auto_download_enabled,
     last_search_at, next_search_at, selected_download_id,
     search_id, search_result_count, best_candidates_json,
@@ -58,6 +59,7 @@ export class WantListStore {
     return {
       id: toNumber(row.id),
       wantKind: row.want_kind === 'replacement' ? 'replacement' : 'missing',
+      recordingId: row.recording_id == null ? null : toNumber(row.recording_id),
       artist: row.artist,
       title: row.title,
       version: row.version ?? null,
@@ -90,14 +92,15 @@ export class WantListStore {
     const normalized = normalizeWantListInput(input)
     const result = await this.db.query<WantListRow>(
       `INSERT INTO want_list (
-         want_kind, artist, title, version, length, year, album, label,
+         want_kind, recording_id, artist, title, version, length, year, album, label,
          discogs_release_id, discogs_track_position, discogs_entity_type,
          source_collection_filename, target_download_count, auto_download_enabled
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
        RETURNING ${this.columns}`,
       [
         normalized.wantKind,
+        normalized.recordingId ?? null,
         normalized.artist,
         normalized.title,
         normalized.version ?? null,
@@ -126,12 +129,13 @@ export class WantListStore {
     const normalized = normalizeWantListInput(input)
     const result = await this.db.query<WantListRow>(
       `UPDATE want_list
-       SET want_kind = $1, artist = $2, title = $3, version = $4, length = $5, year = $6, album = $7, label = $8,
-           source_collection_filename = $9, target_download_count = $10, auto_download_enabled = $11
-       WHERE id = $12
+       SET want_kind = $1, recording_id = $2, artist = $3, title = $4, version = $5, length = $6, year = $7, album = $8, label = $9,
+           source_collection_filename = $10, target_download_count = $11, auto_download_enabled = $12
+       WHERE id = $13
        RETURNING ${this.columns}`,
       [
         normalized.wantKind,
+        normalized.recordingId ?? null,
         normalized.artist,
         normalized.title,
         normalized.version ?? null,
@@ -156,6 +160,10 @@ export class WantListStore {
     if ('pipelineStatus' in patch) {
       params.push(patch.pipelineStatus ?? 'idle')
       parts.push(`pipeline_status = $${params.length}`)
+    }
+    if ('recordingId' in patch) {
+      params.push(patch.recordingId ?? null)
+      parts.push(`recording_id = $${params.length}`)
     }
     if ('sourceCollectionFilename' in patch) {
       params.push(patch.sourceCollectionFilename ?? null)
