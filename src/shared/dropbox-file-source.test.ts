@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
   buildDropboxScanPaths,
+  dropboxCachePathForFilename,
+  dropboxPathForFilename,
   dropboxEntriesToFileStates,
   readDropboxFileSourceConfig
 } from '../backend/dropbox-file-source.ts'
@@ -33,6 +35,30 @@ describe('buildDropboxScanPaths', () => {
       }),
       ['/music/songs', '/music/soulseek/complete', '/music/hasoulseek/complete']
     )
+  })
+})
+
+describe('dropboxPathForFilename', () => {
+  it('maps a collection-relative filename to a Dropbox API path', () => {
+    assert.equal(
+      dropboxPathForFilename({
+        accessToken: 'token',
+        musicPath: '/music',
+        songsFolderPath: 'songs',
+        downloadFolderPaths: []
+      }, 'songs/1999/A - B.mp3'),
+      '/music/songs/1999/A - B.mp3'
+    )
+  })
+})
+
+describe('dropboxCachePathForFilename', () => {
+  it('keeps cached files inside the configured cache root', () => {
+    assert.match(
+      dropboxCachePathForFilename('/tmp/cache', 'songs/A - B.mp3').replace(/\\/g, '/'),
+      /\/tmp\/cache\/songs\/A - B\.mp3$/u
+    )
+    assert.throws(() => dropboxCachePathForFilename('/tmp/cache', '../escape.mp3'), /outside/)
   })
 })
 

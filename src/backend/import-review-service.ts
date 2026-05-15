@@ -23,7 +23,7 @@ type BuildImportReviewInput = {
 
 type ImportReviewServiceDeps = {
   getCollectionService: () => CollectionService
-  resolveMusicRelativePath: (filename: string) => string
+  resolveMusicRelativePath: (filename: string) => string | Promise<string>
   getAudioDuration: (filePath: string) => Promise<number | null>
   isDownloadFilename: (filename: string) => boolean
   discogsMatchService: DiscogsMatchService
@@ -139,7 +139,7 @@ export class ImportReviewService {
       Promise.all(
         similarItems.map(async (item) => ({
           ...item,
-          duration: await this.deps.getAudioDuration(this.deps.resolveMusicRelativePath(item.filename))
+          duration: await this.deps.getAudioDuration(await this.deps.resolveMusicRelativePath(item.filename))
         }))
       ),
       sourceAnalysis !== undefined

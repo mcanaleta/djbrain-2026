@@ -12,7 +12,7 @@ type ImportReviewBackgroundServiceDeps = {
   fileAnalysisService: FileAnalysisService
   importReviewService: ImportReviewService
   queue: ImportProcessingQueue
-  resolveMusicRelativePath: (filename: string) => string
+  resolveMusicRelativePath: (filename: string) => string | Promise<string>
   getSettings: () => AppSettings
 }
 
@@ -73,7 +73,7 @@ export class ImportReviewBackgroundService {
     parsedTitle: string | null
     parsedVersion: string | null
   }): Promise<void> {
-    const absolutePath = this.deps.resolveMusicRelativePath(next.filename)
+    const absolutePath = await this.deps.resolveMusicRelativePath(next.filename)
     const preprocessed = parseImportFilename(next.filename)
     const parsed =
       parseSongFilename(basename(next.filename)) ??

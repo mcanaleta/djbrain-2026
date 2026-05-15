@@ -95,7 +95,7 @@ type RecordingIdentityServiceDeps = {
   discogsMatchService: DiscogsMatchService
   musicbrainzService: MusicBrainzService
   onlineSearchService: OnlineSearchService
-  resolveMusicRelativePath: (filename: string) => string
+  resolveMusicRelativePath: (filename: string) => string | Promise<string>
   getSettings: () => AppSettings
 }
 
@@ -640,7 +640,7 @@ export class RecordingIdentityService {
   }
 
   async identifyFile(filename: string, options: { forceExternal?: boolean } = {}): Promise<IdentificationDecision> {
-    const absolutePath = this.deps.resolveMusicRelativePath(filename)
+    const absolutePath = await this.deps.resolveMusicRelativePath(filename)
     await this.deps.fileAnalysisService.get(filename, absolutePath).catch(() => null)
     const [item, audioHash, rejectedKeys, tags] = await Promise.all([
       this.deps.collectionService.getItem(filename),

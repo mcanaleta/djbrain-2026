@@ -1,3 +1,8 @@
+import { createWriteStream } from 'node:fs'
+import { mkdir, rename, stat, unlink } from 'node:fs/promises'
+import { dirname, relative, resolve } from 'node:path'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import { isSupportedAudioFile, normalizeFilename, normalizeRelativeFolderPath } from './collection-service-helpers.ts'
 
 export type DropboxFileSourceConfig = {
@@ -54,6 +59,18 @@ export function buildDropboxScanPaths(config: DropboxFileSourceConfig): string[]
   return [...new Set([config.songsFolderPath, ...config.downloadFolderPaths].filter(Boolean).map((path) => joinDropboxPath(config.musicPath, path)))]
 }
 
+export function dropboxPathForFilename(config: DropboxFileSourceConfig, filename: string): string {
+  return joinDropboxPath(config.musicPath, normalizeFilename(filename).replace(/^\/+/, ''))
+}
+
+export function dropboxCachePathForFilename(cacheRoot: string, filename: string): string {
+  const root = resolve(cacheRoot)
+  const target = resolve(root, normalizeFilename(filename).replace(/^\/+/, ''))
+  const rel = relative(root, target)
+  if (!rel || rel === '..' || rel.startsWith('../') || rel.startsWith('..\\')) throw new Error('Dropbox cache target is outside cache root.')
+  return target
+}
+
 export function dropboxEntriesToFileStates(config: DropboxFileSourceConfig, entries: DropboxEntry[]): DropboxFileState[] {
   const musicPath = normalizeDropboxPath(config.musicPath)
   const rootParts = musicPath ? musicPath.split('/').filter(Boolean).length : 0
@@ -100,4 +117,34 @@ export async function listDropboxAudioFiles(config: DropboxFileSourceConfig, fet
     }
   }
   return dropboxEntriesToFileStates(config, entries)
+}
+
+export async function downloadDropboxFileToCache(
+  config: DropboxFileSourceConfig,
+  filename: string,
+  cacheRoot: string,
+  expectedSize?: number | null,
+  fetcher: FetchLike = fetch
+): Promise<string> {
+  const cachePath = dropboxCachePathForFilename(cacheRoot, filename)
+  const cached = await stat(cachePath).catch(() => null)
+  if (cached?.isFile() && (!expectedSize || cached.size === expectedSize)) return cachePath
+  await mkdir(dirname(cachePath), { recursive: true })
+  const tempPath = `${cachePath}.tmp-${process.pid}-${Date.now()}`
+  const response = await fetcher('https://content.dropboxapi.com/2/files/download', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${config.accessToken}`,
+      'Dropbox-API-Arg': JSON.stringify({ path: dropboxPathForFilename(config, filename) })
+    }
+  })
+  if (!response.ok || !response.body) throw new Error(`Dropbox download failed (${response.status}): ${await response.text()}`)
+  try {
+    await pipeline(Readable.fromWeb(response.body), createWriteStream(tempPath))
+    await rename(tempPath, cachePath)
+    return cachePath
+  } catch (error) {
+    await unlink(tempPath).catch(() => undefined)
+    throw error
+  }
 }

@@ -6,6 +6,7 @@ import { promisify } from 'node:util'
 import { AudioAnalysisService } from '../src/backend/audio-analysis-service.ts'
 import { CollectionService } from '../src/backend/collection-service.ts'
 import { DiscogsMatchService } from '../src/backend/discogs-match-service.ts'
+import { downloadDropboxFileToCache, readDropboxFileSourceConfig } from '../src/backend/dropbox-file-source.ts'
 import { FileAnalysisService } from '../src/backend/file-analysis-service.ts'
 import { IdentificationBackgroundService } from '../src/backend/identification-background-service.ts'
 import { ImportProcessingQueue } from '../src/backend/import-processing-queue.ts'
@@ -46,6 +47,8 @@ async function assertDirectory(path: string, label: string): Promise<void> {
 
 async function main(): Promise<void> {
   const settings = readSettings()
+  const dropboxConfig = readDropboxFileSourceConfig(settings)
+  const dropboxCacheRoot = resolve(process.env.DJBRAIN_DATA_DIR ?? '.djbrain-data', 'dropbox-cache')
   const options = readProcessWorkerOptions({
     args: process.argv.slice(2),
     env: process.env,
@@ -56,14 +59,20 @@ async function main(): Promise<void> {
     defaultLeaseSeconds: 300
   })
   const collectionService = new CollectionService({ connectionString: requireConfig(), watchFileSystem: false })
-  await assertDirectory(settings.musicFolderPath, 'Music root')
-  await assertDirectory(resolve(settings.musicFolderPath, settings.songsFolderPath), 'Songs folder')
+  if (!dropboxConfig) {
+    await assertDirectory(settings.musicFolderPath, 'Music root')
+    await assertDirectory(resolve(settings.musicFolderPath, settings.songsFolderPath), 'Songs folder')
+  }
   const audioAnalysisService = new AudioAnalysisService()
   const fileAnalysisService = new FileAnalysisService({ getCollectionService: () => collectionService, audioAnalysisService })
   const taggerService = new TaggerService()
   const onlineSearchService = new OnlineSearchService()
   const discogsMatchService = new DiscogsMatchService()
-  const resolveMusicRelativePath = (filename: string): string => {
+  const resolveMusicRelativePath = async (filename: string): Promise<string> => {
+    if (dropboxConfig) {
+      const snapshot = await collectionService.readFileSnapshot(filename)
+      return downloadDropboxFileToCache(dropboxConfig, filename, dropboxCacheRoot, snapshot?.filesize ?? null)
+    }
     const root = resolve(settings.musicFolderPath)
     const absolute = resolve(root, normalizeFilename(filename))
     const rel = relative(root, absolute)
