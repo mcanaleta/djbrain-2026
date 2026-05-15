@@ -50,12 +50,12 @@ async function withImportService(test: (ctx: {
   root: string
   service: ImportService
   writes: Array<{ filePath: string; tags: AudioTags }>
-}) => Promise<void>) {
+}) => Promise<void>, options: { readTags?: (filePath: string) => AudioTags | null } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'djbrain-import-'))
   const writes: Array<{ filePath: string; tags: AudioTags }> = []
   const tagger = {
     supportsFile: (filePath: string) => filePath.toLowerCase().endsWith('.mp3'),
-    readTags: (filePath: string) => filePath.includes('Existing.mp3') ? oldTags : null,
+    readTags: options.readTags ?? ((filePath: string) => filePath.includes('Existing.mp3') ? oldTags : null),
     writeTags: async (filePath: string, tags: AudioTags) => {
       writes.push({ filePath, tags })
       return true
@@ -105,5 +105,23 @@ describe('ImportService', () => {
       assert.equal(writes[0]?.filePath.endsWith('.mp3'), true)
       assert.deepEqual(writes[0]?.tags, oldTags)
     })
+  })
+
+  it('keeps the existing folder year when replacement tags read as zero', async () => {
+    await withImportService(async ({ root, service, writes }) => {
+      const source = join(root, 'download.flac')
+      const target = join(root, 'songs/1997/Existing.mp3')
+      await writeFile(source, 'flac')
+      await mkdir(join(root, 'songs/1997'), { recursive: true })
+      await writeFile(target, 'old-mp3')
+
+      const result = await service.importFileWithKnownMatch(settings(root), match, source, null, {
+        conflictStrategy: 'replace',
+        replaceRelativePath: 'songs/1997/Existing.mp3'
+      })
+
+      assert.equal(result.status, 'replaced')
+      assert.equal(writes[0]?.tags.year, '1997')
+    }, { readTags: (filePath) => filePath.includes('Existing.mp3') ? { ...oldTags, year: '0' } : null })
   })
 })

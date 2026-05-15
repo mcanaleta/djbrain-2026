@@ -4,7 +4,7 @@ import { join, extname, dirname, basename, resolve } from 'node:path'
 import type { AppSettings } from './settings-store.ts'
 import type { OnlineSearchService } from './online-search-service.ts'
 import type { DiscogsMatchService } from './discogs-match-service.ts'
-import type { TaggerService } from './tagger-service.ts'
+import type { AudioTags, TaggerService } from './tagger-service.ts'
 import type { DiscogsTrackMatch } from '../shared/discogs-match.ts'
 import { parseImportFilename } from '../shared/import-filename.ts'
 import {
@@ -127,6 +127,22 @@ function buildArchivePath(settings: AppSettings, sourceFilename: string): string
   const songsPrefix = settings.songsFolderPath.replace(/\\/g, '/').replace(/\/+$/, '')
   const suffix = normalized.startsWith(`${songsPrefix}/`) ? normalized.slice(songsPrefix.length + 1) : basename(normalized)
   return join(settings.musicFolderPath, '_replaced', new Date().toISOString().slice(0, 10), suffix)
+}
+
+function validYear(year: string | null | undefined): string | null {
+  const value = year?.trim()
+  return value && /^(19|20)\d{2}$/.test(value) ? value : null
+}
+
+function yearFromSongsPath(settings: AppSettings, filename: string): string | null {
+  const normalized = filename.replace(/\\/g, '/').replace(/^\/+/, '')
+  const songsPrefix = settings.songsFolderPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+  return validYear(normalized.startsWith(`${songsPrefix}/`) ? normalized.slice(songsPrefix.length + 1).split('/')[0] : null)
+}
+
+function replacementTags(settings: AppSettings, replaceRelativePath: string, existingTags: AudioTags | null, fallbackTags: AudioTags): AudioTags {
+  const tags = existingTags ?? fallbackTags
+  return { ...tags, year: validYear(tags.year) ?? yearFromSongsPath(settings, replaceRelativePath) ?? validYear(fallbackTags.year) }
 }
 
 function buildTags(match: DiscogsTrackMatch) {
@@ -288,7 +304,7 @@ export class ImportService {
         await this.cleanupPreparedFile(prepared)
         return { status: 'error', message: `Replacement target not found: ${replaceRelativePath}` }
       }
-      const replaceTags = this.tagger.readTags(replaceAbsPath) ?? tags
+      const replaceTags = replacementTags(settings, replaceRelativePath, this.tagger.readTags(replaceAbsPath), tags)
       await mkdir(dirname(replaceAbsPath), { recursive: true })
       await this.tagger.writeTags(prepared.path, replaceTags)
       const archivePath = await findAvailableArchivePath(buildArchivePath(settings, replaceRelativePath))
