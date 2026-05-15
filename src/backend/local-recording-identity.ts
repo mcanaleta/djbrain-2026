@@ -4,7 +4,7 @@ import type { FileAnalysisService } from './file-analysis-service.ts'
 import type { AudioTags } from './tagger-service.ts'
 import type { TaggerService } from './tagger-service.ts'
 import { basenameOfFilename, normalizeFilename, normalizeSearchText } from './collection-service-helpers.ts'
-import type { IdentificationDecision, RecordingClaimInput } from './recording-identity-service.ts'
+import type { IdentificationDecision, RecordingClaimInput, SourceClaimMatch } from './recording-identity-service.ts'
 import { parseImportFilename } from '../shared/import-filename.ts'
 import { parseTrackTitle } from '../shared/track-title-parser.ts'
 
@@ -47,6 +47,18 @@ function hasStrongFilenameSignal(filename: string): boolean {
   return /(?:\s-\s|_-_)/.test(basenameOfFilename(filename))
 }
 
+function sameIdentity(left: string | null | undefined, right: string | null | undefined): boolean {
+  const leftNorm = normalizeSearchText(left ?? '')
+  const rightNorm = normalizeSearchText(right ?? '')
+  return !leftNorm || !rightNorm || leftNorm === rightNorm
+}
+
+function sameTrackPosition(left: string | null | undefined, right: string | null | undefined): boolean {
+  const leftNumber = left?.match(/\d+/)?.[0]?.replace(/^0+/, '') ?? null
+  const rightNumber = right?.match(/\d+/)?.[0]?.replace(/^0+/, '') ?? null
+  return leftNumber && rightNumber ? leftNumber === rightNumber : sameIdentity(left, right)
+}
+
 function localClaim(provider: 'tags' | 'filename', filename: string, confidence: number, value: {
   artist: string | null
   title: string | null
@@ -75,6 +87,7 @@ function localClaim(provider: 'tags' | 'filename', filename: string, confidence:
 
 function discogsClaim(tags: AudioTags, canonical: { artist: string | null; title: string | null; version: string | null; year: string | null }, durationSeconds: number | null): RecordingClaimInput | null {
   if (!tags.discogsReleaseId) return null
+  if (tags.discogsTrackPosition && tags.trackPosition && !sameTrackPosition(tags.discogsTrackPosition, tags.trackPosition)) return null
   const trackKey = normalizeSearchText(tags.discogsTrackPosition || tags.trackPosition || tags.title) || 'unknown'
   return {
     provider: 'discogs',
@@ -89,6 +102,31 @@ function discogsClaim(tags: AudioTags, canonical: { artist: string | null; title
     durationSeconds,
     confidence: 90,
     rawJson: JSON.stringify(tags)
+  }
+}
+
+function canonicalFitsLocalEvidence(decision: IdentificationDecision, matched: { artist: string | null; title: string | null; version: string | null } | null): boolean {
+  const canonical = decision.recordingCanonical
+  return !canonical || !matched || (
+    sameIdentity(canonical.artist, matched.artist) &&
+    sameIdentity(canonical.title, matched.title) &&
+    sameIdentity(canonical.version, matched.version)
+  )
+}
+
+function sourceMatchFitsLocalEvidence(decision: IdentificationDecision, match: SourceClaimMatch): boolean {
+  return canonicalFitsLocalEvidence(decision, match.canonical)
+}
+
+function withoutConflictingClaims(decision: IdentificationDecision, blockedKeys: Set<string>): IdentificationDecision {
+  const acceptedClaims = decision.acceptedClaims.filter((claim) => !blockedKeys.has(claim.externalKey))
+  return {
+    ...decision,
+    acceptedClaims,
+    chosenExternalKey: acceptedClaims.find((claim) => claim.provider === 'discogs')?.externalKey ??
+      acceptedClaims.find((claim) => claim.provider === 'tags')?.externalKey ??
+      acceptedClaims.find((claim) => claim.provider === 'filename')?.externalKey ??
+      null
   }
 }
 
@@ -224,15 +262,22 @@ export class LocalRecordingIdentityService {
   private async attachExistingRecording(decision: IdentificationDecision): Promise<IdentificationDecision> {
     if (decision.audioHash) {
       const match = await this.deps.collectionService.findRecordingByAudioHash(decision.audioHash)
-      if (match) return withRecordingMatch(decision, match.recordingId, 'audio_hash', 100, decision.chosenExternalKey)
+      if (match && canonicalFitsLocalEvidence(decision, match.canonical)) {
+        return withRecordingMatch(decision, match.recordingId, 'audio_hash', 100, decision.chosenExternalKey)
+      }
     }
     const sourceMatches = await this.deps.collectionService.findSourceClaimMatches(
       decision.acceptedClaims.map((claim) => claim.externalKey)
     )
-    const best = sourceMatches.sort((left, right) => right.confidence - left.confidence)[0] ?? null
+    const incompatibleKeys = new Set(sourceMatches.filter((match) => !sourceMatchFitsLocalEvidence(decision, match)).map((match) => match.externalKey))
+    const blockedKeys = new Set([...incompatibleKeys].filter((key) => !key.startsWith('local:')))
+    const safeDecision = blockedKeys.size ? withoutConflictingClaims(decision, blockedKeys) : decision
+    const best = sourceMatches
+      .filter((match) => !incompatibleKeys.has(match.externalKey))
+      .sort((left, right) => right.confidence - left.confidence)[0] ?? null
     return best
-      ? withRecordingMatch(decision, best.recordingId, 'source_claim', Math.max(85, best.confidence), best.externalKey)
-      : decision
+      ? withRecordingMatch(safeDecision, best.recordingId, 'source_claim', Math.max(85, best.confidence), best.externalKey)
+      : safeDecision
   }
 
   private async saveTags(filename: string, snapshot: { filesize: number; mtimeMs: number }, tags: AudioTags | null): Promise<void> {

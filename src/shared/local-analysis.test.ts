@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { buildAudioOnlyFfmpegArgs } from '../backend/audio-analysis-service.ts'
-import { buildLocalRecordingDecision } from '../backend/local-recording-identity.ts'
+import { buildLocalRecordingDecision, LocalRecordingIdentityService } from '../backend/local-recording-identity.ts'
 import { buildLocalAnalysisTargets, buildSongsOnlySyncPlan } from '../backend/local-song-sync.ts'
 
 const tags = {
@@ -45,6 +45,61 @@ describe('buildLocalRecordingDecision', () => {
     })
 
     assert.ok(decision.acceptedClaims.some((claim) => claim.externalKey === 'discogs:release:123:track:a1'))
+  })
+
+  it('ignores embedded Discogs track positions that conflict with file track tags', () => {
+    const decision = buildLocalRecordingDecision({
+      filename: 'songs/2002/DJ Mel - Atomik Base.mp3',
+      audioHash: 'hash-1',
+      durationSeconds: 260,
+      tags: { ...tags, artist: 'DJ Mel', title: 'Atomik Base', album: 'Fly', year: null, trackPosition: '02/18', discogsReleaseId: 407430, discogsTrackPosition: 'Z' }
+    })
+
+    assert.equal(decision.acceptedClaims.some((claim) => claim.provider === 'discogs'), false)
+  })
+
+  it('does not attach conflicting source-claim matches to local file evidence', async () => {
+    const saved = { decision: null as ReturnType<typeof buildLocalRecordingDecision> | null }
+    const service = new LocalRecordingIdentityService({
+      collectionService: {
+        readFileSnapshot: async () => ({ filesize: 1, mtimeMs: 1 }),
+        readStoredAudioHash: async () => 'hash-1',
+        findRecordingByAudioHash: async () => ({
+          recordingId: 3013,
+          canonical: { artist: 'DJ Mel', title: 'Fly', version: null, year: '2002' }
+        }),
+        findSourceClaimMatches: async (keys: string[]) => [
+          keys.includes('discogs:release:407430:track:z') ? {
+            claimId: 1,
+            recordingId: 3013,
+            externalKey: 'discogs:release:407430:track:z',
+            confidence: 90,
+            canonical: { artist: 'DJ Mel', title: 'Fly', version: null, year: '2002' }
+          } : null,
+          keys.includes('local:tags:songs/2002/DJ Mel - Atomik Base.mp3') ? {
+            claimId: 2,
+            recordingId: 3013,
+            externalKey: 'local:tags:songs/2002/DJ Mel - Atomik Base.mp3',
+            confidence: 80,
+            canonical: { artist: 'DJ Mel', title: 'Fly', version: null, year: '2002' }
+          } : null
+        ].filter(Boolean),
+        saveFileTagState: async () => {},
+        saveIdentificationDecision: async (_filename: string, decision: ReturnType<typeof buildLocalRecordingDecision>) => {
+          saved.decision = decision
+        }
+      },
+      fileAnalysisService: { get: async () => ({ durationSeconds: 260 }) },
+      taggerService: { readTags: () => ({ ...tags, artist: 'DJ Mel', title: 'Atomik Base', album: 'Fly', year: null, trackPosition: null, discogsReleaseId: 407430, discogsTrackPosition: 'Z' }) },
+      resolveMusicRelativePath: (filename: string) => filename
+    } as never)
+
+    const result = await service.analyzeFile('songs/2002/DJ Mel - Atomik Base.mp3')
+
+    assert.equal(result.recordingId, null)
+    assert.equal(saved.decision?.createRecording?.canonical.title, 'Atomik Base')
+    assert.equal(saved.decision?.acceptedClaims.some((claim) => claim.provider === 'discogs'), false)
+    assert.equal(saved.decision?.acceptedClaims.some((claim) => claim.externalKey.startsWith('local:tags:')), true)
   })
 
   it('falls back to filename inference when tags are absent', () => {
