@@ -23,6 +23,8 @@ import {
 import { WantListStore } from './want-list-store.ts'
 import { DownloadAttemptStore, type DownloadAttemptCreateInput, type DownloadAttemptPatch } from './download-attempt-store.ts'
 import { buildExpectedDownloadFilename } from './downloader-worker-planning.ts'
+import { PROCESS_LEASE_SCHEMA_SQL, ProcessLeaseStore, type ProcessLease, type ProcessLeaseInput } from './process-lease-store.ts'
+import { ensureAppSchemaVersion } from './runtime-governance.ts'
 import { UpgradeCaseStore, type UpgradeCaseCreateInput, type UpgradeCasePatch } from './upgrade-case-store.ts'
 import type {
   AudioAnalysis,
@@ -434,6 +436,8 @@ export class CollectionService {
 
   private readonly downloadAttemptStore: DownloadAttemptStore
 
+  private readonly processLeaseStore: ProcessLeaseStore
+
   private readonly upgradeCaseStore: UpgradeCaseStore
 
   private readonly onUpdated?: (status: CollectionSyncStatus) => void
@@ -479,6 +483,7 @@ export class CollectionService {
     this.pool = new Pool({ connectionString: options.connectionString, max: 8 })
     this.wantListStore = new WantListStore(this.pool)
     this.downloadAttemptStore = new DownloadAttemptStore(this.pool)
+    this.processLeaseStore = new ProcessLeaseStore(this.pool)
     this.upgradeCaseStore = new UpgradeCaseStore(this.pool)
     this.onUpdated = options.onUpdated
     this.onImportQueueChanged = options.onImportQueueChanged
@@ -493,6 +498,10 @@ export class CollectionService {
 
   private async ensureReady(): Promise<void> {
     await this.ready
+  }
+
+  private async ensureSchemaVersion(write: boolean = true): Promise<void> {
+    await ensureAppSchemaVersion(this.pool, write)
   }
 
   public async reconfigure(settings: AppSettings): Promise<void> {
@@ -1255,7 +1264,10 @@ export class CollectionService {
   }
 
   private async initializeSchema(): Promise<void> {
+    await this.ensureSchemaVersion(false)
     await this.pool.query(`
+      ${PROCESS_LEASE_SCHEMA_SQL}
+
       CREATE TABLE IF NOT EXISTS collection_files (
         id BIGINT,
         filename TEXT PRIMARY KEY,
@@ -1648,6 +1660,7 @@ export class CollectionService {
             AND existing_attempt.local_filename = candidate->>'filename'
         );
     `)
+    await this.ensureSchemaVersion()
     await this.materializeRecordingDurations()
   }
 
@@ -4140,6 +4153,21 @@ export class CollectionService {
     await this.ensureReady()
     const attempt = (await this.downloadAttemptStore.listByWantListId(wantListId)).find((item) => item.id === downloadId)
     return attempt ? this.wantListStore.updatePipeline(wantListId, { selectedDownloadId: downloadId }) : null
+  }
+
+  public async acquireProcessLease(input: ProcessLeaseInput): Promise<ProcessLease | null> {
+    await this.ensureReady()
+    return this.processLeaseStore.acquire(input)
+  }
+
+  public async touchProcessLease(role: string, ownerId: string, leaseMs: number): Promise<boolean> {
+    await this.ensureReady()
+    return this.processLeaseStore.touch(role, ownerId, leaseMs)
+  }
+
+  public async releaseProcessLease(role: string, ownerId: string): Promise<void> {
+    await this.ensureReady()
+    await this.processLeaseStore.release(role, ownerId)
   }
 
   public async withDownloaderLock<T>(work: () => Promise<T>): Promise<T | null> {

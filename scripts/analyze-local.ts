@@ -6,6 +6,7 @@ import { CollectionService } from '../src/backend/collection-service.ts'
 import { FileAnalysisService } from '../src/backend/file-analysis-service.ts'
 import { LocalRecordingIdentityService } from '../src/backend/local-recording-identity.ts'
 import { buildLocalAnalysisTargets, buildSongsOnlySyncPlan, scanLocalSongFiles } from '../src/backend/local-song-sync.ts'
+import { ensureAppSchemaVersion } from '../src/backend/runtime-governance.ts'
 import { readSettings } from '../src/backend/settings-store.ts'
 import { TaggerService } from '../src/backend/tagger-service.ts'
 import { normalizeRelativeFolderPath } from '../src/backend/collection-service-helpers.ts'
@@ -63,6 +64,15 @@ async function listKnownFileStateReadOnly(connectionString: string) {
         `
       )
     ).rows.map((row) => ({ filename: row.filename, filesize: Number(row.filesize), mtimeMs: Number(row.mtimems) }))
+  } finally {
+    await pool.end()
+  }
+}
+
+async function assertCompatibleDatabase(connectionString: string): Promise<void> {
+  const pool = new Pool({ connectionString, max: 1 })
+  try {
+    await ensureAppSchemaVersion(pool, false)
   } finally {
     await pool.end()
   }
@@ -165,6 +175,7 @@ async function runPool<T>(items: T[], concurrency: number, worker: (item: T, ind
 async function main(): Promise<void> {
   const dbUrl = process.env['DJBRAIN_POSTGRES_URL']?.trim() ?? ''
   if (!dbUrl) throw new Error('DJBRAIN_POSTGRES_URL is required.')
+  await assertCompatibleDatabase(dbUrl)
   const options = readOptions()
   const songsRoot = join(options.musicRoot, options.songsFolder)
   await assertDirectory(options.musicRoot, 'Music root')

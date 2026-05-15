@@ -1,3 +1,4 @@
+import { hostname } from 'node:os'
 import { CollectionService, type DownloadAttempt, type WantListItem } from '../src/backend/collection-service.ts'
 import { readSettings, type AppSettings } from '../src/backend/settings-store.ts'
 import { SlskdService, type SlskdCandidate } from '../src/backend/slskd-service.ts'
@@ -7,6 +8,10 @@ type Options = {
   intervalSeconds: number
   limit: number
   dryRun: boolean
+  ownerId: string
+  priority: number
+  takeover: boolean
+  leaseMs: number
 }
 
 const sleep = (ms: number) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms))
@@ -16,13 +21,23 @@ function readArg(name: string): string | null {
   return index >= 0 ? (process.argv[index + 1] ?? null) : null
 }
 
+function readNumberArg(name: string, fallback: number): number {
+  const value = Number(readArg(name) ?? process.env[name.replace(/^--/, 'DJBRAIN_').replace(/-/g, '_').toUpperCase()] ?? fallback)
+  return Number.isFinite(value) ? Math.trunc(value) : fallback
+}
+
 function readOptions(): Options {
-  const interval = Number(readArg('--interval-seconds') ?? '60')
-  const limit = Number(readArg('--limit') ?? '10')
+  const interval = readNumberArg('--interval-seconds', 60)
+  const limit = readNumberArg('--limit', 10)
+  const leaseSeconds = readNumberArg('--lease-seconds', 45)
   return {
     intervalSeconds: Math.max(5, Number.isFinite(interval) ? Math.trunc(interval) : 60),
     limit: Math.max(1, Number.isFinite(limit) ? Math.trunc(limit) : 10),
-    dryRun: process.argv.includes('--dry-run')
+    dryRun: process.argv.includes('--dry-run'),
+    ownerId: readArg('--owner-id') ?? process.env.DJBRAIN_PROCESS_OWNER_ID?.trim() ?? `${hostname()}:${process.pid}`,
+    priority: Math.max(0, readNumberArg('--priority', 10)),
+    takeover: process.argv.includes('--takeover') || process.env.DJBRAIN_PROCESS_TAKEOVER === '1',
+    leaseMs: Math.max(10, leaseSeconds) * 1_000
   }
 }
 
@@ -169,11 +184,30 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => { stopped = true })
   try {
     while (!stopped) {
+      const lease = await service.acquireProcessLease({
+        role: 'downloader',
+        ownerId: options.ownerId,
+        hostname: hostname(),
+        pid: process.pid,
+        priority: options.priority,
+        takeover: options.takeover,
+        leaseMs: options.leaseMs,
+        takeoverReason: options.takeover ? 'explicit takeover' : null
+      })
+      if (!lease) {
+        console.log(`[downloader] lease held by another owner; owner=${options.ownerId} priority=${options.priority}`)
+        await sleep(options.intervalSeconds * 1_000)
+        continue
+      }
       const result = await service.withDownloaderLock(() => tick(settings, service, slskd, options))
       if (result === null) console.log('[downloader] another worker holds the lock')
+      if (!(await service.touchProcessLease('downloader', options.ownerId, options.leaseMs))) {
+        console.log('[downloader] lease lost')
+      }
       await sleep(options.intervalSeconds * 1_000)
     }
   } finally {
+    await service.releaseProcessLease('downloader', options.ownerId).catch(() => undefined)
     service.dispose()
   }
 }
