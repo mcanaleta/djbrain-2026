@@ -58,6 +58,18 @@ describe('buildLocalRecordingDecision', () => {
     assert.equal(decision.acceptedClaims.some((claim) => claim.provider === 'discogs'), false)
   })
 
+  it('ignores placeholder Discogs Z track positions without a file track tag', () => {
+    const decision = buildLocalRecordingDecision({
+      filename: 'songs/2003/Virus Infected - Liquid Attack Vol. 1.mp3',
+      audioHash: 'hash-1',
+      durationSeconds: 383,
+      tags: { ...tags, artist: 'Virus Infected', title: 'Liquid Attack Vol. 1', album: 'Vol. 2 - This Is My Life', year: null, trackPosition: null, discogsReleaseId: 734836, discogsTrackPosition: 'Z' }
+    })
+
+    assert.equal(decision.acceptedClaims.some((claim) => claim.provider === 'discogs'), false)
+    assert.equal(decision.createRecording?.canonical.title, 'Liquid Attack Vol. 1')
+  })
+
   it('does not attach conflicting source-claim matches to local file evidence', async () => {
     const saved = { decision: null as ReturnType<typeof buildLocalRecordingDecision> | null }
     const service = new LocalRecordingIdentityService({

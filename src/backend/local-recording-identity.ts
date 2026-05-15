@@ -59,6 +59,10 @@ function sameTrackPosition(left: string | null | undefined, right: string | null
   return leftNumber && rightNumber ? leftNumber === rightNumber : sameIdentity(left, right)
 }
 
+function isPlaceholderDiscogsPosition(value: string | null | undefined): boolean {
+  return normalizeSearchText(value ?? '') === 'z'
+}
+
 function localClaim(provider: 'tags' | 'filename', filename: string, confidence: number, value: {
   artist: string | null
   title: string | null
@@ -87,6 +91,7 @@ function localClaim(provider: 'tags' | 'filename', filename: string, confidence:
 
 function discogsClaim(tags: AudioTags, canonical: { artist: string | null; title: string | null; version: string | null; year: string | null }, durationSeconds: number | null): RecordingClaimInput | null {
   if (!tags.discogsReleaseId) return null
+  if (!tags.trackPosition && isPlaceholderDiscogsPosition(tags.discogsTrackPosition)) return null
   if (tags.discogsTrackPosition && tags.trackPosition && !sameTrackPosition(tags.discogsTrackPosition, tags.trackPosition)) return null
   const trackKey = normalizeSearchText(tags.discogsTrackPosition || tags.trackPosition || tags.title) || 'unknown'
   return {
