@@ -1172,17 +1172,17 @@ export class CollectionService {
         const review = parseImportReview(row.importreviewjson)
         const candidate = review?.candidates[review.selectedCandidateIndex ?? 0] ?? review?.candidates[0] ?? null
         const localMatch = pickImportReviewLocalMatch(review)
-        const parsedMatch = candidate || localMatch
+        const parsedExistingFilename = candidate || localMatch
           ? null
-          : await this.findExistingCollectionMatchByCanonical(buildDownloadExistingMatchCanonical({
+          : await this.findExistingCollectionFilenameByCanonical(buildDownloadExistingMatchCanonical({
               filename: row.filename,
               importArtist: row.importartist,
               importTitle: row.importtitle,
               importVersion: row.importversion,
               importYear: row.importyear
             }), prefixes)
-        const localCanonical = localMatch?.recordingCanonical ?? parsedMatch?.canonical ?? null
-        const existingFilename = candidate?.exactExistingFilename ?? localMatch?.filename ?? parsedMatch?.filename ?? null
+        const localCanonical = localMatch?.recordingCanonical ?? null
+        const existingFilename = candidate?.exactExistingFilename ?? localMatch?.filename ?? parsedExistingFilename
         const sourceFilesize = toNumber(row.filesize)
         const sourceAnalysis = await this.readCachedAudioAnalysisByFilename(row.filename)
         const sourceQuality = await this.readFileQuality(row.filename, sourceFilesize)
@@ -3753,22 +3753,14 @@ export class CollectionService {
     return row?.filesize == null ? null : toNumber(row.filesize)
   }
 
-  private async findExistingCollectionMatchByCanonical(canonical: RecordingCanonical | null, downloadPrefixes: string[]) {
+  private async findExistingCollectionFilenameByCanonical(canonical: RecordingCanonical | null, downloadPrefixes: string[]) {
     if (!canonical?.artist || !canonical.title) return null
     const normKey = buildCanonicalNormKey(canonical)
     if (!normKey) return null
     const prefixWhere = buildPrefixWhereClausePg('collection_files.filename', downloadPrefixes, 2)
-    const rows = (await this.pool.query<{
-      filename: string
-      canonicalartist: string | null
-      canonicaltitle: string | null
-      canonicalversion: string | null
-      canonicalyear: string | null
-    }>(
+    const rows = (await this.pool.query<{ filename: string }>(
       `
-        SELECT collection_files.filename, recordings.canonical_artist AS canonicalArtist,
-          recordings.canonical_title AS canonicalTitle, recordings.canonical_version AS canonicalVersion,
-          recordings.canonical_year AS canonicalYear
+        SELECT collection_files.filename
         FROM collection_files
         JOIN file_identification_state ON file_identification_state.filename = collection_files.filename
         JOIN recordings ON recordings.id = file_identification_state.recording_id
@@ -3780,12 +3772,7 @@ export class CollectionService {
       `,
       [normKey, ...prefixWhere.params]
     )).rows
-    return rows.length === 1
-      ? {
-          filename: rows[0].filename,
-          canonical: toCanonical(rows[0].canonicalartist, rows[0].canonicaltitle, rows[0].canonicalversion, rows[0].canonicalyear)
-        }
-      : null
+    return rows.length === 1 ? rows[0].filename : null
   }
 
   private async readFileQuality(filename: string, filesize: number | null) {
