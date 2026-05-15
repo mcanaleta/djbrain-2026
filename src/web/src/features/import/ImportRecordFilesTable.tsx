@@ -1,4 +1,3 @@
-import { PauseIcon, PlayIcon } from '@radix-ui/react-icons'
 import type { CollectionItemDetails } from '../../../../shared/api'
 import { ActionButton } from '../../components/view/ActionButton'
 import { DataTable, type DataTableColumn } from '../../components/view/DataTable'
@@ -42,45 +41,24 @@ export function ImportRecordFilesTable({
   const columns: DataTableColumn<ImportRecordFileRow>[] = [
     {
       key: 'mix',
-      header: 'Mix',
+      header: 'Solo',
       cellClassName: 'w-[1%] whitespace-nowrap',
       render: (row) => {
-        const isPlaying = mixer.playing.has(row.filename)
-        const isMuted = mixer.muted.has(row.filename)
-        const isSolo = mixer.solo.has(row.filename)
+        const isSolo = mixer.solo.has(row.filename) && mixer.playing.has(row.filename)
         return (
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              title={isPlaying ? 'Pause synced playback' : 'Sync play from needle'}
-              aria-label={isPlaying ? 'Pause synced playback' : 'Sync play from needle'}
-              aria-pressed={isPlaying}
-              onClick={() => mixer.togglePlay(row.filename)}
-              className={mixButtonClass(isPlaying, 'border-violet-200 bg-violet-300 text-zinc-950')}
-            >
-              {isPlaying ? <PauseIcon className="h-3 w-3" /> : <PlayIcon className="h-3 w-3" />}
-            </button>
-            <button
-              type="button"
-              title={isMuted ? 'Unmute' : 'Mute'}
-              aria-label={isMuted ? 'Unmute' : 'Mute'}
-              aria-pressed={isMuted}
-              onClick={() => mixer.toggleMute(row.filename)}
-              className={mixButtonClass(isMuted, 'border-orange-200 bg-orange-300 text-zinc-950')}
-            >
-              M
-            </button>
-            <button
-              type="button"
-              title={isSolo ? 'Unsolo' : 'Solo'}
-              aria-label={isSolo ? 'Unsolo' : 'Solo'}
-              aria-pressed={isSolo}
-              onClick={() => mixer.toggleSolo(row.filename)}
-              className={mixButtonClass(isSolo, 'border-sky-200 bg-sky-300 text-zinc-950')}
-            >
-              S
-            </button>
-          </div>
+          <button
+            type="button"
+            title={isSolo ? 'Stop solo' : 'Solo from needle percent'}
+            aria-label={isSolo ? 'Stop solo' : 'Solo from needle percent'}
+            aria-pressed={isSolo}
+            onClick={(event) => {
+              event.stopPropagation()
+              mixer.toggleSolo(row.filename)
+            }}
+            className={mixButtonClass(isSolo, 'border-sky-200 bg-sky-300 text-zinc-950')}
+          >
+            S
+          </button>
         )
       }
     },
@@ -168,15 +146,15 @@ export function ImportRecordFilesTable({
         <input
           type="range"
           min={0}
-          max={mixer.duration}
+          max={100}
           step={0.1}
-          value={Math.min(mixer.needle, mixer.duration)}
+          value={mixer.needle}
           onChange={(event) => mixer.seek(Number(event.target.value))}
           className="min-w-[180px] flex-1"
           aria-label="Sync needle"
         />
-        <div className="w-24 text-right text-[10px] tabular-nums text-zinc-500">
-          {formatCompactDuration(mixer.needle)} / {formatCompactDuration(mixer.duration)}
+        <div className="w-12 text-right text-[10px] tabular-nums text-zinc-500">
+          {mixer.needle.toFixed(1)}%
         </div>
       </div>
       <DataTable
