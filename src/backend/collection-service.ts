@@ -1702,7 +1702,7 @@ export class CollectionService {
         AND state.recording_id IS DISTINCT FROM attempts.origin_recording_id;
 
       INSERT INTO audio_assets(audio_hash, recording_id, duration_seconds, assigned_by, confidence, updated_at)
-      SELECT DISTINCT file_audio_state.audio_hash, attempts.origin_recording_id, audio_analysis_cache.duration_seconds, 'manual', 100, now()
+      SELECT DISTINCT file_audio_state.audio_hash, attempts.origin_recording_id, NULLIF(NULLIF(audio_analysis_cache.analysis_json, '')::jsonb->>'durationSeconds', '')::double precision, 'manual', 100, now()
       FROM download_attempts attempts
       JOIN file_audio_state
         ON file_audio_state.filename = attempts.local_filename
@@ -2572,7 +2572,7 @@ export class CollectionService {
             await client.query(
               `
                 INSERT INTO audio_assets(audio_hash, recording_id, duration_seconds, assigned_by, confidence, updated_at)
-                SELECT $1, $2, audio_analysis_cache.duration_seconds, 'manual', 100, now()
+                SELECT $1, $2, NULLIF(NULLIF(audio_analysis_cache.analysis_json, '')::jsonb->>'durationSeconds', '')::double precision, 'manual', 100, now()
                 FROM (SELECT 1) seed
                 LEFT JOIN audio_analysis_cache
                   ON audio_analysis_cache.audio_hash = $1
@@ -3673,7 +3673,7 @@ export class CollectionService {
         const assetRow = (
           await client.query<{ audiohash: string | null; durationseconds: number | null }>(
             `
-              SELECT file_identification_state.audio_hash AS audioHash, audio_analysis_cache.duration_seconds AS durationSeconds
+              SELECT file_identification_state.audio_hash AS audioHash, NULLIF(NULLIF(audio_analysis_cache.analysis_json, '')::jsonb->>'durationSeconds', '')::double precision AS durationSeconds
               FROM file_identification_state
               LEFT JOIN audio_analysis_cache
                 ON audio_analysis_cache.audio_hash = file_identification_state.audio_hash
