@@ -70,7 +70,7 @@ describe('buildImportRecordFileRows', () => {
   })
 
   it('exposes replace only when a collection target exists', () => {
-    assert.deepEqual(getImportRecordDownloadActions(true), ['import', 'replace', 'delete'])
+    assert.deepEqual(getImportRecordDownloadActions(true), ['replace', 'delete'])
     assert.deepEqual(getImportRecordDownloadActions(false), ['import', 'delete'])
   })
 

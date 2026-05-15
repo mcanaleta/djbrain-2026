@@ -46,7 +46,7 @@ export function buildImportRecordFileRows(record: ImportTracksTableRow, collecti
 }
 
 export function getImportRecordDownloadActions(hasCollectionTarget: boolean): ImportRecordDownloadAction[] {
-  return hasCollectionTarget ? ['import', 'replace', 'delete'] : ['import', 'delete']
+  return hasCollectionTarget ? ['replace', 'delete'] : ['import', 'delete']
 }
 
 export type ImportActionConfirmation = {
