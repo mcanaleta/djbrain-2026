@@ -1726,16 +1726,16 @@ export class CollectionService {
       SELECT
         'replacement',
         file_identification_state.recording_id,
-        COALESCE(NULLIF(search_artist, ''), 'Unknown Artist'),
-        COALESCE(NULLIF(search_title, ''), collection_filename),
-        search_version,
+        COALESCE(NULLIF(upgrade_cases_source.search_artist, ''), 'Unknown Artist'),
+        COALESCE(NULLIF(upgrade_cases_source.search_title, ''), upgrade_cases_source.collection_filename),
+        upgrade_cases_source.search_version,
         NULL,
         NULL,
         NULL,
-        created_at,
-        CASE WHEN status IN ('completed', 'pending_reanalyze') THEN 'downloaded' ELSE COALESCE(NULLIF(status, ''), 'idle') END,
-        candidate_cache_json,
-        collection_filename,
+        upgrade_cases_source.created_at,
+        CASE WHEN upgrade_cases_source.status IN ('completed', 'pending_reanalyze') THEN 'downloaded' ELSE COALESCE(NULLIF(upgrade_cases_source.status, ''), 'idle') END,
+        upgrade_cases_source.candidate_cache_json,
+        upgrade_cases_source.collection_filename,
         3,
         TRUE
       FROM upgrade_cases upgrade_cases_source
