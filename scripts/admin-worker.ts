@@ -13,7 +13,7 @@ import { ImportReviewBackgroundService } from '../src/backend/import-review-back
 import { ImportReviewService } from '../src/backend/import-review-service.ts'
 import { MusicBrainzService } from '../src/backend/musicbrainz-service.ts'
 import { OnlineSearchService } from '../src/backend/online-search-service.ts'
-import { readProcessWorkerOptions } from '../src/backend/process-runtime.ts'
+import { processLeaseRetryMs, readProcessWorkerOptions } from '../src/backend/process-runtime.ts'
 import { RecordingIdentityService } from '../src/backend/recording-identity-service.ts'
 import { readSettings } from '../src/backend/settings-store.ts'
 import { TaggerService } from '../src/backend/tagger-service.ts'
@@ -128,7 +128,7 @@ async function main(): Promise<void> {
       })
       if (!lease) {
         console.log(`[admin] lease held by another owner; owner=${options.ownerId} priority=${options.priority}`)
-        await sleep(options.intervalSeconds * 1_000)
+        await sleep(processLeaseRetryMs(options.intervalSeconds))
         continue
       }
       if (options.dryRun) {

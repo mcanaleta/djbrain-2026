@@ -55,6 +55,10 @@ export function readProcessWorkerOptions(input: ProcessWorkerOptionsInput): Proc
   }
 }
 
+export function processLeaseRetryMs(intervalSeconds: number): number {
+  return Math.min(30_000, Math.max(5_000, Math.trunc(intervalSeconds) * 1_000))
+}
+
 export function shouldRunServerStartupSync(env: Env): boolean {
   return readBoolean(env.DJBRAIN_ENABLE_SERVER_SYNC, false)
 }

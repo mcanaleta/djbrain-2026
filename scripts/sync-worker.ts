@@ -1,6 +1,6 @@
 import { hostname } from 'node:os'
 import { CollectionService } from '../src/backend/collection-service.ts'
-import { readProcessWorkerOptions } from '../src/backend/process-runtime.ts'
+import { processLeaseRetryMs, readProcessWorkerOptions } from '../src/backend/process-runtime.ts'
 import { readSettings } from '../src/backend/settings-store.ts'
 
 const sleep = (ms: number) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms))
@@ -39,7 +39,7 @@ async function main(): Promise<void> {
       })
       if (!lease) {
         console.log(`[sync] lease held by another owner; owner=${options.ownerId} priority=${options.priority}`)
-        await sleep(options.intervalSeconds * 1_000)
+        await sleep(processLeaseRetryMs(options.intervalSeconds))
         continue
       }
       if (options.dryRun) {

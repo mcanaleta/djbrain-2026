@@ -1,6 +1,6 @@
 import { hostname } from 'node:os'
 import { CollectionService, type DownloadAttempt, type WantListItem } from '../src/backend/collection-service.ts'
-import { readProcessWorkerOptions, type ProcessWorkerOptions } from '../src/backend/process-runtime.ts'
+import { processLeaseRetryMs, readProcessWorkerOptions, type ProcessWorkerOptions } from '../src/backend/process-runtime.ts'
 import { readSettings, type AppSettings } from '../src/backend/settings-store.ts'
 import { SlskdService, type SlskdCandidate } from '../src/backend/slskd-service.ts'
 import { buildDownloadRequests, buildExpectedDownloadFilename, downloadAttemptStatusFromSlskdState, wantListStatusAfterAttempt } from '../src/backend/downloader-worker-planning.ts'
@@ -175,7 +175,7 @@ async function main(): Promise<void> {
       })
       if (!lease) {
         console.log(`[downloader] lease held by another owner; owner=${options.ownerId} priority=${options.priority}`)
-        await sleep(options.intervalSeconds * 1_000)
+        await sleep(processLeaseRetryMs(options.intervalSeconds))
         continue
       }
       const result = await service.withDownloaderLock(() => tick(settings, service, slskd, options))

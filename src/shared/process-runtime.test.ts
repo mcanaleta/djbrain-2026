@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
+  processLeaseRetryMs,
   readProcessWorkerOptions,
   shouldRunServerBackgroundWorkers,
   shouldRunServerStartupSync
@@ -72,6 +73,14 @@ describe('readProcessWorkerOptions', () => {
     })
 
     assert.equal(options.leaseMs, 300_000)
+  })
+})
+
+describe('processLeaseRetryMs', () => {
+  it('retries denied leases quickly without busy looping', () => {
+    assert.equal(processLeaseRetryMs(300), 30_000)
+    assert.equal(processLeaseRetryMs(10), 10_000)
+    assert.equal(processLeaseRetryMs(1), 5_000)
   })
 })
 
