@@ -4022,12 +4022,21 @@ export class CollectionService {
         `
           WITH matches AS (
             SELECT id, want_list_id
-            FROM download_attempts
-            WHERE local_filename IS NULL
-              AND expected_local_filename IS NOT NULL
-              AND (
+            FROM (
+              SELECT
+                id,
+                want_list_id,
+                expected_local_filename,
+                regexp_replace(regexp_replace(replace(remote_filename, E'\\\\', '/'), '^@@[^/]+/', ''), '^.*/([^/]+/[^/]+)$', '\\1') AS remote_tail
+              FROM download_attempts
+              WHERE local_filename IS NULL
+                AND (expected_local_filename IS NOT NULL OR remote_filename IS NOT NULL)
+            ) attempts
+            WHERE (
                 expected_local_filename = $1
                 OR lower(regexp_replace(expected_local_filename, '\\.wav$', '.flac', 'i')) = lower($1)
+                OR lower($1) LIKE '%' || lower(remote_tail)
+                OR lower($1) LIKE '%' || lower(regexp_replace(remote_tail, '\\.wav$', '.flac', 'i'))
               )
           ),
           chosen AS (
