@@ -1,44 +1,23 @@
 import { hostname } from 'node:os'
 import { CollectionService, type DownloadAttempt, type WantListItem } from '../src/backend/collection-service.ts'
+import { readProcessWorkerOptions, type ProcessWorkerOptions } from '../src/backend/process-runtime.ts'
 import { readSettings, type AppSettings } from '../src/backend/settings-store.ts'
 import { SlskdService, type SlskdCandidate } from '../src/backend/slskd-service.ts'
 import { buildDownloadRequests, buildExpectedDownloadFilename, downloadAttemptStatusFromSlskdState, wantListStatusAfterAttempt } from '../src/backend/downloader-worker-planning.ts'
 
-type Options = {
-  intervalSeconds: number
-  limit: number
-  dryRun: boolean
-  ownerId: string
-  priority: number
-  takeover: boolean
-  leaseMs: number
-}
+type Options = ProcessWorkerOptions
 
 const sleep = (ms: number) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms))
 
-function readArg(name: string): string | null {
-  const index = process.argv.indexOf(name)
-  return index >= 0 ? (process.argv[index + 1] ?? null) : null
-}
-
-function readNumberArg(name: string, fallback: number): number {
-  const value = Number(readArg(name) ?? process.env[name.replace(/^--/, 'DJBRAIN_').replace(/-/g, '_').toUpperCase()] ?? fallback)
-  return Number.isFinite(value) ? Math.trunc(value) : fallback
-}
-
 function readOptions(): Options {
-  const interval = readNumberArg('--interval-seconds', 60)
-  const limit = readNumberArg('--limit', 10)
-  const leaseSeconds = readNumberArg('--lease-seconds', 45)
-  return {
-    intervalSeconds: Math.max(5, Number.isFinite(interval) ? Math.trunc(interval) : 60),
-    limit: Math.max(1, Number.isFinite(limit) ? Math.trunc(limit) : 10),
-    dryRun: process.argv.includes('--dry-run'),
-    ownerId: readArg('--owner-id') ?? process.env.DJBRAIN_PROCESS_OWNER_ID?.trim() ?? `${hostname()}:${process.pid}`,
-    priority: Math.max(0, readNumberArg('--priority', 10)),
-    takeover: process.argv.includes('--takeover') || process.env.DJBRAIN_PROCESS_TAKEOVER === '1',
-    leaseMs: Math.max(10, leaseSeconds) * 1_000
-  }
+  return readProcessWorkerOptions({
+    args: process.argv.slice(2),
+    env: process.env,
+    hostname: hostname(),
+    pid: process.pid,
+    defaultIntervalSeconds: 60,
+    defaultLimit: 10
+  })
 }
 
 function requireConfig(settings: AppSettings): string {
@@ -177,7 +156,7 @@ async function tick(settings: AppSettings, service: CollectionService, slskd: Sl
 async function main(): Promise<void> {
   const settings = readSettings()
   const options = readOptions()
-  const service = new CollectionService({ connectionString: requireConfig(settings), debounceMs: 1_000 })
+  const service = new CollectionService({ connectionString: requireConfig(settings), debounceMs: 1_000, watchFileSystem: false })
   const slskd = new SlskdService()
   let stopped = false
   process.on('SIGINT', () => { stopped = true })

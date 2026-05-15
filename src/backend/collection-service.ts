@@ -83,6 +83,7 @@ type CollectionServiceOptions = {
   onImportQueueChanged?: () => void
   onIdentificationQueueChanged?: () => void
   debounceMs?: number
+  watchFileSystem?: boolean
 }
 
 const EMPTY_SETTINGS: AppSettings = {
@@ -448,6 +449,8 @@ export class CollectionService {
 
   private readonly debounceMs: number
 
+  private readonly watchFileSystem: boolean
+
   private readonly ready: Promise<void>
 
   private settings: AppSettings = { ...EMPTY_SETTINGS }
@@ -489,6 +492,7 @@ export class CollectionService {
     this.onImportQueueChanged = options.onImportQueueChanged
     this.onIdentificationQueueChanged = options.onIdentificationQueueChanged
     this.debounceMs = options.debounceMs ?? 750
+    this.watchFileSystem = options.watchFileSystem ?? true
     this.ready = this.initializeSchema().then(async () => {
       this.status.itemCount = await this.readItemCount()
       await this.refreshImportQueueCounts()
@@ -517,7 +521,8 @@ export class CollectionService {
       serperApiKey: settings.serperApiKey,
       youtubeApiKey: settings.youtubeApiKey
     }
-    await this.restartWatchers()
+    if (this.watchFileSystem) await this.restartWatchers()
+    else this.closeWatchers()
   }
 
   public getStatus(): CollectionSyncStatus {

@@ -34,6 +34,18 @@ services:
     profiles: ["downloader"]
     restart: unless-stopped
 
+  sync-worker:
+    build: .
+    command: ["node", "--experimental-strip-types", "scripts/sync-worker.ts"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ${DJBRAIN_HOST_MUSIC_PATH:-/home/marc/Dropbox/music}:/music:ro
+    env_file: .env.docker
+    profiles: ["sync"]
+    restart: unless-stopped
+
   redis:
     image: redis:7-alpine
     restart: unless-stopped

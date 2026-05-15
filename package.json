@@ -14,6 +14,7 @@
     "typecheck": "npm run typecheck:server && npm run typecheck:web",
     "analyze:local": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/analyze-local.ts",
     "downloader": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/downloader.ts",
+    "sync": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/sync-worker.ts",
     "start": "node --env-file-if-exists=.env.local --experimental-strip-types src/server/index.ts --port 5180 --static dist",
     "dev:server": "DJBRAIN_ENABLE_AUTOMATION=0 node --env-file-if-exists=.env.local --watch --experimental-strip-types src/server/index.ts --port 5181",
     "dev:client": "vite",

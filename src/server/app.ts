@@ -21,6 +21,7 @@ import { MusicBrainzService } from '../backend/musicbrainz-service.ts'
 import { RecordingIdentityService } from '../backend/recording-identity-service.ts'
 import { YouTubeApiService } from '../backend/youtube-api-service.ts'
 import { DatabaseInspector } from '../backend/database-inspector.ts'
+import { shouldRunServerStartupSync } from '../backend/process-runtime.ts'
 import type { DiscogsTrackMatch } from '../shared/discogs-match.ts'
 import type { FileIdentificationState, ImportTagPreview } from '../shared/api.ts'
 import { formatError, HttpError, sendJson } from './http.ts'
@@ -53,6 +54,7 @@ const staticDirArg = readArgValue('--static')
 const staticDir = staticDirArg ? resolve(process.cwd(), staticDirArg) : null
 const dataDirArg = readArgValue('--data-dir') ?? process.env['DJBRAIN_DATA_DIR'] ?? null
 const automationEnabled = readBooleanEnv(process.env['DJBRAIN_ENABLE_AUTOMATION'], !process.execArgv.includes('--watch'))
+const serverStartupSyncEnabled = shouldRunServerStartupSync(process.env)
 
 const onlineSearchService = new OnlineSearchService()
 const youtubeApiService = new YouTubeApiService()
@@ -563,6 +565,7 @@ export async function start(): Promise<void> {
   }
   collectionService = new CollectionService({
     connectionString: postgresUrl,
+    watchFileSystem: false,
     onImportQueueChanged: automationEnabled
       ? () => {
         void importReviewBackgroundService?.syncQueue()
@@ -610,13 +613,15 @@ export async function start(): Promise<void> {
     importReviewBackgroundService.start()
     identificationBackgroundService.start()
   }
-  void collectionService.syncNow().then(async () => {
-    if (!automationEnabled) return
-    await Promise.all([
-      importReviewBackgroundService?.syncQueue(),
-      identificationBackgroundService?.syncQueue()
-    ])
-  })
+  if (serverStartupSyncEnabled) {
+    void collectionService.syncNow().then(async () => {
+      if (!automationEnabled) return
+      await Promise.all([
+        importReviewBackgroundService?.syncQueue(),
+        identificationBackgroundService?.syncQueue()
+      ])
+    })
+  }
 
   const app = createApp()
   const server = app.listen(port, () => {
@@ -625,6 +630,7 @@ export async function start(): Promise<void> {
     )
     console.log(`[djbrain-server] using data dir ${appDataDir}`)
     console.log(`[djbrain-server] background automation ${automationEnabled ? 'enabled' : 'disabled'}`)
+    console.log(`[djbrain-server] startup sync ${serverStartupSyncEnabled ? 'enabled' : 'disabled'}`)
   })
 
   const shutdown = (): void => {
