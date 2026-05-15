@@ -1,5 +1,5 @@
-import { basename, dirname, extname, join } from 'node:path'
-import { copyFile, mkdir, stat, unlink } from 'node:fs/promises'
+import { basename, join } from 'node:path'
+import { unlink } from 'node:fs/promises'
 import type { Express } from 'express'
 import type { CollectionService } from '../../backend/collection-service.ts'
 import { FileAnalysisService } from '../../backend/file-analysis-service.ts'
@@ -9,7 +9,6 @@ import type { AppSettings } from '../../backend/settings-store.ts'
 import type { DiscogsTrackMatch } from '../../shared/discogs-match.ts'
 import type { FileIdentificationState, ImportTagPreview } from '../../shared/api.ts'
 import { asyncHandler, sendEmpty, sendJson } from '../http.ts'
-import { buildReplacementArchiveRelativePath } from '../replacement-archive.ts'
 
 type CollectionRouteDeps = {
   requireCollectionService: () => CollectionService
@@ -36,20 +35,6 @@ type CollectionRouteDeps = {
   getMediaStore?: () => PostgresMediaStore | null
   syncMediaCatalog?: () => Promise<void>
   syncMediaItem?: (filename: string) => Promise<void>
-}
-
-async function findAvailableArchivePath(path: string): Promise<string> {
-  const ext = extname(path)
-  const stem = ext ? path.slice(0, -ext.length) : path
-  for (let index = 0; ; index += 1) {
-    const candidate = index === 0 ? path : `${stem} (${index + 1})${ext}`
-    try {
-      await stat(candidate)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return candidate
-      throw error
-    }
-  }
 }
 
 export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps): void {
@@ -368,12 +353,6 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
 
       const providedMatch = readDiscogsTrackMatch(body?.match)
       const tagOverrides = readImportTagPreview(body?.tags)
-      if (providedMatch && body?.mode === 'replace_existing' && replaceFilename) {
-        const archiveRelativePath = normalizeFilename(buildReplacementArchiveRelativePath(settings.songsFolderPath, replaceFilename, new Date().toISOString().slice(0, 10)))
-        const archivePath = await findAvailableArchivePath(resolveMusicRelativePath(archiveRelativePath))
-        await mkdir(dirname(archivePath), { recursive: true })
-        await copyFile(resolveMusicRelativePath(replaceFilename), archivePath)
-      }
       const result = providedMatch
         ? await importService.importFileWithKnownMatch(
             settings,
@@ -396,16 +375,17 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
             return importService.importFile(settings, parsed.artist, parsed.title, parsed.version, absolutePath)
           })()
 
-      await service.syncNow()
-      if (syncMediaItem) {
+      void service.syncNow().then(async () => {
+        if (!syncMediaItem) {
+          await syncMediaCatalog?.()
+          return
+        }
         const changed = new Set<string>()
         if (result.status === 'imported' || result.status === 'imported_upgrade') changed.add(normalizeFilename(result.destRelativePath))
         if (result.status === 'replaced') changed.add(normalizeFilename(result.replacedRelativePath))
         if (result.status === 'skipped_existing') changed.add(normalizeFilename(result.existingRelativePath))
         await Promise.all([...changed].map((item) => syncMediaItem(item)))
-      } else {
-        await syncMediaCatalog?.()
-      }
+      })
 
       if (result.status === 'imported') {
         sendJson(response, 200, { status: 'imported', destRelativePath: result.destRelativePath })

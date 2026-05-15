@@ -57,7 +57,7 @@ export type ImportActionConfirmation = {
 
 function tagLine(input: ImportCommitInput): string {
   const tags = input.tags
-  return [tags?.artist, tags?.title ? `${tags.title}${tags.discogsTrackPosition ? ` [${tags.discogsTrackPosition}]` : ''}` : null, tags?.year].filter(Boolean).join(' - ')
+  return [tags?.artist, tags?.title, tags?.year, tags?.discogsTrackPosition ? `Discogs track ${tags.discogsTrackPosition}` : null].filter(Boolean).join(' - ')
 }
 
 export function buildImportActionConfirmation(

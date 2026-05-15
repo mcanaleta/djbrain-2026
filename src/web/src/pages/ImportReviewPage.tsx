@@ -160,12 +160,14 @@ export default function ImportReviewPage(): React.JSX.Element {
       const result = await api.collection.commitImport(pendingCommit.input)
       const targetFilename = importResultTargetFilename(result)
       if (targetFilename) setCommittedTargetFilename(targetFilename)
-      await refreshDownloads(targetFilename ?? collectionTarget?.filename ?? null)
-      setActionSuccess(`${pendingCommit.confirmation.confirmLabel} finished. Files refreshed.`)
+      setActionSuccess(`${pendingCommit.confirmation.confirmLabel} finished. Refreshing files...`)
       setPendingCommit(null)
       setSelectedFilename(pendingCommit.row.filename)
+      await refreshDownloads(targetFilename ?? collectionTarget?.filename ?? null)
+      setActionSuccess(`${pendingCommit.confirmation.confirmLabel} finished. Files refreshed.`)
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Unexpected import action error')
+      setPendingCommit(null)
     } finally {
       setBusyAction(null)
     }

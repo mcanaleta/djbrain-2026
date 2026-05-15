@@ -100,6 +100,7 @@ describe('ImportService', () => {
 
       assert.equal(result.status, 'replaced')
       assert.equal(await readFile(target, 'utf8'), 'converted-mp3')
+      assert.equal(await readFile(join(root, '_replaced', new Date().toISOString().slice(0, 10), '1997/Existing.mp3'), 'utf8'), 'old-mp3')
       assert.equal(writes.length, 1)
       assert.equal(writes[0]?.filePath.endsWith('.mp3'), true)
       assert.deepEqual(writes[0]?.tags, oldTags)

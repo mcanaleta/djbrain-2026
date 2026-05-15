@@ -113,6 +113,22 @@ async function findAvailablePath(destAbsPath: string): Promise<string> {
   return join(dir, `${base} (${n})${ext}`)
 }
 
+async function findAvailableArchivePath(path: string): Promise<string> {
+  const ext = extname(path)
+  const stem = ext ? path.slice(0, -ext.length) : path
+  for (let index = 0; ; index += 1) {
+    const candidate = index === 0 ? path : `${stem} (${index + 1})${ext}`
+    if (!(await fileExists(candidate))) return candidate
+  }
+}
+
+function buildArchivePath(settings: AppSettings, sourceFilename: string): string {
+  const normalized = sourceFilename.replace(/\\/g, '/').replace(/^\/+/, '')
+  const songsPrefix = settings.songsFolderPath.replace(/\\/g, '/').replace(/\/+$/, '')
+  const suffix = normalized.startsWith(`${songsPrefix}/`) ? normalized.slice(songsPrefix.length + 1) : basename(normalized)
+  return join(settings.musicFolderPath, '_replaced', new Date().toISOString().slice(0, 10), suffix)
+}
+
 function buildTags(match: DiscogsTrackMatch) {
   return {
     artist: match.artist,
@@ -275,6 +291,9 @@ export class ImportService {
       const replaceTags = this.tagger.readTags(replaceAbsPath) ?? tags
       await mkdir(dirname(replaceAbsPath), { recursive: true })
       await this.tagger.writeTags(prepared.path, replaceTags)
+      const archivePath = await findAvailableArchivePath(buildArchivePath(settings, replaceRelativePath))
+      await mkdir(dirname(archivePath), { recursive: true })
+      await copyFile(replaceAbsPath, archivePath)
       await copyFile(prepared.path, replaceAbsPath)
       await unlink(localFilePath)
       await this.cleanupPreparedFile(prepared)
