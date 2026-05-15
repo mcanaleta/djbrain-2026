@@ -1548,6 +1548,7 @@ export class CollectionService {
         album TEXT,
         label TEXT,
         added_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         pipeline_status TEXT NOT NULL DEFAULT 'idle',
         source_collection_filename TEXT,
         target_download_count INTEGER NOT NULL DEFAULT 3,
@@ -1650,6 +1651,7 @@ export class CollectionService {
 
       ALTER TABLE want_list ADD COLUMN IF NOT EXISTS want_kind TEXT NOT NULL DEFAULT 'missing';
       ALTER TABLE want_list ADD COLUMN IF NOT EXISTS recording_id BIGINT REFERENCES recordings(id) ON DELETE SET NULL;
+      ALTER TABLE want_list ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
       ALTER TABLE want_list ADD COLUMN IF NOT EXISTS source_collection_filename TEXT;
       ALTER TABLE want_list ADD COLUMN IF NOT EXISTS target_download_count INTEGER NOT NULL DEFAULT 3;
       ALTER TABLE want_list ADD COLUMN IF NOT EXISTS auto_download_enabled BOOLEAN NOT NULL DEFAULT TRUE;
