@@ -4165,7 +4165,7 @@ export class CollectionService {
             parsed_artist, parsed_title, parsed_version, parsed_year,
             tag_artist, tag_title, tag_version, chosen_claim_id,
             identify_version, explanation_json, verified_at, error_message, processed_at
-          ) VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, $9, $10, $11, NULL, NULL, NULL, NULL, $12, NULL, CASE WHEN $4 IS NULL THEN NULL ELSE now() END, NULL, CASE WHEN $4 IS NULL THEN NULL ELSE now() END)
+          ) VALUES ($1, $2, $3, $4::bigint, NULL, $5, $6, $7, $8, $9, $10, $11, NULL, NULL, NULL, NULL, $12, NULL, CASE WHEN $4::bigint IS NULL THEN NULL ELSE now() END, NULL, CASE WHEN $4::bigint IS NULL THEN NULL ELSE now() END)
           ON CONFLICT(filename) DO UPDATE SET
             filesize = excluded.filesize,
             mtime_ms = excluded.mtime_ms,
