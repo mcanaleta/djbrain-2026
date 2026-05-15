@@ -423,7 +423,7 @@ function buildReplacementRelativePath(collectionFilename: string, downloadFilena
   const normalizedDownload = normalizeFilename(downloadFilename)
   const targetDir = dirname(normalizedCollection)
   const currentBasename = basename(normalizedCollection).replace(/\.[^.]+$/, '')
-  const nextExt = extname(normalizedDownload) || extname(normalizedCollection)
+  const nextExt = extname(normalizedDownload).toLowerCase() === '.mp3' ? extname(normalizedDownload) : '.mp3'
   return normalizeFilename(join(targetDir, `${currentBasename}${nextExt}`))
 }
 

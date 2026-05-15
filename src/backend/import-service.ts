@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process'
 import { copyFile, mkdir, unlink, access, stat, readdir } from 'node:fs/promises'
 import { join, extname, dirname, basename, resolve } from 'node:path'
 import type { AppSettings } from './settings-store.ts'
@@ -39,6 +40,8 @@ type ImportFileOptions = {
   conflictStrategy?: 'auto' | 'keep_both' | 'replace'
   replaceRelativePath?: string | null
 }
+type AudioConverter = (sourcePath: string, targetPath: string) => Promise<void>
+type PreparedImportFile = { path: string; ext: string; bitrateHintKbps: number | null; converted: boolean }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -60,6 +63,10 @@ function buildDestFilename(
   return sanitizeFilenameSegment(name) + ext
 }
 
+function importOutputExt(ext: string): string {
+  return ext.toLowerCase() === '.mp3' ? ext : '.mp3'
+}
+
 async function fileExists(path: string): Promise<boolean> {
   try {
     await access(path)
@@ -73,6 +80,27 @@ async function readQuality(filePath: string, bitrateHint: number | null = null):
   const { size } = await stat(filePath)
   const ext = extname(filePath).toLowerCase()
   return fileQualityFromExt(ext, size, bitrateHint)
+}
+
+async function removeFileIfExists(path: string): Promise<void> {
+  try {
+    await unlink(path)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+}
+
+function runFfmpegMp3(sourcePath: string, targetPath: string): Promise<void> {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn('ffmpeg', ['-y', '-v', 'error', '-nostdin', '-i', sourcePath, '-map', '0:a:0', '-vn', '-codec:a', 'libmp3lame', '-b:a', '320k', targetPath], { stdio: ['ignore', 'ignore', 'pipe'] })
+    let stderr = ''
+    child.stderr.on('data', (chunk) => { stderr += String(chunk) })
+    child.once('error', reject)
+    child.once('close', (code) => {
+      if (code === 0) resolvePromise()
+      else reject(new Error(stderr.trim() || `ffmpeg mp3 conversion failed (${code ?? 'unknown'}).`))
+    })
+  })
 }
 
 /** Find a path like /dir/base (2).ext, (3).ext … that does not exist yet */
@@ -105,11 +133,13 @@ export class ImportService {
   private readonly discogsMatch: DiscogsMatchService
   private readonly tagger: TaggerService
   private readonly onlineSearch: OnlineSearchService
+  private readonly audioConverter: AudioConverter
 
-  constructor(discogsMatch: DiscogsMatchService, tagger: TaggerService, onlineSearch: OnlineSearchService) {
+  constructor(discogsMatch: DiscogsMatchService, tagger: TaggerService, onlineSearch: OnlineSearchService, audioConverter: AudioConverter = runFfmpegMp3) {
     this.discogsMatch = discogsMatch
     this.tagger = tagger
     this.onlineSearch = onlineSearch
+    this.audioConverter = audioConverter
   }
 
   /**
@@ -225,7 +255,8 @@ export class ImportService {
     options: ImportFileOptions = {}
   ): Promise<ImportResult> {
     const year = match.year ?? 'unknown'
-    const ext = extname(localFilePath).toLowerCase()
+    const prepared = await this.prepareImportFile(localFilePath, bitrateHintKbps)
+    const ext = prepared.ext
     const destFilename = buildDestFilename(match.artist, match.title, match.version, ext)
     const destDir = join(settings.musicFolderPath, settings.songsFolderPath, year)
     const destAbsPath = join(destDir, destFilename)
@@ -237,10 +268,16 @@ export class ImportService {
     if (options.conflictStrategy === 'replace') {
       const replaceRelativePath = options.replaceRelativePath || destRelativePath
       const replaceAbsPath = join(settings.musicFolderPath, replaceRelativePath)
+      if (!(await fileExists(replaceAbsPath))) {
+        await this.cleanupPreparedFile(prepared)
+        return { status: 'error', message: `Replacement target not found: ${replaceRelativePath}` }
+      }
+      const replaceTags = this.tagger.readTags(replaceAbsPath) ?? tags
       await mkdir(dirname(replaceAbsPath), { recursive: true })
-      await this.tagger.writeTags(localFilePath, tags)
-      await copyFile(localFilePath, replaceAbsPath)
+      await this.tagger.writeTags(prepared.path, replaceTags)
+      await copyFile(prepared.path, replaceAbsPath)
       await unlink(localFilePath)
+      await this.cleanupPreparedFile(prepared)
       return { status: 'replaced', replacedRelativePath: replaceRelativePath, match }
     }
 
@@ -248,13 +285,14 @@ export class ImportService {
       if (options.conflictStrategy === 'keep_both') {
         const upgradePath = await findAvailablePath(destAbsPath)
         const upgradeRelativePath = join(settings.songsFolderPath, year, basename(upgradePath))
-        await this.tagger.writeTags(localFilePath, tags)
-        await copyFile(localFilePath, upgradePath)
+        await this.tagger.writeTags(prepared.path, tags)
+        await copyFile(prepared.path, upgradePath)
         await unlink(localFilePath)
+        await this.cleanupPreparedFile(prepared)
         return { status: 'imported_upgrade', destRelativePath: upgradeRelativePath, existingRelativePath: destRelativePath, match }
       }
 
-      const newQuality = await readQuality(localFilePath, bitrateHintKbps)
+      const newQuality = await readQuality(prepared.path, prepared.bitrateHintKbps)
       const existingQuality = await readQuality(destAbsPath)
       const comparison = compareQuality(newQuality, existingQuality)
 
@@ -263,22 +301,37 @@ export class ImportService {
       )
 
       if (comparison !== 'better') {
+        await this.cleanupPreparedFile(prepared)
         return { status: 'skipped_existing', existingRelativePath: destRelativePath, match, existingQuality, newQuality }
       }
 
       const upgradePath = await findAvailablePath(destAbsPath)
       const upgradeRelativePath = join(settings.songsFolderPath, year, basename(upgradePath))
       console.log('[import] upgrading — saving new version as:', upgradeRelativePath)
-      await this.tagger.writeTags(localFilePath, tags)
-      await copyFile(localFilePath, upgradePath)
+      await this.tagger.writeTags(prepared.path, tags)
+      await copyFile(prepared.path, upgradePath)
       await unlink(localFilePath)
+      await this.cleanupPreparedFile(prepared)
       return { status: 'imported_upgrade', destRelativePath: upgradeRelativePath, existingRelativePath: destRelativePath, match }
     }
 
-    await this.tagger.writeTags(localFilePath, tags)
-    await copyFile(localFilePath, destAbsPath)
+    await this.tagger.writeTags(prepared.path, tags)
+    await copyFile(prepared.path, destAbsPath)
     await unlink(localFilePath)
+    await this.cleanupPreparedFile(prepared)
     return { status: 'imported', destRelativePath, match }
+  }
+
+  private async prepareImportFile(localFilePath: string, bitrateHintKbps: number | null): Promise<PreparedImportFile> {
+    const ext = extname(localFilePath).toLowerCase()
+    if (ext === '.mp3') return { path: localFilePath, ext: importOutputExt(ext), bitrateHintKbps, converted: false }
+    const targetPath = `${localFilePath}.tmp-${process.pid}-${Date.now()}.mp3`
+    await this.audioConverter(localFilePath, targetPath)
+    return { path: targetPath, ext: '.mp3', bitrateHintKbps: 320, converted: true }
+  }
+
+  private async cleanupPreparedFile(prepared: PreparedImportFile): Promise<void> {
+    if (prepared.converted) await removeFileIfExists(prepared.path)
   }
 }
 
@@ -302,7 +355,7 @@ export function buildImportDestRelativePath(
   ext: string
 ): string {
   const year = match.year ?? 'unknown'
-  const filename = buildDestFilename(match.artist, match.title, match.version, ext)
+  const filename = buildDestFilename(match.artist, match.title, match.version, importOutputExt(ext))
   return join(songsFolderPath, year, filename)
 }
 

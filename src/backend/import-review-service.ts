@@ -155,7 +155,7 @@ export class ImportReviewService {
       candidates: reviewCandidates,
       similarItems: similarItemsWithDuration,
       sourceAnalysis: resolvedSourceAnalysis ?? null,
-      tagWriteSupported: this.deps.taggerService.supportsFile(absolutePath)
+      tagWriteSupported: this.deps.taggerService.supportsFile(absolutePath) || ext !== '.mp3'
     }
   }
 }

@@ -1,5 +1,5 @@
-import { basename, join } from 'node:path'
-import { unlink } from 'node:fs/promises'
+import { basename, dirname, extname, join } from 'node:path'
+import { copyFile, mkdir, stat, unlink } from 'node:fs/promises'
 import type { Express } from 'express'
 import type { CollectionService } from '../../backend/collection-service.ts'
 import { FileAnalysisService } from '../../backend/file-analysis-service.ts'
@@ -35,6 +35,27 @@ type CollectionRouteDeps = {
   getMediaStore?: () => PostgresMediaStore | null
   syncMediaCatalog?: () => Promise<void>
   syncMediaItem?: (filename: string) => Promise<void>
+}
+
+async function findAvailableArchivePath(path: string): Promise<string> {
+  const ext = extname(path)
+  const stem = ext ? path.slice(0, -ext.length) : path
+  for (let index = 0; ; index += 1) {
+    const candidate = index === 0 ? path : `${stem} (${index + 1})${ext}`
+    try {
+      await stat(candidate)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return candidate
+      throw error
+    }
+  }
+}
+
+export function buildReplacementArchiveRelativePath(songsFolderPath: string, sourceFilename: string, date: string): string {
+  const normalized = sourceFilename.replace(/\\/g, '/').replace(/^\/+/, '')
+  const songsPrefix = songsFolderPath.replace(/\\/g, '/').replace(/\/+$/, '')
+  const archiveSuffix = normalized.startsWith(`${songsPrefix}/`) ? normalized.slice(songsPrefix.length + 1) : basename(normalized)
+  return join(songsPrefix, '_replaced', date, archiveSuffix)
 }
 
 export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps): void {
@@ -353,6 +374,12 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
 
       const providedMatch = readDiscogsTrackMatch(body?.match)
       const tagOverrides = readImportTagPreview(body?.tags)
+      if (providedMatch && body?.mode === 'replace_existing' && replaceFilename) {
+        const archiveRelativePath = normalizeFilename(buildReplacementArchiveRelativePath(settings.songsFolderPath, replaceFilename, new Date().toISOString().slice(0, 10)))
+        const archivePath = await findAvailableArchivePath(resolveMusicRelativePath(archiveRelativePath))
+        await mkdir(dirname(archivePath), { recursive: true })
+        await copyFile(resolveMusicRelativePath(replaceFilename), archivePath)
+      }
       const result = providedMatch
         ? await importService.importFileWithKnownMatch(
             settings,
