@@ -21,7 +21,7 @@ import { MusicBrainzService } from '../backend/musicbrainz-service.ts'
 import { RecordingIdentityService } from '../backend/recording-identity-service.ts'
 import { YouTubeApiService } from '../backend/youtube-api-service.ts'
 import { DatabaseInspector } from '../backend/database-inspector.ts'
-import { shouldRunServerStartupSync } from '../backend/process-runtime.ts'
+import { shouldRunServerBackgroundWorkers, shouldRunServerStartupSync } from '../backend/process-runtime.ts'
 import type { DiscogsTrackMatch } from '../shared/discogs-match.ts'
 import type { FileIdentificationState, ImportTagPreview } from '../shared/api.ts'
 import { formatError, HttpError, sendJson } from './http.ts'
@@ -55,6 +55,7 @@ const staticDir = staticDirArg ? resolve(process.cwd(), staticDirArg) : null
 const dataDirArg = readArgValue('--data-dir') ?? process.env['DJBRAIN_DATA_DIR'] ?? null
 const automationEnabled = readBooleanEnv(process.env['DJBRAIN_ENABLE_AUTOMATION'], !process.execArgv.includes('--watch'))
 const serverStartupSyncEnabled = shouldRunServerStartupSync(process.env)
+const serverBackgroundWorkersEnabled = shouldRunServerBackgroundWorkers(process.env)
 
 const onlineSearchService = new OnlineSearchService()
 const youtubeApiService = new YouTubeApiService()
@@ -464,17 +465,16 @@ export function createApp(): express.Express {
 
   registerCollectionRoutes(app, {
     requireCollectionService,
-    automationEnabled,
     currentSettings,
     readCollectionStatus: async () => ({ ...(await readCollectionStatus()), automationEnabled }),
     buildImportReview,
     fileAnalysisService,
     importService,
     syncImportReviewQueue: async () => {
-      await importReviewBackgroundService?.syncQueue()
+      if (serverBackgroundWorkersEnabled) await importReviewBackgroundService?.syncQueue()
     },
     syncIdentificationQueue: async () => {
-      await identificationBackgroundService?.syncQueue()
+      if (serverBackgroundWorkersEnabled) await identificationBackgroundService?.syncQueue()
     },
     resolveMusicRelativePath,
     normalizeFilename,
@@ -566,12 +566,12 @@ export async function start(): Promise<void> {
   collectionService = new CollectionService({
     connectionString: postgresUrl,
     watchFileSystem: false,
-    onImportQueueChanged: automationEnabled
+    onImportQueueChanged: serverBackgroundWorkersEnabled
       ? () => {
         void importReviewBackgroundService?.syncQueue()
       }
       : undefined,
-    onIdentificationQueueChanged: automationEnabled
+    onIdentificationQueueChanged: serverBackgroundWorkersEnabled
       ? () => {
         void identificationBackgroundService?.syncQueue()
       }
@@ -602,14 +602,7 @@ export async function start(): Promise<void> {
     identityService: recordingIdentityService,
     queue: identificationProcessingQueue
   })
-  if (!automationEnabled) {
-    await Promise.all([
-      importProcessingQueue.clear(),
-      identificationProcessingQueue.clear(),
-      collectionService.resetImportReviewProcessing(),
-      collectionService.resetIdentificationProcessing()
-    ])
-  } else {
+  if (serverBackgroundWorkersEnabled) {
     importReviewBackgroundService.start()
     identificationBackgroundService.start()
   }
@@ -630,6 +623,7 @@ export async function start(): Promise<void> {
     )
     console.log(`[djbrain-server] using data dir ${appDataDir}`)
     console.log(`[djbrain-server] background automation ${automationEnabled ? 'enabled' : 'disabled'}`)
+    console.log(`[djbrain-server] in-process workers ${serverBackgroundWorkersEnabled ? 'enabled' : 'disabled'}`)
     console.log(`[djbrain-server] startup sync ${serverStartupSyncEnabled ? 'enabled' : 'disabled'}`)
   })
 

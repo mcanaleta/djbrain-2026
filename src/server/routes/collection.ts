@@ -12,7 +12,6 @@ import { asyncHandler, sendEmpty, sendJson } from '../http.ts'
 
 type CollectionRouteDeps = {
   requireCollectionService: () => CollectionService
-  automationEnabled: boolean
   currentSettings: () => AppSettings
   readCollectionStatus: () => Promise<unknown>
   buildImportReview: (filename: string, searchValue?: unknown, force?: boolean) => Promise<unknown>
@@ -41,7 +40,6 @@ type CollectionRouteDeps = {
 export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps): void {
   const {
     requireCollectionService,
-    automationEnabled,
     currentSettings,
     readCollectionStatus,
     buildImportReview,
@@ -166,10 +164,6 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
   app.post(
     '/api/collection/import/process',
     asyncHandler(async (request, response) => {
-      if (!automationEnabled) {
-        sendJson(response, 200, { queued: 0 })
-        return
-      }
       const body = (request.body ?? null) as { filenames?: string[] | null; force?: boolean } | null
       const filenames = Array.isArray(body?.filenames)
         ? body.filenames.filter((value): value is string => typeof value === 'string')
@@ -188,10 +182,6 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
   app.post(
     '/api/collection/identify/process',
     asyncHandler(async (request, response) => {
-      if (!automationEnabled) {
-        sendJson(response, 200, { queued: 0 })
-        return
-      }
       const body = (request.body ?? null) as { filenames?: string[] | null; force?: boolean } | null
       const filenames = Array.isArray(body?.filenames)
         ? body.filenames.filter((value): value is string => typeof value === 'string')

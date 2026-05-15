@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { readProcessWorkerOptions, shouldRunServerStartupSync } from '../backend/process-runtime.ts'
+import {
+  readProcessWorkerOptions,
+  shouldRunServerBackgroundWorkers,
+  shouldRunServerStartupSync
+} from '../backend/process-runtime.ts'
 
 describe('readProcessWorkerOptions', () => {
   it('reads shared takeover and lease flags for a daemon worker', () => {
@@ -55,6 +59,20 @@ describe('readProcessWorkerOptions', () => {
 
     assert.equal(options.leaseMs, 305_000)
   })
+
+  it('supports longer default leases for slow file workers', () => {
+    const options = readProcessWorkerOptions({
+      args: ['--interval-seconds', '30'],
+      env: {},
+      hostname: 'host',
+      pid: 123,
+      defaultIntervalSeconds: 60,
+      defaultLimit: 10,
+      defaultLeaseSeconds: 300
+    })
+
+    assert.equal(options.leaseMs, 300_000)
+  })
 })
 
 describe('shouldRunServerStartupSync', () => {
@@ -62,5 +80,13 @@ describe('shouldRunServerStartupSync', () => {
     assert.equal(shouldRunServerStartupSync({}), false)
     assert.equal(shouldRunServerStartupSync({ DJBRAIN_ENABLE_SERVER_SYNC: '1' }), true)
     assert.equal(shouldRunServerStartupSync({ DJBRAIN_ENABLE_SERVER_SYNC: 'false' }), false)
+  })
+})
+
+describe('shouldRunServerBackgroundWorkers', () => {
+  it('keeps queue processors out of the HTTP server unless explicitly enabled', () => {
+    assert.equal(shouldRunServerBackgroundWorkers({}), false)
+    assert.equal(shouldRunServerBackgroundWorkers({ DJBRAIN_ENABLE_SERVER_WORKERS: '1' }), true)
+    assert.equal(shouldRunServerBackgroundWorkers({ DJBRAIN_ENABLE_SERVER_WORKERS: 'false' }), false)
   })
 })

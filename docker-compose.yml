@@ -46,6 +46,22 @@ services:
     profiles: ["sync"]
     restart: unless-stopped
 
+  admin-worker:
+    build: .
+    command: ["node", "--experimental-strip-types", "scripts/admin-worker.ts"]
+    depends_on:
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ${DJBRAIN_HOST_MUSIC_PATH:-/home/marc/Dropbox/music}:/music:ro
+    env_file: .env.docker
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    profiles: ["admin"]
+    restart: unless-stopped
+
   redis:
     image: redis:7-alpine
     restart: unless-stopped

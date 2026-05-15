@@ -34,29 +34,32 @@ export class ImportReviewBackgroundService {
 
   kick(): void {
     if (this.running) return
-    void this.run()
+    void this.processAvailable()
   }
 
-  async syncQueue(): Promise<number> {
+  async syncQueue(kick: boolean = true): Promise<number> {
     const queued = await this.deps.queue.enqueue(await this.deps.collectionService.listPendingImportReviewFilenames())
-    if (queued > 0) this.kick()
+    if (queued > 0 && kick) this.kick()
     return queued
   }
 
-  private async run(): Promise<void> {
-    if (this.running) return
+  async processAvailable(limit: number = Number.POSITIVE_INFINITY, reschedule: boolean = true): Promise<number> {
+    if (this.running) return 0
     this.running = true
+    let processed = 0
     try {
-      for (;;) {
+      while (processed < limit) {
         const filename = await this.deps.queue.take(1)
-        if (!filename) return
+        if (!filename) return processed
         const next = await this.deps.collectionService.claimImportReviewFile(filename)
         if (!next) continue
         await this.process(next)
+        processed += 1
       }
+      return processed
     } finally {
       this.running = false
-      if (this.deps.collectionService.getStatus().importPendingCount) {
+      if (reschedule && this.deps.collectionService.getStatus().importPendingCount) {
         void this.syncQueue()
       }
     }

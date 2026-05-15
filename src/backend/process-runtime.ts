@@ -17,6 +17,7 @@ type ProcessWorkerOptionsInput = {
   pid: number
   defaultIntervalSeconds: number
   defaultLimit: number
+  defaultLeaseSeconds?: number
 }
 
 function readArg(args: string[], name: string): string | null {
@@ -42,7 +43,7 @@ export function readProcessWorkerOptions(input: ProcessWorkerOptionsInput): Proc
   const interval = readNumber(input.args, input.env, '--interval-seconds', input.defaultIntervalSeconds)
   const limit = readNumber(input.args, input.env, '--limit', input.defaultLimit)
   const intervalSeconds = Math.max(5, interval)
-  const leaseSeconds = readNumber(input.args, input.env, '--lease-seconds', intervalSeconds + 5)
+  const leaseSeconds = readNumber(input.args, input.env, '--lease-seconds', input.defaultLeaseSeconds ?? intervalSeconds + 5)
   return {
     intervalSeconds,
     limit: Math.max(1, limit),
@@ -56,4 +57,8 @@ export function readProcessWorkerOptions(input: ProcessWorkerOptionsInput): Proc
 
 export function shouldRunServerStartupSync(env: Env): boolean {
   return readBoolean(env.DJBRAIN_ENABLE_SERVER_SYNC, false)
+}
+
+export function shouldRunServerBackgroundWorkers(env: Env): boolean {
+  return readBoolean(env.DJBRAIN_ENABLE_SERVER_WORKERS, false)
 }
