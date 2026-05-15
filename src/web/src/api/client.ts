@@ -388,6 +388,9 @@ export const api: DJBrainApi = {
     getRow: (table, key) =>
       request(`/api/database/tables/${encodeURIComponent(table)}/rows/${encodeURIComponent(key)}`)
   },
+  runtime: {
+    getStatus: () => request('/api/runtime/status')
+  },
   upgrades: {
     list: () => request<UpgradeCase[]>('/api/upgrades'),
     open: (collectionFilename: string) =>

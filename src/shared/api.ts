@@ -3,6 +3,7 @@ import type { DiscogsTrackMatch } from './discogs-match'
 import type { GrokSearchResponse } from './grok-search'
 import type { OnlineSearchResponse, OnlineSearchScope } from './online-search'
 import type { DatabaseRowDetails, DatabaseTableRows, DatabaseTableSummary } from './database-inspector'
+import type { RuntimeStatus } from './runtime-status'
 
 export type AppSettings = {
   musicFolderPath: string
@@ -578,6 +579,9 @@ export type DJBrainApi = {
     listTables: () => Promise<DatabaseTableSummary[]>
     listRows: (table: string, input?: { filter?: string; limit?: number; offset?: number }) => Promise<DatabaseTableRows>
     getRow: (table: string, key: string) => Promise<DatabaseRowDetails | null>
+  }
+  runtime: {
+    getStatus: () => Promise<RuntimeStatus>
   }
   upgrades: {
     list: () => Promise<UpgradeCase[]>

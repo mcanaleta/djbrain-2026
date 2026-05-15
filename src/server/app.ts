@@ -22,12 +22,14 @@ import { RecordingIdentityService } from '../backend/recording-identity-service.
 import { YouTubeApiService } from '../backend/youtube-api-service.ts'
 import { DatabaseInspector } from '../backend/database-inspector.ts'
 import { shouldRunServerBackgroundWorkers, shouldRunServerStartupSync } from '../backend/process-runtime.ts'
+import { RuntimeStatusStore } from '../backend/runtime-status-store.ts'
 import type { DiscogsTrackMatch } from '../shared/discogs-match.ts'
 import type { FileIdentificationState, ImportTagPreview } from '../shared/api.ts'
 import { formatError, HttpError, sendJson } from './http.ts'
 import { registerCollectionRoutes } from './routes/collection.ts'
 import { registerDatabaseRoutes } from './routes/database.ts'
 import { registerMediaRoutes } from './routes/media.ts'
+import { registerRuntimeRoutes } from './routes/runtime.ts'
 import { registerSearchRoutes } from './routes/search.ts'
 import { registerUpgradeRoutes } from './routes/upgrades.ts'
 import { registerWantListRoutes } from './routes/want-list.ts'
@@ -116,6 +118,7 @@ const upgradeActions = createUpgradeActions({
 
 let collectionService: CollectionService | null = null
 let databaseInspector: DatabaseInspector | null = null
+let runtimeStatusStore: RuntimeStatusStore | null = null
 let recordingIdentityService: RecordingIdentityService | null = null
 let importReviewBackgroundService: ImportReviewBackgroundService | null = null
 let identificationBackgroundService: IdentificationBackgroundService | null = null
@@ -489,6 +492,13 @@ export function createApp(): express.Express {
   })
 
   registerDatabaseRoutes(app, { requireDatabaseInspector })
+  registerRuntimeRoutes(app, {
+    readStatus: async () => requireRuntimeStatusStore().read({
+      automationEnabled,
+      serverBackgroundWorkersEnabled,
+      serverStartupSyncEnabled
+    })
+  })
 
   registerWantListRoutes(app, {
     requireCollectionService,
@@ -578,6 +588,7 @@ export async function start(): Promise<void> {
       : undefined
   })
   databaseInspector = new DatabaseInspector(postgresUrl)
+  runtimeStatusStore = new RuntimeStatusStore(postgresUrl)
   await collectionService.reconfigure(currentSettings())
   recordingIdentityService = new RecordingIdentityService({
     collectionService,
@@ -631,6 +642,7 @@ export async function start(): Promise<void> {
     server.close(() => {
       collectionService?.dispose()
       void databaseInspector?.dispose()
+      void runtimeStatusStore?.dispose()
       void importProcessingQueue.stop()
       void identificationProcessingQueue.stop()
       process.exit(0)
@@ -652,6 +664,13 @@ function requireDatabaseInspector(): DatabaseInspector {
     throw new Error('Database inspector not initialized')
   }
   return databaseInspector
+}
+
+function requireRuntimeStatusStore(): RuntimeStatusStore {
+  if (!runtimeStatusStore) {
+    throw new Error('Runtime status store not initialized')
+  }
+  return runtimeStatusStore
 }
 
 function requireRecordingIdentityService(): RecordingIdentityService {

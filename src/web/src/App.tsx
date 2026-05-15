@@ -22,6 +22,7 @@ import GrokSearchPage from './pages/GrokSearchPage'
 import ImportPage from './pages/ImportPage'
 import ImportReviewPage from './pages/ImportReviewPage'
 import IdentifyPage from './pages/IdentifyPage'
+import RuntimePage from './pages/RuntimePage'
 import SearchOnlinePage from './pages/SearchOnlinePage'
 import SoulseekPage from './pages/SoulseekPage'
 import SpotifyPage from './pages/SpotifyPage'
@@ -51,6 +52,7 @@ const router = createBrowserRouter(
       <Route path="/import/review" element={<ImportReviewPage />} />
       <Route path="/identify" element={<IdentifyPage />} />
       <Route path="/dropbox" element={<DropboxPage />} />
+      <Route path="/runtime" element={<RuntimePage />} />
     </Route>
   )
 )

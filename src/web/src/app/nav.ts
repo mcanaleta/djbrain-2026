@@ -3,6 +3,7 @@ import {
   ArchiveIcon,
   BookmarkIcon,
   DownloadIcon,
+  GearIcon,
   EyeOpenIcon,
   MagnifyingGlassIcon,
   MixerHorizontalIcon,
@@ -38,7 +39,8 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'spotify', label: 'Spotify', path: '/spotify', icon: SewingPinIcon },
   { key: 'import', label: 'Import', path: '/import', icon: MixerHorizontalIcon },
   { key: 'identify', label: 'Identify', path: '/identify', icon: EyeOpenIcon },
-  { key: 'dropbox', label: 'Dropbox', path: '/dropbox', icon: ArchiveIcon }
+  { key: 'dropbox', label: 'Dropbox', path: '/dropbox', icon: ArchiveIcon },
+  { key: 'runtime', label: 'Runtime', path: '/runtime', icon: GearIcon }
 ]
 
 export const NAV_TITLE_BY_PATH = new Map(NAV_ITEMS.map((item) => [item.path, item.label]))
@@ -66,6 +68,10 @@ export function resolveNavTitle(pathname: string): string {
 
   if (/^\/database(?:\/|$)/u.test(pathname)) {
     return 'Database'
+  }
+
+  if (pathname === '/runtime') {
+    return 'Runtime'
   }
 
   return NAV_TITLE_BY_PATH.get(pathname as `/${string}`) ?? 'DJBrain'
