@@ -5,6 +5,7 @@ import {
   dropboxCachePathForFilename,
   dropboxPathForFilename,
   dropboxEntriesToFileStates,
+  readDropboxAccessToken,
   readDropboxFileSourceConfig
 } from '../backend/dropbox-file-source.ts'
 
@@ -21,6 +22,28 @@ describe('readDropboxFileSourceConfig', () => {
 
     assert.equal(config?.accessToken, 'token')
     assert.equal(config?.musicPath, '/music')
+  })
+
+  it('can read the Dropbox token from an rclone config', () => {
+    const config = readDropboxFileSourceConfig(
+      { musicFolderPath: '/music', songsFolderPath: 'songs', downloadFolderPaths: [] },
+      {
+        DJBRAIN_FILE_ACCESS_MODE: 'dropbox',
+        DJBRAIN_DROPBOX_RCLONE_REMOTE: 'dropbox'
+      },
+      `[dropbox]\ntype = dropbox\ntoken = {"access_token":"sl.test","refresh_token":"refresh","expiry":"2026-05-15T14:45:35+02:00"}`
+    )
+
+    assert.equal(config?.accessToken, 'sl.test')
+  })
+})
+
+describe('readDropboxAccessToken', () => {
+  it('prefers explicit env token over rclone config contents', () => {
+    assert.equal(
+      readDropboxAccessToken({ DJBRAIN_DROPBOX_ACCESS_TOKEN: 'env-token' }, '[dropbox]\ntoken = {"access_token":"rclone-token"}'),
+      'env-token'
+    )
   })
 })
 

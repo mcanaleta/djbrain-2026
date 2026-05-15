@@ -1,5 +1,6 @@
 import { createWriteStream } from 'node:fs'
 import { mkdir, rename, stat, unlink } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { dirname, relative, resolve } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -43,9 +44,9 @@ const joinDropboxPath = (root: string, child: string): string => {
   return normalizeDropboxPath(`${base}/${relative}`)
 }
 
-export function readDropboxFileSourceConfig(settings: Settings, env: Env = process.env): DropboxFileSourceConfig | null {
+export function readDropboxFileSourceConfig(settings: Settings, env: Env = process.env, rcloneConfigText?: string): DropboxFileSourceConfig | null {
   if ((env.DJBRAIN_FILE_ACCESS_MODE ?? '').trim().toLowerCase() !== 'dropbox') return null
-  const accessToken = env.DJBRAIN_DROPBOX_ACCESS_TOKEN?.trim()
+  const accessToken = readDropboxAccessToken(env, rcloneConfigText)
   if (!accessToken) throw new Error('DJBRAIN_DROPBOX_ACCESS_TOKEN is required when DJBRAIN_FILE_ACCESS_MODE=dropbox.')
   return {
     accessToken,
@@ -53,6 +54,48 @@ export function readDropboxFileSourceConfig(settings: Settings, env: Env = proce
     songsFolderPath: normalizeRelativeFolderPath(settings.songsFolderPath || 'songs'),
     downloadFolderPaths: settings.downloadFolderPaths.map(normalizeRelativeFolderPath).filter(Boolean)
   }
+}
+
+export function readDropboxAccessToken(env: Env = process.env, rcloneConfigText?: string): string | null {
+  const explicit = env.DJBRAIN_DROPBOX_ACCESS_TOKEN?.trim()
+  if (explicit) return explicit
+  const text = rcloneConfigText ?? readOptionalFile(env.DJBRAIN_DROPBOX_RCLONE_CONFIG?.trim())
+  if (!text) return null
+  const remote = env.DJBRAIN_DROPBOX_RCLONE_REMOTE?.trim() || 'dropbox'
+  const tokenJson = readIniValue(text, remote, 'token')
+  if (!tokenJson) return null
+  try {
+    const token = JSON.parse(tokenJson) as { access_token?: unknown }
+    return typeof token.access_token === 'string' && token.access_token.trim() ? token.access_token.trim() : null
+  } catch {
+    return null
+  }
+}
+
+function readOptionalFile(path: string | undefined): string | null {
+  if (!path) return null
+  try {
+    return readFileSync(path, 'utf8')
+  } catch {
+    return null
+  }
+}
+
+function readIniValue(text: string, section: string, key: string): string | null {
+  let inSection = false
+  for (const line of text.split(/\r?\n/u)) {
+    const trimmed = line.trim()
+    const header = trimmed.match(/^\[([^\]]+)\]$/u)
+    if (header) {
+      inSection = header[1] === section
+      continue
+    }
+    if (!inSection || !trimmed || trimmed.startsWith('#') || trimmed.startsWith(';')) continue
+    const index = trimmed.indexOf('=')
+    if (index < 0 || trimmed.slice(0, index).trim() !== key) continue
+    return trimmed.slice(index + 1).trim()
+  }
+  return null
 }
 
 export function buildDropboxScanPaths(config: DropboxFileSourceConfig): string[] {
