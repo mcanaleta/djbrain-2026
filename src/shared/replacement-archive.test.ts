@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { buildReplacementArchiveRelativePath } from '../server/routes/collection.ts'
+import { buildReplacementArchiveRelativePath } from '../server/replacement-archive.ts'
 
 describe('buildReplacementArchiveRelativePath', () => {
-  it('archives collection replacements under songs/_replaced by date', () => {
+  it('archives collection replacements outside the active songs tree by date', () => {
     assert.equal(
       buildReplacementArchiveRelativePath('songs', 'songs/1998/Jog - Future.mp3', '2026-05-15').replaceAll('\\', '/'),
-      'songs/_replaced/2026-05-15/1998/Jog - Future.mp3'
+      '_replaced/2026-05-15/1998/Jog - Future.mp3'
     )
   })
 })

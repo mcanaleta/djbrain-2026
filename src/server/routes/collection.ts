@@ -9,6 +9,7 @@ import type { AppSettings } from '../../backend/settings-store.ts'
 import type { DiscogsTrackMatch } from '../../shared/discogs-match.ts'
 import type { FileIdentificationState, ImportTagPreview } from '../../shared/api.ts'
 import { asyncHandler, sendEmpty, sendJson } from '../http.ts'
+import { buildReplacementArchiveRelativePath } from '../replacement-archive.ts'
 
 type CollectionRouteDeps = {
   requireCollectionService: () => CollectionService
@@ -49,13 +50,6 @@ async function findAvailableArchivePath(path: string): Promise<string> {
       throw error
     }
   }
-}
-
-export function buildReplacementArchiveRelativePath(songsFolderPath: string, sourceFilename: string, date: string): string {
-  const normalized = sourceFilename.replace(/\\/g, '/').replace(/^\/+/, '')
-  const songsPrefix = songsFolderPath.replace(/\\/g, '/').replace(/\/+$/, '')
-  const archiveSuffix = normalized.startsWith(`${songsPrefix}/`) ? normalized.slice(songsPrefix.length + 1) : basename(normalized)
-  return join(songsPrefix, '_replaced', date, archiveSuffix)
 }
 
 export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps): void {

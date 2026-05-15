@@ -27,6 +27,7 @@ import type {
   UpgradeReferenceSource
 } from '../shared/api.ts'
 import { HttpError } from './http.ts'
+import { buildReplacementArchiveRelativePath } from './replacement-archive.ts'
 
 const execFileAsync = promisify(execFile)
 
@@ -239,13 +240,9 @@ export function createWantListPipelines(deps: WantListPipelineDeps) {
         const localRelativePath = toMusicRelativePath(settings, localFilePath)
         const parsed = parseImportFilename(item.sourceCollectionFilename) ?? parseImportFilename(localRelativePath)
         const archiveDate = new Date().toISOString().slice(0, 10)
-        const songsPrefix = normalizeFilename(settings.songsFolderPath)
         const normalizedCollectionFilename = normalizeFilename(item.sourceCollectionFilename)
-        const archiveSuffix = normalizedCollectionFilename.startsWith(`${songsPrefix}/`)
-          ? normalizedCollectionFilename.slice(songsPrefix.length + 1)
-          : basename(normalizedCollectionFilename)
         const archivePath = await findAvailableArchivePath(resolveMusicRelativePath(normalizeFilename(
-          join(settings.songsFolderPath, '_replaced', archiveDate, archiveSuffix)
+          buildReplacementArchiveRelativePath(settings.songsFolderPath, normalizedCollectionFilename, archiveDate)
         )))
         const replacementRelativePath = buildReplacementRelativePath(item.sourceCollectionFilename, localRelativePath)
         const match = {
@@ -1038,14 +1035,8 @@ export function createUpgradeActions(deps: UpgradePipelineDeps) {
     }
 
     const archiveDate = new Date().toISOString().slice(0, 10)
-    const songsPrefix = normalizeFilename(settings.songsFolderPath)
     const normalizedCollectionFilename = normalizeFilename(upgradeCase.collectionFilename)
-    const archiveSuffix = normalizedCollectionFilename.startsWith(`${songsPrefix}/`)
-      ? normalizedCollectionFilename.slice(songsPrefix.length + 1)
-      : basename(normalizedCollectionFilename)
-    const desiredArchiveRelativePath = normalizeFilename(
-      join(settings.songsFolderPath, '_replaced', archiveDate, archiveSuffix)
-    )
+    const desiredArchiveRelativePath = normalizeFilename(buildReplacementArchiveRelativePath(settings.songsFolderPath, normalizedCollectionFilename, archiveDate))
     const archivePath = await findAvailableArchivePath(resolveMusicRelativePath(desiredArchiveRelativePath))
     const archiveRelativePath = toMusicRelativePath(settings, archivePath)
     const replacementRelativePath = buildReplacementRelativePath(
