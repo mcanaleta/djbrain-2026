@@ -161,7 +161,7 @@ export function ImportRecordFilesTable({
           <SectionKicker>Import Record</SectionKicker>
           <div className="mt-1 text-sm font-semibold text-zinc-100">{record.artist} - {record.title}</div>
         </div>
-        <Pill>{record.fileCount} files</Pill>
+        <Pill>{record.totalFileCount} files</Pill>
       </div>
       <div className="mb-2 flex items-center gap-2 rounded-md border border-zinc-800/70 bg-zinc-900/20 px-2 py-1.5">
         <div className="w-14 text-[10px] uppercase tracking-wide text-zinc-500">Needle</div>

@@ -19,6 +19,7 @@ export type ImportTracksTableRow = {
   replacementFilename: string | null
   betterQualityFound: boolean | null
   fileCount: number
+  totalFileCount: number
   files: ImportRow[]
   prep: string
   bestFile: ImportRow
@@ -126,6 +127,7 @@ export function groupImportRows(rows: ImportRow[]): ImportTracksTableRow[] {
       const bestFile = [...group].sort(compareImportRows)[0]
       const id = importRecordId(key)
       const usesRecording = key.startsWith('recording:')
+      const replacementFilename = group.find((row) => row.importExactExistingFilename)?.importExactExistingFilename ?? null
       return {
         id,
         legacyIds: [...new Set(group.flatMap((row) => importLegacyGroupKeys(row).map(importRecordId)).filter((legacyId) => legacyId !== id))],
@@ -136,14 +138,14 @@ export function groupImportRows(rows: ImportRow[]): ImportTracksTableRow[] {
           : bestFile.title,
         year: usesRecording ? bestFile.year : bestFile.importMatchYear || bestFile.year,
         releaseTitle: bestFile.importReleaseTitle ?? null,
-        replacementFilename:
-          group.find((row) => row.importExactExistingFilename)?.importExactExistingFilename ?? null,
+        replacementFilename,
         betterQualityFound: group.some((row) => row.importBetterThanExisting === true)
           ? true
           : group.some((row) => row.importBetterThanExisting === false)
             ? false
             : null,
         fileCount: group.length,
+        totalFileCount: group.length + (replacementFilename ? 1 : 0),
         files: [...group].sort(compareImportRows),
         prep: summarizePrep(group),
         bestFile

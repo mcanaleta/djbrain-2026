@@ -89,4 +89,14 @@ describe('groupImportRows', () => {
     assert.equal(rows[0]?.id, 1932)
     assert.ok(rows[0]?.legacyIds.includes(2926488223))
   })
+
+  it('counts the replacement source in total files', () => {
+    const rows = groupImportRows(buildImportRows([{
+      ...item("hasoulseek/complete/UnknownAlbum/A1 - Jog - Future (Remix '98).flac", ''),
+      importExactExistingFilename: "songs/1998/Jog - Future (Remix '98).mp3"
+    }]))
+
+    assert.equal(rows[0]?.fileCount, 1)
+    assert.equal(rows[0]?.totalFileCount, 2)
+  })
 })

@@ -87,7 +87,7 @@ export function ImportTracksTable({
       key: 'files',
       header: 'Files',
       cellClassName: 'whitespace-nowrap text-zinc-400',
-      render: (row) => row.fileCount
+      render: (row) => row.totalFileCount
     },
     {
       key: 'replace',
