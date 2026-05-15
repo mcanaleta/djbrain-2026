@@ -48,6 +48,34 @@ describe('readProcessWorkerOptions', () => {
     assert.equal(options.dryRun, true)
   })
 
+  it('defaults local workers to higher priority automatic takeover', () => {
+    const options = readProcessWorkerOptions({
+      args: [],
+      env: {},
+      hostname: 'machook',
+      pid: 123,
+      defaultIntervalSeconds: 60,
+      defaultLimit: 10
+    })
+
+    assert.equal(options.priority, 50)
+    assert.equal(options.takeover, true)
+  })
+
+  it('defaults production workers to lower priority without preemption', () => {
+    const options = readProcessWorkerOptions({
+      args: [],
+      env: { DJBRAIN_PROCESS_TIER: 'prod' },
+      hostname: 'raspberry4',
+      pid: 123,
+      defaultIntervalSeconds: 60,
+      defaultLimit: 10
+    })
+
+    assert.equal(options.priority, 10)
+    assert.equal(options.takeover, false)
+  })
+
   it('keeps the lease alive longer than the polling interval', () => {
     const options = readProcessWorkerOptions({
       args: ['--interval-seconds', '300'],

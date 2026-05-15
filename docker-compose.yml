@@ -29,6 +29,8 @@ services:
       postgres:
         condition: service_healthy
     env_file: .env.docker
+    environment:
+      DJBRAIN_PROCESS_TIER: prod
     extra_hosts:
       - "host.docker.internal:host-gateway"
     profiles: ["downloader"]
@@ -43,6 +45,8 @@ services:
     volumes:
       - ${DJBRAIN_HOST_MUSIC_PATH:-/home/marc/Dropbox/music}:/music:ro
     env_file: .env.docker
+    environment:
+      DJBRAIN_PROCESS_TIER: prod
     profiles: ["sync"]
     restart: unless-stopped
 
@@ -57,6 +61,8 @@ services:
     volumes:
       - ${DJBRAIN_HOST_MUSIC_PATH:-/home/marc/Dropbox/music}:/music:ro
     env_file: .env.docker
+    environment:
+      DJBRAIN_PROCESS_TIER: prod
     extra_hosts:
       - "host.docker.internal:host-gateway"
     profiles: ["admin"]

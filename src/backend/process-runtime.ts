@@ -39,18 +39,23 @@ function readBoolean(value: string | undefined, fallback: boolean): boolean {
   return fallback
 }
 
+function isProdTier(env: Env): boolean {
+  return (env.DJBRAIN_PROCESS_TIER ?? '').trim().toLowerCase() === 'prod'
+}
+
 export function readProcessWorkerOptions(input: ProcessWorkerOptionsInput): ProcessWorkerOptions {
   const interval = readNumber(input.args, input.env, '--interval-seconds', input.defaultIntervalSeconds)
   const limit = readNumber(input.args, input.env, '--limit', input.defaultLimit)
   const intervalSeconds = Math.max(5, interval)
   const leaseSeconds = readNumber(input.args, input.env, '--lease-seconds', input.defaultLeaseSeconds ?? intervalSeconds + 5)
+  const localDefault = !isProdTier(input.env)
   return {
     intervalSeconds,
     limit: Math.max(1, limit),
     dryRun: input.args.includes('--dry-run'),
     ownerId: readArg(input.args, '--owner-id') ?? input.env.DJBRAIN_PROCESS_OWNER_ID?.trim() ?? `${input.hostname}:${input.pid}`,
-    priority: Math.max(0, readNumber(input.args, input.env, '--priority', 10)),
-    takeover: input.args.includes('--takeover') || input.env.DJBRAIN_PROCESS_TAKEOVER === '1',
+    priority: Math.max(0, readNumber(input.args, input.env, '--priority', localDefault ? 50 : 10)),
+    takeover: input.args.includes('--takeover') || readBoolean(input.env.DJBRAIN_PROCESS_TAKEOVER, localDefault),
     leaseMs: Math.max(10, intervalSeconds + 5, leaseSeconds) * 1_000
   }
 }

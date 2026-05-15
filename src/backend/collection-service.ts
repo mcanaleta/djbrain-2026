@@ -20,6 +20,7 @@ import {
   scanDirectory,
   type SyncChange
 } from './collection-scanner.ts'
+import { listDropboxAudioFiles, readDropboxFileSourceConfig, type DropboxFileSourceConfig } from './dropbox-file-source.ts'
 import { WantListStore } from './want-list-store.ts'
 import { DownloadAttemptStore, type DownloadAttemptCreateInput, type DownloadAttemptPatch } from './download-attempt-store.ts'
 import { buildExpectedDownloadFilename } from './downloader-worker-planning.ts'
@@ -1841,6 +1842,9 @@ export class CollectionService {
   }
 
   private async runSyncPass(): Promise<string | null> {
+    const dropboxConfig = readDropboxFileSourceConfig(this.settings)
+    if (dropboxConfig) return this.runDropboxSyncPass(dropboxConfig)
+
     const context = await resolveScanContext(this.settings)
     if (!context.musicRootPath || context.scanRoots.length === 0) {
       return context.warning
@@ -1881,6 +1885,22 @@ export class CollectionService {
       return 'One or more scan folders could not be read. Existing collection entries were preserved.'
     }
     return context.warning
+  }
+
+  private async runDropboxSyncPass(dropboxConfig: DropboxFileSourceConfig): Promise<string | null> {
+    const knownState = await this.readKnownState()
+    const scanned = await listDropboxAudioFiles(dropboxConfig)
+    const seen = new Set(scanned.map((file) => file.filename))
+    const changed = new Map<string, SyncChange>()
+    for (const file of scanned) {
+      if (knownState.get(file.filename) !== file.mtimeMs) {
+        changed.set(file.filename, { filesize: file.filesize, mtimeMs: file.mtimeMs })
+      }
+    }
+    const removed = [...knownState.keys()].filter((filename) => !seen.has(filename))
+    await this.applyChanges(changed, removed)
+    this.status.itemCount = await this.readItemCount()
+    return null
   }
 
   private async readKnownState(): Promise<Map<string, number>> {
