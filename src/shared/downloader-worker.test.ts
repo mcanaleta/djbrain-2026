@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 import {
   buildDownloadRequests,
   buildExpectedDownloadFilename,
+  planDownloadAttemptFileLinks,
   downloadAttemptStatusFromSlskdState,
   wantListStatusAfterAttempt,
   buildUpgradeWantedMigration,
@@ -110,6 +111,44 @@ describe('buildExpectedDownloadFilename', () => {
 
   it('uses null when no completed-download prefix is configured', () => {
     assert.equal(buildExpectedDownloadFilename([], 'Track.mp3'), null)
+  })
+})
+
+describe('planDownloadAttemptFileLinks', () => {
+  it('links existing files by remote tail when the configured download root changed', () => {
+    const links = planDownloadAttemptFileLinks([{
+      id: 53,
+      wantListId: 9,
+      status: 'downloaded',
+      expectedLocalFilename: 'soulseek/complete/MUSIC/Spd/02-spd_-_a_great_reward_(spd_base)-tia.flac',
+      remoteFilename: 'MUSIC\\Spd\\02-spd_-_a_great_reward_(spd_base)-tia.flac',
+      remoteSize: 40941219,
+      localFilename: null,
+      localFilesize: null
+    }], [{
+      filename: 'hasoulseek/complete/Spd/02-spd_-_a_great_reward_(spd_base)-tia.flac',
+      filesize: 40941219
+    }])
+
+    assert.deepEqual(links.map((link) => [link.attemptId, link.filename]), [[53, 'hasoulseek/complete/Spd/02-spd_-_a_great_reward_(spd_base)-tia.flac']])
+  })
+
+  it('uses Soulseek conflict suffixes and size to repair duplicate local links', () => {
+    const links = planDownloadAttemptFileLinks([{
+      id: 13,
+      wantListId: 9,
+      status: 'downloaded',
+      expectedLocalFilename: null,
+      remoteFilename: '@@peer\\Clubland X-treme Hardcore 4 (2007)\\1-02 Darren Styles & Francis Hill - Come Running.flac',
+      remoteSize: 41129379,
+      localFilename: 'hasoulseek/complete/Clubland X-treme Hardcore 4 (2007)/1-02 Darren Styles & Francis Hill - Come Running.flac',
+      localFilesize: 41004560
+    }], [{
+      filename: 'hasoulseek/complete/Clubland X-treme Hardcore 4 (2007)/1-02 Darren Styles & Francis Hill - Come Running_639142018835027264.flac',
+      filesize: 41129379
+    }])
+
+    assert.equal(links[0]?.filename, 'hasoulseek/complete/Clubland X-treme Hardcore 4 (2007)/1-02 Darren Styles & Francis Hill - Come Running_639142018835027264.flac')
   })
 })
 

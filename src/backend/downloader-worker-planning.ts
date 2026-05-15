@@ -32,6 +32,29 @@ export type DownloadAttemptSeed = {
   remoteSize: number | null
 }
 
+export type DownloadAttemptFileLinkInput = {
+  id: number
+  wantListId: number | null
+  status: DownloadAttemptStatus
+  expectedLocalFilename: string | null
+  remoteFilename: string | null
+  remoteSize: number | null
+  localFilename: string | null
+  localFilesize: number | null
+}
+
+export type DownloadAttemptFileInput = {
+  filename: string
+  filesize: number
+}
+
+export type DownloadAttemptFileLinkPlan = {
+  attemptId: number
+  wantListId: number | null
+  filename: string
+  filesize: number
+}
+
 export type DownloadRequestPlan = {
   wantListId: number
   query: string
@@ -76,6 +99,58 @@ export function buildExpectedDownloadFilename(downloadFolderPaths: string[], rem
   const unsafeRoot = segments[0]?.includes(':') || segments[0]?.startsWith('@@')
   const tail = completeIndex >= 0 ? segments.slice(completeIndex + 1) : unsafeRoot ? [basenameOfFilename(normalized)] : segments
   return normalizeFilename(`${prefix}/${tail.join('/') || basenameOfFilename(normalized)}`)
+}
+
+function linkPath(value: string | null | undefined): string {
+  return value ? normalizeFilename(value).replace(/_\d{12,}(?=\.[^/.]+$)/, '').toLowerCase() : ''
+}
+
+function flacPath(value: string): string {
+  return value.replace(/\.wav$/i, '.flac')
+}
+
+function pathTail(value: string, count: number): string {
+  return value.split('/').filter(Boolean).slice(-count).join('/')
+}
+
+function linkScore(attempt: DownloadAttemptFileLinkInput, file: DownloadAttemptFileInput): number {
+  const local = linkPath(file.filename)
+  const expected = linkPath(attempt.expectedLocalFilename)
+  const remote = linkPath(attempt.remoteFilename).replace(/^@@[^/]+\//, '')
+  let score = expected && [expected, flacPath(expected)].includes(local) ? 100 : 0
+  for (const source of [expected, remote].filter(Boolean)) {
+    if ([pathTail(source, 2), flacPath(pathTail(source, 2))].some((tail) => tail && local.endsWith(tail))) score = Math.max(score, 70)
+    if ([pathTail(source, 1), flacPath(pathTail(source, 1))].some((tail) => tail && local.endsWith(tail))) score = Math.max(score, 50)
+  }
+  if (!score) return 0
+  if (attempt.remoteSize != null) score += file.filesize === attempt.remoteSize ? 20 : -20
+  if (attempt.status === 'downloaded') score += 5
+  if (attempt.localFilename && linkPath(attempt.localFilename) === local) score += 2
+  return score >= 50 ? score : 0
+}
+
+export function planDownloadAttemptFileLinks(
+  attempts: DownloadAttemptFileLinkInput[],
+  files: DownloadAttemptFileInput[]
+): DownloadAttemptFileLinkPlan[] {
+  const pairs = attempts.flatMap((attempt) => files
+    .map((file) => ({ attempt, file, score: linkScore(attempt, file) }))
+    .filter((item) => item.score > 0))
+  const best = new Map<number, typeof pairs>()
+  for (const pair of pairs) best.set(pair.attempt.id, [...(best.get(pair.attempt.id) ?? []), pair])
+  const usable = [...best.values()].flatMap((items) => {
+    const score = Math.max(...items.map((item) => item.score))
+    const top = items.filter((item) => item.score === score)
+    return top.length === 1 ? top : []
+  }).sort((left, right) => right.score - left.score || left.attempt.id - right.attempt.id)
+  const usedFiles = new Set<string>()
+  const usedAttempts = new Set<number>()
+  return usable.flatMap(({ attempt, file }) => {
+    if (usedAttempts.has(attempt.id) || usedFiles.has(file.filename)) return []
+    usedAttempts.add(attempt.id)
+    usedFiles.add(file.filename)
+    return [{ attemptId: attempt.id, wantListId: attempt.wantListId, filename: file.filename, filesize: file.filesize }]
+  })
 }
 
 export function downloadAttemptStatusFromSlskdState(state: string | null): DownloadAttemptStatus | null {

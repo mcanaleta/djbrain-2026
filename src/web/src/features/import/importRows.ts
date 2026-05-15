@@ -63,7 +63,29 @@ function normalizeGroupTitle(value: string): string {
     .replace(/\s+\d{6,}$/, '')
 }
 
+function normalizeGroupPath(value: string): string {
+  return value.trim().replace(/\\/g, '/').replace(/\/+/g, '/').toLowerCase()
+}
+
+function hasConflictSuffix(value: string): boolean {
+  return /_\d{12,}(?=\.[^/.]+$)/.test(value)
+}
+
+function importFileKey(row: ImportRow): string {
+  return `${normalizeGroupPath(row.filename).replace(/_\d{12,}(?=\.[^/.]+$)/, '')}:${row.filesize}`
+}
+
+function uniqueImportRows(rows: ImportRow[]): ImportRow[] {
+  const byFile = new Map<string, ImportRow>()
+  for (const row of rows) {
+    const existing = byFile.get(importFileKey(row))
+    if (!existing || (hasConflictSuffix(existing.filename) && !hasConflictSuffix(row.filename))) byFile.set(importFileKey(row), row)
+  }
+  return [...byFile.values()]
+}
+
 function importGroupKey(row: ImportRow): string {
+  if (row.importExactExistingFilename) return `replace:${normalizeGroupPath(row.importExactExistingFilename)}`
   if (row.recordingId != null) return `recording:${row.recordingId}`
   return importFallbackGroupKey(row)
 }
@@ -124,30 +146,37 @@ export function groupImportRows(rows: ImportRow[]): ImportTracksTableRow[] {
   }
   return [...groups.entries()]
     .map(([key, group]) => {
-      const bestFile = [...group].sort(compareImportRows)[0]
-      const id = importRecordId(key)
-      const usesRecording = key.startsWith('recording:')
+      const files = uniqueImportRows(group).sort(compareImportRows)
+      const bestFile = files[0]
+      const recordingId = group.find((row) => row.recordingId != null)?.recordingId ?? null
+      const id = recordingId ?? importRecordId(key)
+      const usesRecording = recordingId != null
+      const displayFile = usesRecording ? group.find((row) => row.recordingId === recordingId) ?? bestFile : bestFile
       const replacementFilename = group.find((row) => row.importExactExistingFilename)?.importExactExistingFilename ?? null
       return {
         id,
-        legacyIds: [...new Set(group.flatMap((row) => importLegacyGroupKeys(row).map(importRecordId)).filter((legacyId) => legacyId !== id))],
+        legacyIds: [...new Set(group.flatMap((row) => [
+          importRecordId(key),
+          ...importLegacyGroupKeys(row).map(importRecordId),
+          ...(row.recordingId != null ? [row.recordingId] : [])
+        ]).filter((legacyId) => legacyId !== id))],
         key,
-        artist: usesRecording ? bestFile.artist : bestFile.importMatchArtist || bestFile.artist,
+        artist: usesRecording ? displayFile.artist : bestFile.importMatchArtist || bestFile.artist,
         title: !usesRecording && bestFile.importMatchTitle
           ? `${bestFile.importMatchTitle}${bestFile.importMatchVersion ? ` (${bestFile.importMatchVersion})` : ''}`
-          : bestFile.title,
-        year: usesRecording ? bestFile.year : bestFile.importMatchYear || bestFile.year,
+          : displayFile.title,
+        year: usesRecording ? displayFile.year : bestFile.importMatchYear || bestFile.year,
         releaseTitle: bestFile.importReleaseTitle ?? null,
         replacementFilename,
-        betterQualityFound: group.some((row) => row.importBetterThanExisting === true)
+        betterQualityFound: files.some((row) => row.importBetterThanExisting === true)
           ? true
-          : group.some((row) => row.importBetterThanExisting === false)
+          : files.some((row) => row.importBetterThanExisting === false)
             ? false
             : null,
-        fileCount: group.length,
-        totalFileCount: group.length + (replacementFilename ? 1 : 0),
-        files: [...group].sort(compareImportRows),
-        prep: summarizePrep(group),
+        fileCount: files.length,
+        totalFileCount: files.length + (replacementFilename ? 1 : 0),
+        files,
+        prep: summarizePrep(files),
         bestFile
       }
     })

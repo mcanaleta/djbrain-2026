@@ -99,4 +99,34 @@ describe('groupImportRows', () => {
     assert.equal(rows[0]?.fileCount, 1)
     assert.equal(rows[0]?.totalFileCount, 2)
   })
+
+  it('groups assigned and pending replacement candidates by the source collection file', () => {
+    const rows = groupImportRows(buildImportRows([{
+      ...item('hasoulseek/complete/SPD/mp3.mp3', ''),
+      recordingId: 2763,
+      recordingCanonical: { artist: 'SPD', title: 'A Great Reward', version: 'SPD Base', year: '2000' },
+      importExactExistingFilename: 'songs/2000/SPD - A Great Reward (SPD Base).mp3'
+    }, {
+      ...item('hasoulseek/complete/SPD/flac.flac', ''),
+      importMatchArtist: 'SPD',
+      importMatchTitle: 'A Great Reward',
+      importMatchVersion: 'SPD Base',
+      importExactExistingFilename: 'songs/2000/SPD - A Great Reward (SPD Base).mp3'
+    }]))
+
+    assert.equal(rows.length, 1)
+    assert.equal(rows[0]?.id, 2763)
+    assert.equal(rows[0]?.fileCount, 2)
+    assert.equal(rows[0]?.totalFileCount, 3)
+  })
+
+  it('hides duplicate Soulseek conflict copies with the same size', () => {
+    const rows = groupImportRows(buildImportRows([
+      item("hasoulseek/complete/Album/Track_639142650659652653.mp3", 'same', 123),
+      item('hasoulseek/complete/Album/Track.mp3', 'same', 123)
+    ]))
+
+    assert.equal(rows[0]?.fileCount, 1)
+    assert.equal(rows[0]?.files[0]?.filename, 'hasoulseek/complete/Album/Track.mp3')
+  })
 })

@@ -23,7 +23,12 @@ import {
 import { listDropboxAudioFiles, readDropboxFileSourceConfig, type DropboxFileSourceConfig } from './dropbox-file-source.ts'
 import { WantListStore } from './want-list-store.ts'
 import { DownloadAttemptStore, type DownloadAttemptCreateInput, type DownloadAttemptPatch } from './download-attempt-store.ts'
-import { buildExpectedDownloadFilename } from './downloader-worker-planning.ts'
+import {
+  buildExpectedDownloadFilename,
+  planDownloadAttemptFileLinks,
+  type DownloadAttemptFileInput,
+  type DownloadAttemptFileLinkInput
+} from './downloader-worker-planning.ts'
 import { PROCESS_LEASE_SCHEMA_SQL, ProcessLeaseStore, type ProcessLease, type ProcessLeaseInput } from './process-lease-store.ts'
 import { ensureAppSchemaVersion } from './runtime-governance.ts'
 import { UpgradeCaseStore, type UpgradeCaseCreateInput, type UpgradeCasePatch } from './upgrade-case-store.ts'
@@ -1150,7 +1155,7 @@ export class CollectionService {
             collection_files.filename AS filename,
             collection_files.filesize AS filesize,
             ${scoreSql} AS score,
-            file_identification_state.recording_id AS recordingId,
+            COALESCE(file_identification_state.recording_id, download_origin.originRecordingId) AS recordingId,
             (
               SELECT external_key
               FROM recording_source_claims
@@ -1165,9 +1170,9 @@ export class CollectionService {
               ORDER BY confidence DESC, id
               LIMIT 1
             ) AS recordingMusicBrainzExternalKey,
-            file_identification_state.status AS identificationStatus,
-            file_identification_state.confidence AS identificationConfidence,
-            file_identification_state.assignment_method AS assignmentMethod,
+            COALESCE(file_identification_state.status, CASE WHEN download_origin.originRecordingId IS NULL THEN NULL ELSE 'ready' END) AS identificationStatus,
+            COALESCE(file_identification_state.confidence, CASE WHEN download_origin.originRecordingId IS NULL THEN NULL ELSE 100 END) AS identificationConfidence,
+            COALESCE(file_identification_state.assignment_method, CASE WHEN download_origin.originRecordingId IS NULL THEN NULL ELSE 'manual' END) AS assignmentMethod,
             recordings.canonical_artist AS recordingCanonicalArtist,
             recordings.canonical_title AS recordingCanonicalTitle,
             recordings.canonical_version AS recordingCanonicalVersion,
@@ -1182,16 +1187,18 @@ export class CollectionService {
             download_origin.originSourceCollectionFilename AS downloadOriginSourceCollectionFilename
           FROM collection_files
           LEFT JOIN file_identification_state ON file_identification_state.filename = collection_files.filename
-          LEFT JOIN recordings ON recordings.id = file_identification_state.recording_id
           LEFT JOIN import_review_cache ON import_review_cache.filename = collection_files.filename
           LEFT JOIN LATERAL (
-            SELECT COALESCE(download_attempts.origin_source_collection_filename, want_list.source_collection_filename) AS originSourceCollectionFilename
+            SELECT
+              COALESCE(download_attempts.origin_recording_id, want_list.recording_id) AS originRecordingId,
+              COALESCE(download_attempts.origin_source_collection_filename, want_list.source_collection_filename) AS originSourceCollectionFilename
             FROM download_attempts
             LEFT JOIN want_list ON want_list.id = download_attempts.want_list_id
             WHERE download_attempts.local_filename = collection_files.filename
             ORDER BY download_attempts.completed_at DESC NULLS LAST, download_attempts.updated_at DESC, download_attempts.id DESC
             LIMIT 1
           ) download_origin ON TRUE
+          LEFT JOIN recordings ON recordings.id = COALESCE(file_identification_state.recording_id, download_origin.originRecordingId)
           WHERE ${whereSql}
           ORDER BY ${ftsQuery ? 'score DESC,' : ''} lower(collection_files.filename)
           ${ftsQuery ? `LIMIT $${nextParam + 1}::int` : ''}
@@ -2043,10 +2050,6 @@ export class CollectionService {
   }
 
   private async applyChanges(changed: Map<string, SyncChange>, removed: string[]): Promise<void> {
-    if (changed.size === 0 && removed.length === 0) {
-      return
-    }
-
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
@@ -2075,9 +2078,10 @@ export class CollectionService {
         await client.query('DELETE FROM collection_files WHERE filename = $1', [filename])
       }
 
-      await this.syncDownloadAttemptFileLinksWithClient(client, changed, removed)
-      const touchedImportQueue = await this.syncImportReviewCacheWithClient(client, changed, removed)
-      const touchedIdentificationQueue = await this.syncIdentificationStateWithClient(client, changed, removed)
+      const linked = await this.syncDownloadAttemptFileLinksWithClient(client, removed)
+      const reviewChanges = new Map([...changed, ...linked])
+      const touchedImportQueue = await this.syncImportReviewCacheWithClient(client, reviewChanges, removed)
+      const touchedIdentificationQueue = await this.syncIdentificationStateWithClient(client, reviewChanges, removed)
       await this.syncFileAnalysisStateWithClient(client, changed, removed)
 
       await client.query('COMMIT')
@@ -4008,9 +4012,9 @@ export class CollectionService {
 
   private async syncDownloadAttemptFileLinksWithClient(
     client: PoolClient,
-    changed: Map<string, SyncChange>,
     removed: string[]
-  ): Promise<void> {
+  ): Promise<Map<string, SyncChange>> {
+    const linked = new Map<string, SyncChange>()
     for (const filename of removed) {
       await client.query(
         `UPDATE download_attempts SET local_filename = NULL, local_filesize = NULL, updated_at = now() WHERE local_filename = $1`,
@@ -4018,53 +4022,80 @@ export class CollectionService {
       )
     }
 
-    for (const [filename, change] of changed.entries()) {
-      if (!isDownloadRelativeFilename(filename, this.settings.downloadFolderPaths)) continue
+    const prefixes = getDownloadFolderPrefixes(this.settings.downloadFolderPaths)
+    if (prefixes.length === 0) return linked
+    const prefixWhere = buildPrefixWhereClausePg('collection_files.filename', prefixes)
+    const files = (await client.query<DownloadAttemptFileInput & { mtimems: number | bigint }>(
+      `
+        SELECT collection_files.filename, collection_files.filesize, collection_file_state.mtime_ms AS mtimeMs
+        FROM collection_files
+        JOIN collection_file_state ON collection_file_state.filename = collection_files.filename
+        WHERE ${prefixWhere.clause}
+      `,
+      prefixWhere.params
+    )).rows
+    const attempts = (await client.query<{
+      id: number | bigint
+      wantlistid: number | bigint | null
+      status: DownloadAttemptFileLinkInput['status']
+      expectedlocalfilename: string | null
+      remotefilename: string | null
+      remotesize: number | bigint | null
+      localfilename: string | null
+      localfilesize: number | bigint | null
+    }>(
+      `
+        SELECT id, want_list_id AS wantListId, status, expected_local_filename AS expectedLocalFilename,
+          remote_filename AS remoteFilename, remote_size AS remoteSize, local_filename AS localFilename, local_filesize AS localFilesize
+        FROM download_attempts
+        WHERE status IN ('queued', 'requested', 'downloading', 'downloaded', 'missing_local')
+          AND (expected_local_filename IS NOT NULL OR remote_filename IS NOT NULL)
+          AND (
+            local_filename IS NULL
+            OR (remote_size IS NOT NULL AND local_filesize IS DISTINCT FROM remote_size)
+            OR NOT EXISTS (SELECT 1 FROM collection_files WHERE filename = download_attempts.local_filename)
+          )
+      `
+    )).rows.map((row): DownloadAttemptFileLinkInput => ({
+      id: toNumber(row.id),
+      wantListId: row.wantlistid == null ? null : toNumber(row.wantlistid),
+      status: row.status,
+      expectedLocalFilename: row.expectedlocalfilename,
+      remoteFilename: row.remotefilename,
+      remoteSize: row.remotesize == null ? null : toNumber(row.remotesize),
+      localFilename: row.localfilename,
+      localFilesize: row.localfilesize == null ? null : toNumber(row.localfilesize)
+    }))
+    const fileState = new Map(files.map((file) => [file.filename, { filesize: toNumber(file.filesize), mtimeMs: toNumber(file.mtimems) }]))
+    for (const link of planDownloadAttemptFileLinks(attempts, files.map((file) => ({ filename: file.filename, filesize: toNumber(file.filesize) })))) {
       const row = (await client.query<{ id: number | string; wantlistid: number | string | null }>(
         `
-          WITH matches AS (
-            SELECT id, want_list_id
-            FROM (
-              SELECT
-                id,
-                want_list_id,
-                expected_local_filename,
-                regexp_replace(regexp_replace(replace(remote_filename, E'\\\\', '/'), '^@@[^/]+/', ''), '^.*/([^/]+/[^/]+)$', '\\1') AS remote_tail
-              FROM download_attempts
-              WHERE local_filename IS NULL
-                AND (expected_local_filename IS NOT NULL OR remote_filename IS NOT NULL)
-            ) attempts
-            WHERE (
-                expected_local_filename = $1
-                OR lower(regexp_replace(expected_local_filename, '\\.wav$', '.flac', 'i')) = lower($1)
-                OR lower($1) LIKE '%' || lower(remote_tail)
-                OR lower($1) LIKE '%' || lower(regexp_replace(remote_tail, '\\.wav$', '.flac', 'i'))
-              )
-          ),
-          chosen AS (
-            SELECT * FROM matches WHERE (SELECT COUNT(*) FROM matches) = 1
-          )
           UPDATE download_attempts target
-          SET local_filename = $1,
-              local_filesize = $2,
+          SET local_filename = $2,
+              local_filesize = $3,
               status = 'downloaded',
               origin_recording_id = COALESCE(target.origin_recording_id, (SELECT recording_id FROM want_list WHERE id = target.want_list_id)),
+              origin_source_collection_filename = COALESCE(target.origin_source_collection_filename, (SELECT source_collection_filename FROM want_list WHERE id = target.want_list_id)),
               completed_at = COALESCE(target.completed_at, now()),
               error_message = NULL,
               updated_at = now()
-          FROM chosen
-          WHERE target.id = chosen.id
+          WHERE target.id = $1
+            AND (target.local_filename IS DISTINCT FROM $2 OR target.local_filesize IS DISTINCT FROM $3 OR target.status <> 'downloaded')
           RETURNING target.id, target.want_list_id AS wantlistid
         `,
-        [filename, change.filesize]
+        [link.attemptId, link.filename, link.filesize]
       )).rows[0]
-      if (row?.wantlistid != null) {
+      if (!row) continue
+      const state = fileState.get(link.filename)
+      if (state) linked.set(link.filename, state)
+      if (row.wantlistid != null) {
         await client.query(
           `UPDATE want_list SET pipeline_status = 'downloaded', selected_download_id = COALESCE(selected_download_id, $2), updated_at = now() WHERE id = $1`,
           [toNumber(row.wantlistid), toNumber(row.id)]
         )
       }
     }
+    return linked
   }
 
   private async readDownloadAttemptOriginWithClient(client: PoolClient, filename: string): Promise<DownloadAttemptOrigin | null> {
