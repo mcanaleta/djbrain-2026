@@ -133,6 +133,18 @@ function parseImportReview(value: string | null | undefined): ImportReview | nul
   }
 }
 
+export function buildDownloadExistingMatchCanonical(input: {
+  filename: string
+  importArtist: string | null
+  importTitle: string | null
+  importVersion: string | null
+  importYear: string | null
+}): RecordingCanonical | null {
+  const cached = toCanonical(input.importArtist, input.importTitle, input.importVersion, input.importYear)
+  const canonical = cached?.artist && cached.title ? cached : parseImportFilename(input.filename)
+  return canonical?.artist && canonical.title ? canonical : null
+}
+
 function buildFtsQuery(value: string): string {
   const terms = tokenizeSearchText(value).filter((term) => term.length >= 2)
   return terms.join(' ')
@@ -1160,8 +1172,17 @@ export class CollectionService {
         const review = parseImportReview(row.importreviewjson)
         const candidate = review?.candidates[review.selectedCandidateIndex ?? 0] ?? review?.candidates[0] ?? null
         const localMatch = pickImportReviewLocalMatch(review)
-        const localCanonical = localMatch?.recordingCanonical ?? null
-        const existingFilename = candidate?.exactExistingFilename ?? localMatch?.filename ?? null
+        const parsedMatch = candidate || localMatch
+          ? null
+          : await this.findExistingCollectionMatchByCanonical(buildDownloadExistingMatchCanonical({
+              filename: row.filename,
+              importArtist: row.importartist,
+              importTitle: row.importtitle,
+              importVersion: row.importversion,
+              importYear: row.importyear
+            }), prefixes)
+        const localCanonical = localMatch?.recordingCanonical ?? parsedMatch?.canonical ?? null
+        const existingFilename = candidate?.exactExistingFilename ?? localMatch?.filename ?? parsedMatch?.filename ?? null
         const sourceFilesize = toNumber(row.filesize)
         const sourceAnalysis = await this.readCachedAudioAnalysisByFilename(row.filename)
         const sourceQuality = await this.readFileQuality(row.filename, sourceFilesize)
@@ -3730,6 +3751,41 @@ export class CollectionService {
       )
     ).rows[0]
     return row?.filesize == null ? null : toNumber(row.filesize)
+  }
+
+  private async findExistingCollectionMatchByCanonical(canonical: RecordingCanonical | null, downloadPrefixes: string[]) {
+    if (!canonical?.artist || !canonical.title) return null
+    const normKey = buildCanonicalNormKey(canonical)
+    if (!normKey) return null
+    const prefixWhere = buildPrefixWhereClausePg('collection_files.filename', downloadPrefixes, 2)
+    const rows = (await this.pool.query<{
+      filename: string
+      canonicalartist: string | null
+      canonicaltitle: string | null
+      canonicalversion: string | null
+      canonicalyear: string | null
+    }>(
+      `
+        SELECT collection_files.filename, recordings.canonical_artist AS canonicalArtist,
+          recordings.canonical_title AS canonicalTitle, recordings.canonical_version AS canonicalVersion,
+          recordings.canonical_year AS canonicalYear
+        FROM collection_files
+        JOIN file_identification_state ON file_identification_state.filename = collection_files.filename
+        JOIN recordings ON recordings.id = file_identification_state.recording_id
+        WHERE recordings.merged_into_recording_id IS NULL
+          AND recordings.canonical_norm_key = $1
+          AND NOT (${prefixWhere.clause})
+        ORDER BY lower(collection_files.filename)
+        LIMIT 2
+      `,
+      [normKey, ...prefixWhere.params]
+    )).rows
+    return rows.length === 1
+      ? {
+          filename: rows[0].filename,
+          canonical: toCanonical(rows[0].canonicalartist, rows[0].canonicaltitle, rows[0].canonicalversion, rows[0].canonicalyear)
+        }
+      : null
   }
 
   private async readFileQuality(filename: string, filesize: number | null) {
