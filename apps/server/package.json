@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "start": "node --env-file-if-exists=../../.env.local --experimental-strip-types src/index.ts --port 5180 --static ../../dist",
-    "dev": "DJBRAIN_ENABLE_AUTOMATION=0 node --env-file-if-exists=../../.env.local --watch --experimental-strip-types src/index.ts --port 5181",
+    "dev": "node --env-file-if-exists=../../.env.local --watch --experimental-strip-types src/index.ts --port 5181",
     "test": "node --experimental-strip-types --test src/*.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
