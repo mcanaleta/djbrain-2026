@@ -282,15 +282,18 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
   app.post(
     '/api/collection/recordings/assign-discogs-track',
     asyncHandler(async (request, response) => {
-      const body = (request.body ?? null) as { filename?: string | null; match?: unknown } | null
+      const body = (request.body ?? null) as { filename?: string | null; recordingId?: number | null; match?: unknown } | null
       const filename = typeof body?.filename === 'string' ? normalizeFilename(body.filename) : ''
+      const recordingId = typeof body?.recordingId === 'number' ? body.recordingId : null
       const match = readDiscogsTrackMatch(body?.match)
-      if (!filename || !match) {
-        sendJson(response, 400, { message: 'filename and Discogs track match are required.' })
+      if ((!filename && !recordingId) || !match) {
+        sendJson(response, 400, { message: 'filename or recordingId and Discogs track match are required.' })
         return
       }
-      const result = await requireCollectionService().assignDiscogsTrack(filename, match)
-      if (syncMediaItem) await syncMediaItem(filename)
+      const result = recordingId
+        ? await requireCollectionService().assignDiscogsTrackToRecording(recordingId, match)
+        : await requireCollectionService().assignDiscogsTrack(filename, match)
+      if (filename && syncMediaItem) await syncMediaItem(filename)
       else await syncMediaCatalog?.()
       sendJson(response, 200, result)
     })

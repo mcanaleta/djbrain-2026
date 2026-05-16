@@ -3847,6 +3847,80 @@ export class CollectionService {
     }
   }
 
+  public async assignDiscogsTrackToRecording(recordingId: number, match: DiscogsTrackMatch): Promise<RecordingDetails | null> {
+    await this.ensureReady()
+    const canonical = toCanonical(match.artist, match.title, match.version, match.year)
+    if (!Number.isFinite(recordingId) || recordingId <= 0 || !canonical) return null
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      const updated = await client.query(
+        `
+          UPDATE recordings
+          SET canonical_artist = $2, canonical_title = $3, canonical_version = $4, canonical_year = $5,
+              canonical_norm_key = $6, confidence = 100, review_state = 'confirmed',
+              metadata_locked = TRUE, updated_at = now()
+          WHERE id = $1 AND review_state <> 'merged'
+        `,
+        [recordingId, canonical.artist, canonical.title, canonical.version, canonical.year, buildCanonicalNormKey(canonical)]
+      )
+      if (updated.rowCount !== 1) throw new Error('Recording was not found.')
+      const claimId = (
+        await client.query<{ id: number | bigint }>(
+          `
+            INSERT INTO recording_source_claims(
+              recording_id, provider, entity_type, external_key,
+              artist, title, version, release_title, track_position, year, duration_seconds,
+              confidence, raw_json, updated_at
+            ) VALUES ($1, 'discogs', 'release_track', $2, $3, $4, $5, $6, $7, $8, $9, 100, $10::jsonb, now())
+            ON CONFLICT(provider, entity_type, external_key) DO UPDATE SET
+              recording_id = EXCLUDED.recording_id,
+              artist = EXCLUDED.artist,
+              title = EXCLUDED.title,
+              version = EXCLUDED.version,
+              release_title = EXCLUDED.release_title,
+              track_position = EXCLUDED.track_position,
+              year = COALESCE(EXCLUDED.year, recording_source_claims.year),
+              duration_seconds = COALESCE(EXCLUDED.duration_seconds, recording_source_claims.duration_seconds),
+              confidence = GREATEST(recording_source_claims.confidence, EXCLUDED.confidence),
+              raw_json = EXCLUDED.raw_json,
+              updated_at = now()
+            RETURNING id
+          `,
+          [
+            recordingId,
+            buildDiscogsExternalKey(match),
+            match.artist,
+            match.title,
+            match.version,
+            match.releaseTitle,
+            match.trackPosition,
+            match.year,
+            match.durationSeconds ?? null,
+            JSON.stringify(match)
+          ]
+        )
+      ).rows[0]?.id
+      await client.query(
+        `
+          UPDATE file_identification_state
+          SET status = 'ready', assignment_method = 'manual', confidence = 100,
+              chosen_claim_id = $2, verified_at = now(), processed_at = now(), error_message = NULL
+          WHERE recording_id = $1
+        `,
+        [recordingId, claimId ? toNumber(claimId) : null]
+      )
+      await this.materializeRecordingDurations([recordingId], client)
+      await client.query('COMMIT')
+      return await this.getRecording(recordingId)
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+  }
+
   public async mergeRecordings(sourceRecordingId: number, targetRecordingId: number): Promise<RecordingDetails | null> {
     await this.ensureReady()
     const client = await this.pool.connect()

@@ -10,6 +10,7 @@ export type ImportRow = CollectionItem & {
 
 export type ImportTracksTableRow = {
   id: number
+  recordingId: number | null
   legacyIds: number[]
   key: string
   artist: string
@@ -155,6 +156,7 @@ export function groupImportRows(rows: ImportRow[]): ImportTracksTableRow[] {
       const replacementFilename = group.find((row) => row.importExactExistingFilename)?.importExactExistingFilename ?? null
       return {
         id,
+        recordingId,
         legacyIds: [...new Set(group.flatMap((row) => [
           importRecordId(key),
           ...importLegacyGroupKeys(row).map(importRecordId),

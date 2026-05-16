@@ -14,11 +14,13 @@ function label(row: DiscogsTrackSearchResult): string {
 
 export function DiscogsTrackAssignDialog({
   filename,
+  recordingId,
   initialQuery,
   onClose,
   onAssigned
 }: {
-  filename: string
+  filename?: string | null
+  recordingId?: number | null
   initialQuery: string
   onClose: () => void
   onAssigned: () => Promise<void>
@@ -47,7 +49,9 @@ export function DiscogsTrackAssignDialog({
     setBusy('assign')
     setError(null)
     try {
-      await api.collection.assignDiscogsTrack(filename, row)
+      if (recordingId) await api.collection.assignDiscogsTrackToRecording(recordingId, row)
+      else if (filename) await api.collection.assignDiscogsTrack(filename, row)
+      else throw new Error('No file or recording selected for Discogs assignment.')
       await onAssigned()
       onClose()
     } catch (err) {

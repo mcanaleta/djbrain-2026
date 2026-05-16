@@ -8,6 +8,7 @@ import { ActionButton } from '../components/view/ActionButton'
 import { Notice } from '../components/view/Notice'
 import { ImportActionConfirmDialog } from '../features/import/ImportActionConfirmDialog'
 import { ImportRecordFilesTable } from '../features/import/ImportRecordFilesTable'
+import { DiscogsTrackAssignDialog } from '../features/collection-item/DiscogsTrackAssignDialog'
 import {
   buildImportActionConfirmation,
   buildImportCommitInputFromReview,
@@ -41,6 +42,7 @@ export default function ImportReviewPage(): React.JSX.Element {
   const [activeReview, setActiveReview] = useState<ActiveImportReview | null>(null)
   const [pendingCommit, setPendingCommit] = useState<PendingCommitAction | null>(null)
   const [committedTargetFilename, setCommittedTargetFilename] = useState<string | null>(null)
+  const [showDiscogsAssign, setShowDiscogsAssign] = useState(false)
   const { data: listResult, isPending } = useQuery({
     queryKey: ['collection', 'downloads', query],
     queryFn: () => api.collection.listDownloads(query)
@@ -88,6 +90,7 @@ export default function ImportReviewPage(): React.JSX.Element {
   const selectedItem = record?.files.find((file) => file.filename === selectedFilename) ?? record?.bestFile ?? null
   const nextRecord = currentIndex >= 0 ? records[currentIndex + 1] ?? null : null
   const nextHref = nextRecord ? buildImportRecordReviewHref(nextRecord.id, query) : importHref
+  const discogsQuery = [record?.artist, record?.title].filter(Boolean).join(' ')
 
   const handleResolved = (): void => {
     navigate(nextHref, { replace: true })
@@ -198,6 +201,11 @@ export default function ImportReviewPage(): React.JSX.Element {
         onCancelDelete={() => setPendingDeleteFilename(null)}
         onSelect={setSelectedFilename}
       />
+      <div className="flex justify-end">
+        <ActionButton size="xs" tone="primary" disabled={!record.recordingId} onClick={() => setShowDiscogsAssign(true)}>
+          Assign Discogs
+        </ActionButton>
+      </div>
       {actionError ? <Notice tone="error">{actionError}</Notice> : null}
       {actionSuccess ? <Notice tone="success">{actionSuccess}</Notice> : null}
       <ImportReviewDialog
@@ -213,6 +221,18 @@ export default function ImportReviewPage(): React.JSX.Element {
         onCancel={() => { if (!busyAction) setPendingCommit(null) }}
         onConfirm={() => { void confirmPendingCommit() }}
       />
+      {showDiscogsAssign && record.recordingId ? (
+        <DiscogsTrackAssignDialog
+          recordingId={record.recordingId}
+          initialQuery={discogsQuery}
+          onClose={() => setShowDiscogsAssign(false)}
+          onAssigned={async () => {
+            await queryClient.invalidateQueries({ queryKey: ['collection', 'downloads'] })
+            if (collectionTargetFilename) await queryClient.invalidateQueries({ queryKey: ['collection', 'item', collectionTargetFilename] })
+            setActionSuccess('Discogs track assigned. Files refreshed.')
+          }}
+        />
+      ) : null}
     </div>
   )
 }

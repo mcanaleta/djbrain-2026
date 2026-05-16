@@ -333,6 +333,16 @@ export const api: DJBrainApi = {
       void syncCollectionSnapshot()
       return result
     },
+    async assignDiscogsTrackToRecording(recordingId, match) {
+      const result = await request<RecordingDetails | null>('/api/collection/recordings/assign-discogs-track', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ recordingId, match })
+      })
+      invalidateCollectionSnapshot()
+      void syncCollectionSnapshot()
+      return result
+    },
     async repairTags(filename, fields) {
       await request<void>('/api/collection/tags/repair', {
         method: 'POST',

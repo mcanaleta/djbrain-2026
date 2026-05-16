@@ -579,6 +579,7 @@ export type DJBrainApi = {
       canonical?: Partial<RecordingCanonical> | null
     }) => Promise<RecordingDetails | null>
     assignDiscogsTrack: (filename: string, match: DiscogsTrackMatch) => Promise<RecordingDetails | null>
+    assignDiscogsTrackToRecording: (recordingId: number, match: DiscogsTrackMatch) => Promise<RecordingDetails | null>
     repairTags: (filename: string, fields: TagRepairField[]) => Promise<void>
     mergeRecordings: (sourceRecordingId: number, targetRecordingId: number) => Promise<RecordingDetails | null>
     commitImport: (input: ImportCommitInput) => Promise<ImportFileResult>
