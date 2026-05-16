@@ -55,7 +55,10 @@ const port = Number(readArgValue('--port') ?? '5181')
 const staticDirArg = readArgValue('--static')
 const staticDir = staticDirArg ? resolve(process.cwd(), staticDirArg) : null
 const dataDirArg = readArgValue('--data-dir') ?? process.env['DJBRAIN_DATA_DIR'] ?? null
-const automationEnabled = readBooleanEnv(process.env['DJBRAIN_ENABLE_AUTOMATION'], !process.execArgv.includes('--watch'))
+const automationEnabled = readBooleanEnv(
+  readArgValue('--automation') ?? process.env['DJBRAIN_ENABLE_AUTOMATION'],
+  !process.execArgv.includes('--watch')
+)
 const serverStartupSyncEnabled = shouldRunServerStartupSync(process.env)
 const serverBackgroundWorkersEnabled = shouldRunServerBackgroundWorkers(process.env)
 
