@@ -133,6 +133,7 @@ export type CollectionItemDetails = {
     errorMessage: string | null
     processedAt: string | null
   } | null
+  qualityScore: number | null
   parsedAudioAnalysis: AudioAnalysis | null
   identification: FileIdentificationState | null
   upgradeCase: UpgradeCase | null

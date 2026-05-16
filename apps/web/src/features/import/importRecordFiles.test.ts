@@ -25,6 +25,7 @@ const target: CollectionItemDetails = {
   importReview: null,
   fileAudioState: null,
   audioAnalysisCache: null,
+  qualityScore: 82,
   parsedAudioAnalysis: null,
   identification: null,
   upgradeCase: null
@@ -67,6 +68,7 @@ describe('buildImportRecordFileRows', () => {
     const rows = buildImportRecordFileRows(record!, target)
     assert.deepEqual(rows.map((row) => row.kind), ['collection', 'download', 'download'])
     assert.equal(rows[0]?.filename, target.filename)
+    assert.equal(rows[0]?.qualityScore, 82)
   })
 
   it('exposes replace only when a collection target exists', () => {

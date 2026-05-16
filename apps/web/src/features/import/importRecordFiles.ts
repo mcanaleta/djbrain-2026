@@ -21,7 +21,7 @@ function collectionRow(item: CollectionItemDetails): ImportRecordFileRow {
     filename: item.filename,
     filesize: item.filesize,
     duration: item.parsedAudioAnalysis?.durationSeconds ?? null,
-    qualityScore: null,
+    qualityScore: item.qualityScore,
     audioAnalysis: item.parsedAudioAnalysis,
     prep: 'collection',
     download: null

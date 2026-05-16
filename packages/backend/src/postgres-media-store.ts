@@ -2,6 +2,7 @@ import { Pool, type PoolClient } from 'pg'
 import type { CollectionService } from './collection-service.ts'
 import type { CollectionItem, CollectionItemDetails, CollectionListResult } from '@djbrain/shared/api.ts'
 import { parseImportFilename } from '@djbrain/shared/import-filename.ts'
+import { computeAnalysisQualityScore } from './audio-quality-score.ts'
 
 type MediaTags = NonNullable<CollectionItemDetails['tags']>
 
@@ -370,6 +371,7 @@ export class PostgresMediaStore {
     )
     const row = result.rows[0]
     if (!row) return null
+    const parsedAudioAnalysis = row.analysis_json as CollectionItemDetails['parsedAudioAnalysis']
     const analysisJsonText = row.analysis_json ? JSON.stringify(row.analysis_json) : null
     const importReviewJsonText = row.import_review_json ? JSON.stringify(row.import_review_json) : null
     return {
@@ -432,9 +434,10 @@ export class PostgresMediaStore {
               analysisJson: analysisJsonText,
               errorMessage: row.cache_error_message,
               processedAt: toTimestampText(row.cache_processed_at)
-            }
+          }
           : null,
-      parsedAudioAnalysis: row.analysis_json as CollectionItemDetails['parsedAudioAnalysis'],
+      qualityScore: computeAnalysisQualityScore(parsedAudioAnalysis),
+      parsedAudioAnalysis,
       identification: null,
       upgradeCase: null
     }
