@@ -8,6 +8,9 @@
     "admin": "node --env-file-if-exists=../../.env.local --experimental-strip-types src/admin-worker.ts",
     "downloader": "node --env-file-if-exists=../../.env.local --experimental-strip-types src/downloader.ts",
     "sync": "node --env-file-if-exists=../../.env.local --experimental-strip-types src/sync-worker.ts",
+    "dev:admin": "node --env-file-if-exists=../../.env.local --watch --experimental-strip-types src/admin-worker.ts",
+    "dev:downloader": "node --env-file-if-exists=../../.env.local --watch --experimental-strip-types src/downloader.ts",
+    "dev:sync": "node --env-file-if-exists=../../.env.local --watch --experimental-strip-types src/sync-worker.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

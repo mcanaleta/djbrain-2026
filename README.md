@@ -58,6 +58,18 @@ Node.js 24+, pnpm 11+.
 
 ---
 
+## Development
+
+Run every local component from the workspace root:
+
+```bash
+pnpm run dev
+```
+
+This starts the Vite web app on `http://localhost:5180`, the API server on `http://localhost:5181`, and the long-running downloader, sync, and admin workers. Individual components remain available as `pnpm run dev:client`, `pnpm run dev:server`, `pnpm run dev:downloader`, `pnpm run dev:sync`, and `pnpm run dev:admin`.
+
+---
+
 ## Architecture
 
 ```

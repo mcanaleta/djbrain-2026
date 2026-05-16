@@ -19,7 +19,10 @@
     "start": "pnpm --filter @djbrain/server start",
     "dev:server": "pnpm --filter @djbrain/server dev",
     "dev:client": "pnpm --filter @djbrain/web dev",
-    "dev": "concurrently -k -n api,web \"pnpm run dev:server\" \"pnpm run dev:client\"",
+    "dev:downloader": "pnpm --filter @djbrain/workers dev:downloader",
+    "dev:sync": "pnpm --filter @djbrain/workers dev:sync",
+    "dev:admin": "pnpm --filter @djbrain/workers dev:admin",
+    "dev": "concurrently -k -n api,web,downloader,sync,admin \"pnpm run dev:server\" \"pnpm run dev:client\" \"pnpm run dev:downloader\" \"pnpm run dev:sync\" \"pnpm run dev:admin\"",
     "build": "pnpm run typecheck && pnpm --filter @djbrain/web build",
     "preview": "pnpm --filter @djbrain/web preview"
   },
