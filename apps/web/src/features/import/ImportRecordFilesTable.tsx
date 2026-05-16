@@ -16,6 +16,14 @@ const mixButtonClass = (active: boolean, activeClass: string): string =>
   `inline-flex h-7 w-7 items-center justify-center rounded border text-[10px] font-bold ${active ? activeClass : 'border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100'}`
 const ACTION_LABEL = { import: 'Import', replace: 'Replace', delete: 'Delete' } satisfies Record<ImportRecordDownloadAction, string>
 const BUSY_ACTION_LABEL = { import: 'Importing...', replace: 'Replacing...', delete: 'Deleting...' } satisfies Record<ImportRecordDownloadAction, string>
+const UTILITY_BUSY_LABEL = { reanalyze: 'Reanalyzing...', show: 'Opening folder...', open: 'Opening...' } satisfies Record<ImportRecordFileUtilityAction, string>
+
+function utilityBusyLabel(busyAction: string | null, row: ImportRecordFileRow): string | null {
+  for (const action of Object.keys(UTILITY_BUSY_LABEL) as ImportRecordFileUtilityAction[]) {
+    if (busyAction === `${action}:${row.filename}`) return UTILITY_BUSY_LABEL[action]
+  }
+  return null
+}
 
 export function ImportRecordFilesTable({
   record,
@@ -102,11 +110,13 @@ export function ImportRecordFilesTable({
       header: 'Actions',
       cellClassName: 'w-[1%] whitespace-nowrap text-right',
       render: (row) => {
-        const menu = <ImportRecordFileMenu row={row} disabled={busyAction !== null} onAction={onUtilityAction} />
-        if (row.kind === 'collection') return <div className="flex justify-end gap-1"><Pill tone="primary">target</Pill>{menu}</div>
+        const utilityBusy = utilityBusyLabel(busyAction, row)
+        const menu = <ImportRecordFileMenu row={row} disabled={busyAction !== null} busyLabel={utilityBusy} onAction={onUtilityAction} />
+        if (row.kind === 'collection') return <div className="flex justify-end gap-1">{utilityBusy ? <Pill tone="primary" pulse>{utilityBusy}</Pill> : <Pill tone="primary">target</Pill>}{menu}</div>
         const actions = getImportRecordDownloadActions(hasCollectionTarget)
         return (
           <div className="flex justify-end gap-1">
+            {utilityBusy ? <Pill tone="primary" pulse>{utilityBusy}</Pill> : null}
             {actions.map((action) => {
               const confirming = action === 'delete' && pendingDeleteFilename === row.filename
               const key = `${action}:${row.filename}`

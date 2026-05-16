@@ -16,24 +16,27 @@ const ACTIONS = [
 export function ImportRecordFileMenu({
   row,
   disabled,
+  busyLabel,
   onAction
 }: {
   row: ImportRecordFileRow
   disabled: boolean
+  busyLabel?: string | null
   onAction: (action: ImportRecordFileUtilityAction, row: ImportRecordFileRow) => void
 }): React.JSX.Element {
+  const busy = Boolean(busyLabel)
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
         <button
           type="button"
-          aria-label={`File actions for ${row.filename}`}
-          title="File actions"
+          aria-label={busy ? busyLabel ?? 'Working' : `File actions for ${row.filename}`}
+          title={busy ? busyLabel ?? 'Working' : 'File actions'}
           disabled={disabled}
           onClick={(event) => event.stopPropagation()}
           className="inline-flex h-7 w-7 items-center justify-center rounded border border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-50"
         >
-          <DotsHorizontalIcon />
+          {busy ? <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" /> : <DotsHorizontalIcon />}
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
