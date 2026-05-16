@@ -515,10 +515,9 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
       const body = (request.body ?? null) as { filename?: string } | null
       const filename = typeof body?.filename === 'string' ? body.filename : ''
       await unlink(resolveMusicRelativePath(filename))
-      void service.syncNow().then(async () => {
-        if (syncMediaItem) await syncMediaItem(normalizeFilename(filename))
-        else await syncMediaCatalog?.()
-      })
+      await service.syncNow()
+      if (syncMediaItem) await syncMediaItem(normalizeFilename(filename))
+      else await syncMediaCatalog?.()
       sendEmpty(response, 204)
     })
   )
