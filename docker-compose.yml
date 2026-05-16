@@ -24,7 +24,7 @@ services:
 
   downloader:
     build: .
-    command: ["node", "--experimental-strip-types", "scripts/downloader.ts"]
+    command: ["node", "--experimental-strip-types", "apps/workers/src/downloader.ts"]
     depends_on:
       redis:
         condition: service_started
@@ -40,7 +40,7 @@ services:
 
   sync-worker:
     build: .
-    command: ["node", "--experimental-strip-types", "scripts/sync-worker.ts"]
+    command: ["node", "--experimental-strip-types", "apps/workers/src/sync-worker.ts"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -56,7 +56,7 @@ services:
 
   admin-worker:
     build: .
-    command: ["node", "--experimental-strip-types", "scripts/admin-worker.ts"]
+    command: ["node", "--experimental-strip-types", "apps/workers/src/admin-worker.ts"]
     depends_on:
       redis:
         condition: service_started

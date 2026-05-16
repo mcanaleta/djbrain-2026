@@ -1,0 +1,14 @@
+{
+  "name": "@djbrain/shared",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "exports": {
+    "./*.ts": "./src/*.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test src/*.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

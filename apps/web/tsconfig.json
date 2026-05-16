@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "include": ["src/env.d.ts", "src/**/*"],
+  "exclude": ["src/**/*.test.ts"],
+  "compilerOptions": {
+    "composite": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "types": ["vite/client"],
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@web/*": ["src/*"]
+    }
+  }
+}

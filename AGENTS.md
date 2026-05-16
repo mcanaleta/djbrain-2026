@@ -8,7 +8,7 @@
 # Frontend rules
 - Hard split rule: if a page goes above ~250 lines, a component above ~200, or a hook/helper above ~150, stop and split it.
 - Pages are route shells only: params, high-level layout, feature composition. Do not put scoring, matching, grouping, formatting, or workflow logic in page files.
-- Put feature logic in `src/web/src/features/*` or `src/web/src/lib/*` as pure functions/hooks. Prefer `page -> feature hook -> presentational components`.
+- Put feature logic in `apps/web/src/features/*` or `apps/web/src/lib/*` as pure functions/hooks. Prefer `page -> feature hook -> presentational components`.
 - Shared UI components stay dumb and presentational. No API calls, polling, domain decisions, or feature-specific branching inside generic UI primitives.
 - If the same helper/formatter/badge/table logic appears twice, extract it on the second use. No copy-paste between pages.
 - Do not hand-roll the same async pattern in many screens. Loading/error/polling/request-cancellation logic must be centralized per feature in a shared hook/helper.

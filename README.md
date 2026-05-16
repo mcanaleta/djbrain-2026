@@ -63,21 +63,21 @@ Node.js 24+, pnpm 11+.
 ```
 ┌────────────────────────────────────────────────────────────┐
 │  Browser App (React Router + Vite)                          │
-│  src/web/src/                                               │
+│  apps/web/src/                                               │
 │  Pages → api.* → fetch('/api/...')                         │
 └──────────────────────┬─────────────────────────────────────┘
                        │ HTTP / JSON
 ┌──────────────────────▼─────────────────────────────────────┐
 │  Local API Server (Express)                                 │
-│  src/server/app.ts     – route registry + media streaming   │
-│  src/backend/*-service.ts – business logic + SQLite         │
+│  apps/server/src/app.ts     – route registry + media streaming   │
+│  packages/backend/src/*-service.ts – business logic + SQLite         │
 │  node:sqlite          – SQLite (synchronous API)            │
 └────────────────────────────────────────────────────────────┘
 ```
 
 **Rules:**
 - The web client never accesses the filesystem directly.
-- `api` is the browser-side client and lives in `src/web/src/api/client.ts`.
+- `api` is the browser-side client and lives in `apps/web/src/api/client.ts`.
 - Heavy I/O and database work happens in the local server/services layer.
 - Collection and want-list updates are polled from the browser client.
 
@@ -121,21 +121,21 @@ src/
 
 ### Adding a new API call
 
-**1. Server — add route** (`src/server/app.ts`):
+**1. Server — add route** (`apps/server/src/app.ts`):
 ```typescript
 app.post('/api/my-feature/do-thing', async (request, response) => {
   response.json(await myService.doThing(request.body.arg))
 })
 ```
 
-**2. Shared contract — update types** (`src/shared/api.ts`):
+**2. Shared contract — update types** (`packages/shared/src/api.ts`):
 ```typescript
 myFeature: {
   doThing: (arg: string) => Promise<MyResult>
 }
 ```
 
-**3. Browser client — implement the fetch wrapper** (`src/web/src/api/client.ts`):
+**3. Browser client — implement the fetch wrapper** (`apps/web/src/api/client.ts`):
 ```typescript
 doThing: (arg) =>
   request('/api/my-feature/do-thing', {
@@ -229,21 +229,21 @@ interface AppSettings {
 }
 ```
 
-`settings-store.ts` in `src/backend/settings-store.ts` normalizes environment values into `AppSettings`.
+`settings-store.ts` in `packages/backend/src/settings-store.ts` normalizes environment values into `AppSettings`.
 
 ---
 
 ## Navigation & Routing
 
-`src/web/src/app/nav.ts` defines `NAV_ITEMS`. Each entry has:
+`apps/web/src/app/nav.ts` defines `NAV_ITEMS`. Each entry has:
 ```typescript
 { key: string; label: string; path: string; icon: React.ComponentType }
 ```
 
-`src/web/src/App.tsx` maps paths to page components using `<Route>`.
+`apps/web/src/App.tsx` maps paths to page components using `<Route>`.
 
 To add a new page:
-1. Create `src/web/src/pages/MyPage.tsx`
+1. Create `apps/web/src/pages/MyPage.tsx`
 2. Add a nav item in `nav.ts`
 3. Add `<Route path="/my-page" element={<MyPage />} />` in `App.tsx`
 
@@ -268,7 +268,7 @@ To add a new page:
 
 ## Services
 
-### CollectionService (`src/backend/collection-service.ts`)
+### CollectionService (`packages/backend/src/collection-service.ts`)
 
 Manages the SQLite database, file scanning, FTS search, and want list CRUD.
 
@@ -280,7 +280,7 @@ Manages the SQLite database, file scanning, FTS search, and want list CRUD.
 
 Supported audio extensions: `.mp3 .flac .wav .aiff .aif .m4a .aac .ogg .opus .alac`
 
-### SlskdService (`src/backend/slskd-service.ts`)
+### SlskdService (`packages/backend/src/slskd-service.ts`)
 
 Wraps the slskd REST API.
 
@@ -293,18 +293,18 @@ Wraps the slskd REST API.
 
 Searches are **intentionally not deleted** so you can inspect them in slskd's web UI.
 
-### OnlineSearchService (`src/backend/online-search-service.ts`)
+### OnlineSearchService (`packages/backend/src/online-search-service.ts`)
 
 - Discogs search (`GET /database/search`) + entity detail (`GET /releases/{id}` etc.)
 - Serper.dev Google search
 - Parses release/master/artist/label pages into a uniform `DiscogsEntityDetail` structure
 - Extracts: tracklist, videos (YouTube links only), facts, related sections, hero image
 
-### GrokSearchService (`src/backend/grok-search-service.ts`)
+### GrokSearchService (`packages/backend/src/grok-search-service.ts`)
 
 Uses Grok AI with web search tools to find tracks. Returns structured `GrokTrackResult[]`.
 
-### SettingsStore (`src/backend/settings-store.ts`)
+### SettingsStore (`packages/backend/src/settings-store.ts`)
 
 - Reads `DJBRAIN_*` env vars
 - Returns a normalized `AppSettings` object
@@ -368,7 +368,7 @@ Top 30 candidates (by score descending) are stored as JSON. Score ≥ 60 shown i
 
 ## Shared Utilities
 
-### `src/shared/track-title-parser.ts`
+### `packages/shared/src/track-title-parser.ts`
 
 Splits a raw track title into `{ title, version }`:
 
@@ -416,20 +416,20 @@ Used in `DiscogsEntityPage` before adding a track to the want list.
 ### View composition
 
 - Keep route files high-level and readable: route params, hook wiring, major sections, and navigation decisions should be obvious in the page file.
-- Default to the shared view primitives in `src/web/src/components/view.tsx` for page chrome: sections, hero blocks, notices, compact buttons, labeled inputs, stat cards, and dense tables.
+- Default to the shared view primitives in `apps/web/src/components/view.tsx` for page chrome: sections, hero blocks, notices, compact buttons, labeled inputs, stat cards, and dense tables.
 - Do not leave raw panel/table Tailwind strings in route files when the intent is generic UI structure; hide that in shared view components first.
-- Move generic formatting, parsing, and error helpers into `src/web/src/lib/`.
+- Move generic formatting, parsing, and error helpers into `apps/web/src/lib/`.
 - Move feature-specific reusable UI and view-model logic into a small feature folder instead of leaving it inline in the route.
 - Move async loading / action orchestration into hooks when a page starts mixing data fetching with lots of JSX.
 - Do not split every section into its own file by default; extract shared or low-signal code, not the main page narrative.
 
 ### New page with data from backend services
 
-1. Define the data type in `src/shared/api.ts` (add to `DJBrainApi`)
-2. Add the service method in the appropriate `src/backend/*-service.ts`
-3. Register an Express route in `src/server/app.ts`
-4. Add the browser client wrapper in `src/web/src/api/client.ts`
-5. Create the page in `src/web/src/pages/`
+1. Define the data type in `packages/shared/src/api.ts` (add to `DJBrainApi`)
+2. Add the service method in the appropriate `packages/backend/src/*-service.ts`
+3. Register an Express route in `apps/server/src/app.ts`
+4. Add the browser client wrapper in `apps/web/src/api/client.ts`
+5. Create the page in `apps/web/src/pages/`
 6. Add nav item in `nav.ts` + route in `App.tsx`
 
 ### New SQLite column
@@ -439,9 +439,9 @@ Use the idempotent migration pattern (see [Migrations](#migrations) above). Plac
 ### New external API integration
 
 - Add API key to `AppSettings` in `settings-store.ts`
-- Create `src/backend/my-api-service.ts`
-- Register route in `src/server/app.ts`
-- Add client call in `src/web/src/api/client.ts`
+- Create `packages/backend/src/my-api-service.ts`
+- Register route in `apps/server/src/app.ts`
+- Add client call in `apps/web/src/api/client.ts`
 
 ---
 
@@ -451,12 +451,12 @@ Tests use the Node.js built-in test runner. No Jest, no Vitest.
 
 ```bash
 pnpm test
-# runs: node --experimental-strip-types --test 'src/shared/*.test.ts'
+# runs workspace tests in packages/shared, packages/backend, apps/server, and apps/web
 ```
 
 Test file conventions:
 - Co-located next to the file under test: `foo.ts` → `foo.test.ts`
-- Currently only `src/shared/` is tested
+- Workspace packages keep tests next to the code they exercise.
 - Import the `.ts` extension explicitly — required by `--experimental-strip-types`:
   ```typescript
   import { myFn } from './my-module.ts'   // required
@@ -477,7 +477,7 @@ Test file conventions:
 
 ## Content Security Policy
 
-Defined in `src/web/index.html` as a `<meta http-equiv="Content-Security-Policy">` tag.
+Defined in `apps/web/index.html` as a `<meta http-equiv="Content-Security-Policy">` tag.
 
 Current policy allows:
 - `img-src 'self' data: https:` — Discogs images and all HTTPS images

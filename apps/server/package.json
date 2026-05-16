@@ -1,0 +1,21 @@
+{
+  "name": "@djbrain/server",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node --env-file-if-exists=../../.env.local --experimental-strip-types src/index.ts --port 5180 --static ../../dist",
+    "dev": "DJBRAIN_ENABLE_AUTOMATION=0 node --env-file-if-exists=../../.env.local --watch --experimental-strip-types src/index.ts --port 5181",
+    "test": "node --experimental-strip-types --test src/*.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@djbrain/backend": "workspace:*",
+    "@djbrain/shared": "workspace:*",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.19.1"
+  }
+}
