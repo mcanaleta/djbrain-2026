@@ -458,6 +458,8 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
             }
             return importService.importFile(settings, parsed.artist, parsed.title, parsed.version, absolutePath)
           })()
+      const importResolved = ['imported', 'imported_upgrade', 'skipped_existing', 'replaced'].includes(result.status)
+      if (importResolved) await service.removeWantListsForDownloadedFile(filename)
 
       void service.syncNow().then(async () => {
         if (!syncMediaItem) {

@@ -4606,6 +4606,32 @@ export class CollectionService {
     await this.wantListStore.remove(id)
   }
 
+  public async removeWantListsForDownloadedFile(filenameInput: string): Promise<number[]> {
+    await this.ensureReady()
+    const filename = normalizeFilename(filenameInput)
+    if (!filename) return []
+    const result = await this.pool.query<{ id: number | bigint }>(
+      `
+        WITH linked AS (
+          SELECT DISTINCT want_list_id AS id
+          FROM download_attempts
+          WHERE local_filename = $1 AND want_list_id IS NOT NULL
+        ),
+        cleared AS (
+          UPDATE download_attempts
+          SET want_list_id = NULL, updated_at = now()
+          WHERE want_list_id IN (SELECT id FROM linked)
+        ),
+        deleted AS (
+          DELETE FROM want_list WHERE id IN (SELECT id FROM linked) RETURNING id
+        )
+        SELECT id FROM deleted
+      `,
+      [filename]
+    )
+    return [...new Set(result.rows.map((row) => toNumber(row.id)).filter((id) => id > 0))]
+  }
+
   public async wantListList(): Promise<WantListItem[]> {
     await this.ensureReady()
     return this.wantListStore.list()
