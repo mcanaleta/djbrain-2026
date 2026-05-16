@@ -446,6 +446,7 @@ export type AudioAnalysis = {
   sampleRateHz: number | null
   bitDepth: number | null
   bitrateKbps: number | null
+  maxFrequencyHz?: number | null
   durationSeconds: number | null
   fileSizeBytes: number
   integratedLufs: number | null

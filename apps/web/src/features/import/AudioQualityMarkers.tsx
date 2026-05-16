@@ -6,6 +6,7 @@ export const AUDIO_QUALITY_MARKERS = [
   ['bitrate', 'Bitrate'],
   ['rate', 'Rate'],
   ['bits', 'Bits'],
+  ['maxfreq', 'Top'],
   ['crest', 'Crest'],
   ['air', 'Air'],
   ['noise', 'Noise'],
@@ -28,6 +29,7 @@ function intensity(key: AudioQualityMarkerKey, analysis: AudioAnalysis | null): 
   if (key === 'bitrate') return clamp01((analysis.bitrateKbps ?? 0) / 320)
   if (key === 'rate') return clamp01((analysis.sampleRateHz ?? 0) / 48000)
   if (key === 'bits') return analysis.bitDepth ? clamp01(analysis.bitDepth / 24) : formatScore
+  if (key === 'maxfreq') return clamp01((maxFrequencyHz(analysis) ?? 0) / 22050)
   if (key === 'crest') return clamp01((analysis.crestDb ?? 0) / 16)
   if (key === 'air') return clamp01(((analysis.airBandRmsDb ?? -64) + 58) / 22)
   if (key === 'noise') return clamp01((analysis.noiseScore ?? 0) / 100)
@@ -43,6 +45,7 @@ export function formatAudioQualityMarker(key: AudioQualityMarkerKey, analysis: A
   if (key === 'bitrate') return formatBitrate(analysis.bitrateKbps)
   if (key === 'rate') return formatHz(analysis.sampleRateHz)
   if (key === 'bits') return formatBits(analysis.bitDepth)
+  if (key === 'maxfreq') return formatHz(maxFrequencyHz(analysis))
   if (key === 'crest') return `${formatDb(analysis.crestDb)} dB`
   if (key === 'air') return `${formatDb(analysis.airBandRmsDb)} dB`
   if (key === 'noise') return formatPercent(analysis.noiseScore)
@@ -50,6 +53,21 @@ export function formatAudioQualityMarker(key: AudioQualityMarkerKey, analysis: A
   if (key === 'rumble') return formatPercent(analysis.rumbleScore)
   if (key === 'hum') return formatPercent(analysis.humScore)
   return formatPercent(analysis.vinylLikelihood)
+}
+
+function maxFrequencyHz(analysis: AudioAnalysis): number | null {
+  if (typeof analysis.maxFrequencyHz === 'number') return analysis.maxFrequencyHz
+  const nyquist = analysis.sampleRateHz ? analysis.sampleRateHz / 2 : null
+  const format = analysis.format.toLowerCase()
+  const bitrate = analysis.bitrateKbps ?? 0
+  const bitrateCeiling =
+    ['flac', 'wav', 'aiff', 'aif', 'alac'].includes(format) ? nyquist
+      : format === 'mp3' ? (bitrate >= 256 ? 20000 : bitrate >= 192 ? 18000 : bitrate >= 128 ? 16000 : bitrate > 0 ? 15000 : null)
+        : ['aac', 'm4a', 'ogg', 'opus'].includes(format) ? (bitrate >= 192 ? 20000 : bitrate >= 128 ? 18000 : bitrate > 0 ? 16000 : null)
+          : null
+  const cutoffCeiling = analysis.cutoffDb == null ? null : analysis.cutoffDb >= 18 ? 16000 : analysis.cutoffDb >= 12 ? 18000 : analysis.cutoffDb >= 8 ? 20000 : null
+  const value = [nyquist, bitrateCeiling, cutoffCeiling].filter((item): item is number => item != null && Number.isFinite(item))
+  return value.length ? Math.round(Math.min(...value) / 1000) * 1000 : null
 }
 
 export function AudioQualityMarkerCell({ marker, analysis }: { marker: AudioQualityMarkerKey; analysis: AudioAnalysis | null }): React.JSX.Element {
