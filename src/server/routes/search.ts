@@ -3,6 +3,7 @@ import type { AppSettings } from '../../backend/settings-store.ts'
 import { GrokSearchService } from '../../backend/grok-search-service.ts'
 import { OnlineSearchService } from '../../backend/online-search-service.ts'
 import { YouTubeApiService } from '../../backend/youtube-api-service.ts'
+import { searchDiscogsTracks } from '../../backend/discogs-track-search.ts'
 import { HttpError, asyncHandler, readQueryString, sendJson } from '../http.ts'
 
 type SlskdConnectionTestResult = {
@@ -72,6 +73,13 @@ export function registerSearchRoutes(app: Express, deps: SearchRouteDeps): void 
       }
 
       sendJson(response, 200, await onlineSearchService.getDiscogsEntity(currentSettings(), type, id))
+    })
+  )
+
+  app.get(
+    '/api/discogs-track-search',
+    asyncHandler(async (request, response) => {
+      sendJson(response, 200, await searchDiscogsTracks(currentSettings(), readQueryString(request.query['query']), onlineSearchService))
     })
   )
 

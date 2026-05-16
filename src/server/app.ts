@@ -473,6 +473,7 @@ export function createApp(): express.Express {
     buildImportReview,
     fileAnalysisService,
     importService,
+    taggerService,
     syncImportReviewQueue: async () => {
       if (serverBackgroundWorkersEnabled) await importReviewBackgroundService?.syncQueue()
     },

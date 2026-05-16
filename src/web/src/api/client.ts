@@ -217,6 +217,8 @@ export const api: DJBrainApi = {
       request(
         `/api/online-search?query=${encodeURIComponent(query)}&scope=${encodeURIComponent(scope ?? 'online')}`
       ),
+    searchDiscogsTracks: (query: string) =>
+      request(`/api/discogs-track-search?query=${encodeURIComponent(query)}`),
     getDiscogsEntity: ((type: DiscogsEntityType, id: number | string) =>
       request(`/api/discogs/${type}/${id}`)) as DJBrainApi['onlineSearch']['getDiscogsEntity']
   },
@@ -320,6 +322,25 @@ export const api: DJBrainApi = {
       invalidateCollectionSnapshot()
       void syncCollectionSnapshot()
       return result
+    },
+    async assignDiscogsTrack(filename, match) {
+      const result = await request<RecordingDetails | null>('/api/collection/recordings/assign-discogs-track', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ filename, match })
+      })
+      invalidateCollectionSnapshot()
+      void syncCollectionSnapshot()
+      return result
+    },
+    async repairTags(filename, fields) {
+      await request<void>('/api/collection/tags/repair', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ filename, fields })
+      })
+      invalidateCollectionSnapshot()
+      void syncCollectionSnapshot()
     },
     async mergeRecordings(sourceRecordingId: number, targetRecordingId: number) {
       const result = await request<RecordingDetails | null>('/api/collection/recordings/merge', {

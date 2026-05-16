@@ -1,17 +1,27 @@
 import { useCallback, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import type { CollectionItemDetails, RecordingDetails } from '../../../shared/api'
+import { buildCollectionItemHeading, findDiscogsDisplayTrack } from '../../../shared/collection-item-display'
+import type { TagRepairField, TagRepairRow } from '../../../shared/tag-repair'
+import { buildTagRepairRows } from '../../../shared/tag-repair'
+import { parseDurationString } from '../../../shared/track-matcher'
 import { buildReplacementWantInput } from '../../../shared/want-list-input'
 import { api } from '../api/client'
 import { ActionButton } from '../components/view/ActionButton'
 import { KV } from '../components/view/KV'
 import { Notice } from '../components/view/Notice'
+import { PageHeader } from '../components/view/PageHeader'
+import { Pill } from '../components/view/Pill'
+import { SourceIconLink } from '../components/view/SourceIconLink'
 import { ViewSection } from '../components/view/ViewSection'
 import { usePlayer } from '../context/PlayerContext'
-import { CollectionItemModelView } from '../features/collection-item/CollectionItemModelView'
+import { DiscogsTrackAssignDialog } from '../features/collection-item/DiscogsTrackAssignDialog'
+import { DiscogsReleaseTracklist } from '../features/collection-item/DiscogsReleaseTracklist'
 import { getErrorMessage } from '../lib/error-utils'
-import { deriveTrackSummaryFromFilename, formatFileSize } from '../lib/music-file'
-import { buildIdentifyReviewHref } from '../lib/urls'
+import { deriveTrackSummaryFromFilename, formatCompactDuration, formatFileSize } from '../lib/music-file'
+import { buildDiscogsReleaseUrl, buildIdentifyReviewHref } from '../lib/urls'
 
 function fmtDate(value: string | number | null | undefined): string {
   if (value == null) return '—'
@@ -29,6 +39,85 @@ function JsonBlock({ value }: { value: string | null | undefined }): React.JSX.E
   )
 }
 
+type SourceClaim = RecordingDetails['sourceClaims'][number]
+
+function shortHash(value: string | null | undefined): string {
+  return value ? `${value.slice(0, 12)}...${value.slice(-8)}` : '-'
+}
+
+function duration(value: number | null | undefined): string {
+  return value == null ? '-' : `${formatCompactDuration(value)} (${value.toFixed(1)}s)`
+}
+
+function drift(fileSeconds: number | null | undefined, referenceSeconds: number | null | undefined): ReactNode {
+  if (fileSeconds == null || referenceSeconds == null || referenceSeconds <= 0) return '-'
+  const delta = fileSeconds - referenceSeconds
+  const abs = Math.abs(delta)
+  const percent = (delta / referenceSeconds) * 100
+  const label = abs < 1 ? 'OK' : abs <= 5 ? 'minor drift' : 'DRIFT'
+  const className = abs < 1 ? 'text-emerald-300' : abs <= 5 ? 'text-amber-300' : 'text-rose-300'
+  return <span className={className}>{label}: {delta >= 0 ? '+' : ''}{delta.toFixed(1)}s / {percent >= 0 ? '+' : ''}{percent.toFixed(1)}%</span>
+}
+
+function releaseIdFromClaim(claim: SourceClaim | null, item: CollectionItemDetails): number | null {
+  const keyMatch = claim?.externalKey.match(/discogs:release:(\d+)/i)
+  return keyMatch ? Number(keyMatch[1]) : item.tags?.discogsReleaseId || null
+}
+
+function tagSummary(item: CollectionItemDetails): string {
+  const tags = item.tags
+  return tags ? `${tags.artist || '-'} - ${tags.title || '-'}${tags.version ? ` (${tags.version})` : ''}` : '-'
+}
+
+function tagRelease(item: CollectionItemDetails): string {
+  const tags = item.tags
+  return tags ? [tags.album, tags.label, tags.year].filter(Boolean).join(' / ') || '-' : '-'
+}
+
+function modelTitle(recording: RecordingDetails | null | undefined, item: CollectionItemDetails): string {
+  const canonical = recording?.canonical ?? item.recordingCanonical
+  return `${canonical?.artist || '-'} - ${canonical?.title || '-'}${canonical?.version ? ` (${canonical.version})` : ''}${canonical?.year ? ` / ${canonical.year}` : ''}`
+}
+
+function discogsSearchQuery(item: CollectionItemDetails, summary: { artist: string; title: string }): string {
+  const artist = item.recordingCanonical?.artist || item.tags?.artist || summary.artist
+  const title = item.recordingCanonical?.title || item.tags?.title || summary.title
+  const version = item.recordingCanonical?.version || item.tags?.version
+  return [artist, title, version].filter((value) => value && !String(value).startsWith('Unknown ')).join(' ')
+}
+
+function normalize(value: string | null | undefined): string {
+  return (value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+function Step({ title, status, children }: { title: string; status?: string; children: ReactNode }): React.JSX.Element {
+  return (
+    <div className="min-w-0 border-l border-zinc-800 pl-3">
+      <div className="mb-1 flex items-center gap-1">
+        <div className="text-[11px] font-semibold uppercase text-zinc-400">{title}</div>
+        {status ? <Pill>{status}</Pill> : null}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+function TagRepairValue({ row, busy, onRepair }: { row: TagRepairRow; busy: boolean; onRepair: (field: TagRepairField) => void }): React.JSX.Element {
+  if (!row.expected) return <span className="text-zinc-500">-</span>
+  if (row.matches) return <span className="font-medium text-emerald-300">OK</span>
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      <span className="text-zinc-500">tag</span>
+      <span className="rounded border border-zinc-800 bg-zinc-950 px-1.5 py-0.5 text-zinc-200">{row.current || '-'}</span>
+      <span className="text-zinc-500">record</span>
+      <span className="rounded border border-zinc-800 bg-zinc-950 px-1.5 py-0.5 text-zinc-200">{row.expected}</span>
+      <ActionButton size="xs" tone="primary" disabled={busy} onClick={() => onRepair(row.field)}>
+        {busy ? 'Writing...' : 'Assign tag'}
+      </ActionButton>
+    </span>
+  )
+}
+
 export default function CollectionItemPage(): React.JSX.Element {
   const navigate = useNavigate()
   const player = usePlayer()
@@ -41,6 +130,8 @@ export default function CollectionItemPage(): React.JSX.Element {
   const itemLabel = hasItemId ? (itemId ?? '') : filename
   const [busyAction, setBusyAction] = useState<'sync' | 'reanalyze' | 'identify' | 'discogs' | 'upgrade' | null>(null)
   const [busyCandidateId, setBusyCandidateId] = useState<number | 'create' | null>(null)
+  const [busyTagField, setBusyTagField] = useState<TagRepairField | null>(null)
+  const [showDiscogsAssign, setShowDiscogsAssign] = useState(false)
   const [actionMessage, setActionMessage] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const {
@@ -76,6 +167,37 @@ export default function CollectionItemPage(): React.JSX.Element {
         : { artist: 'Unknown artist', title: 'Unknown title', year: '' },
     [item]
   )
+  const hash = item?.fileAudioState?.audioHash ?? item?.identification?.audioHash ?? null
+  const analysis = item?.parsedAudioAnalysis
+  const chosenClaim = recording?.sourceClaims.find((claim) => claim.id === item?.identification?.chosenClaimId) ?? null
+  const discogsClaim = chosenClaim?.provider === 'discogs' ? chosenClaim : recording?.sourceClaims.find((claim) => claim.provider === 'discogs') ?? null
+  const releaseId = item ? releaseIdFromClaim(discogsClaim, item) : null
+  const localClaims = recording?.sourceClaims.filter((claim) => claim.provider !== 'discogs').length ?? 0
+  const trackPosition = discogsClaim?.trackPosition ?? item?.tags?.discogsTrackPosition ?? null
+  const fileDuration = analysis?.durationSeconds ?? null
+  const recordDuration = recording?.durationSeconds ?? chosenClaim?.durationSeconds ?? null
+  const { data: discogsRelease, error: discogsError, isPending: isDiscogsLoading } = useQuery({
+    queryKey: ['discogs-release', releaseId],
+    queryFn: () => api.onlineSearch.getDiscogsEntity('release', releaseId as number),
+    enabled: releaseId != null
+  })
+  const isDiscogsReleaseLoading = releaseId != null && isDiscogsLoading
+  const discogsTitle = discogsClaim?.title ?? item?.tags?.title
+  const titleNeedle = normalize(discogsTitle)
+  const officialTrack = findDiscogsDisplayTrack(
+    discogsRelease?.tracklist ?? [],
+    trackPosition,
+    discogsTitle,
+    item?.upgradeCase?.officialDurationSeconds ?? item?.upgradeCase?.referenceDurationSeconds ?? null
+  )
+  const trackDuration = officialTrack?.duration ? parseDurationString(officialTrack.duration) : null
+  const videoDuration = titleNeedle
+    ? discogsRelease?.videos.find((video) => normalize(video.title).includes(titleNeedle))?.duration ?? null
+    : null
+  const discogsDuration = trackDuration ?? videoDuration ?? discogsClaim?.durationSeconds ?? null
+  const discogsSource = trackDuration != null ? 'Discogs tracklist' : videoDuration != null ? 'Discogs video' : discogsError ? 'Release load error' : discogsClaim ? 'stored claim' : '-'
+  const tagRepairRows = item ? buildTagRepairRows(item.tags, recording?.canonical ?? item.recordingCanonical) : []
+  const heading = buildCollectionItemHeading(item, recording, officialTrack)
 
   const handleSync = useCallback(async (): Promise<void> => {
     setBusyAction('sync')
@@ -181,13 +303,29 @@ export default function CollectionItemPage(): React.JSX.Element {
     [item, refetch]
   )
 
+  const handleRepairTag = useCallback(async (field: TagRepairField): Promise<void> => {
+    if (!item) return
+    setBusyTagField(field)
+    setActionMessage(null)
+    setActionError(null)
+    try {
+      await api.collection.repairTags(item.filename, [field])
+      await refetch()
+      setActionMessage('ID3 tag updated.')
+    } catch (error) {
+      setActionError(getErrorMessage(error, 'Failed to write ID3 tag'))
+    } finally {
+      setBusyTagField(null)
+    }
+  }, [item, refetch])
+
   return (
     <div className="space-y-3">
-      <ViewSection
-        title={summary.title}
-        subtitle={item ? `${summary.artist}${summary.year ? ` · ${summary.year}` : ''}` : 'Collection item'}
-        aside={
-          <div className="flex flex-wrap gap-2">
+      <PageHeader
+        title={heading.title}
+        subtitle={heading.subtitle || itemLabel || 'Missing collection item.'}
+        actions={
+          <>
             <ActionButton size="xs" onClick={() => navigate('/collection')}>
               Back
             </ActionButton>
@@ -207,18 +345,10 @@ export default function CollectionItemPage(): React.JSX.Element {
                 >
                   Play
                 </ActionButton>
-                <ActionButton size="xs" onClick={() => void api.collection.showInFinder(item.filename)}>
-                  Finder
-                </ActionButton>
                 <ActionButton size="xs" onClick={() => void api.collection.openInPlayer(item.filename)}>
                   Open Player
                 </ActionButton>
-                <ActionButton
-                  size="xs"
-                  disabled={busyAction === 'reanalyze'}
-                  title="Recompute audio/hash analysis for this file"
-                  onClick={() => void handleReanalyze()}
-                >
+                <ActionButton size="xs" disabled={busyAction === 'reanalyze'} title="Recompute audio/hash analysis for this file" onClick={() => void handleReanalyze()}>
                   {busyAction === 'reanalyze' ? 'Reanalyzing…' : 'Reanalyze'}
                 </ActionButton>
                 <ActionButton size="xs" disabled={busyAction === 'identify'} onClick={() => void handleIdentify()}>
@@ -226,6 +356,9 @@ export default function CollectionItemPage(): React.JSX.Element {
                 </ActionButton>
                 <ActionButton size="xs" disabled={busyAction === 'discogs'} onClick={() => void handleFindDiscogs()}>
                   {busyAction === 'discogs' ? 'Searching...' : 'Find Discogs'}
+                </ActionButton>
+                <ActionButton size="xs" tone="primary" onClick={() => setShowDiscogsAssign(true)}>
+                  Assign Discogs
                 </ActionButton>
                 <ActionButton size="xs" onClick={() => navigate(buildIdentifyReviewHref(item.filename, item.isDownload ? 'downloads' : 'collection'))}>
                   Review Identify
@@ -240,11 +373,9 @@ export default function CollectionItemPage(): React.JSX.Element {
                 </ActionButton>
               </>
             ) : null}
-          </div>
+          </>
         }
-      >
-        <div className="text-xs text-zinc-500">{item?.filename ?? (itemLabel || 'Missing collection item.')}</div>
-      </ViewSection>
+      />
 
       {isLoading ? <Notice className="text-sm">Loading item…</Notice> : null}
       {errorMessage ? <Notice tone="error" className="text-sm">{errorMessage}</Notice> : null}
@@ -256,155 +387,59 @@ export default function CollectionItemPage(): React.JSX.Element {
 
       {item ? (
         <>
-          <CollectionItemModelView item={item} recording={recording} isRecordingLoading={Boolean(item.recordingId) && isRecordingLoading} />
-
-          <details className="rounded-xl border border-zinc-800 bg-zinc-950/30 p-2">
-            <summary className="cursor-pointer text-[12px] font-semibold text-zinc-300">Diagnostics</summary>
-            <div className="mt-2 space-y-3">
-          <ViewSection title="File Row" padding="sm">
-            <KV
-              rows={[
-                { label: 'Filename', value: item.filename },
-                { label: 'Filesize', value: `${formatFileSize(item.filesize)} (${item.filesize} bytes)` },
-                { label: 'Mtime', value: fmtDate(item.mtimeMs) },
-                { label: 'Type', value: item.isDownload ? 'Download/import file' : 'Collection/library file' }
-              ]}
-            />
-          </ViewSection>
-
-          <ViewSection title="Import Cache" padding="sm">
-            {item.importReview ? (
-              <>
+        <div className="flex flex-row flex-wrap gap-6">
+          <ViewSection title="File Info">
+              <KV
+                labelWidth="72px"
+                rows={[
+                  { label: 'Format', value: `${analysis?.format ?? '-'}${analysis?.codec ? ` / ${analysis.codec}` : ''}` },
+                  { label: 'Size', value: formatFileSize(item.filesize) },
+                  { label: 'Modified', value: fmtDate(item.mtimeMs) },
+                  { label: 'Duration', value: duration(fileDuration) },
+                  { label: 'Bitrate', value: analysis?.bitrateKbps ? `${analysis.bitrateKbps} kbps` : '-' },
+                  { label: 'Sample Rate', value: analysis?.sampleRateHz ? `${analysis.sampleRateHz} Hz` : '-' },
+                // add quality overall score
+                ]}
+              />
+              </ViewSection>
+              <ViewSection title="Discogs">
                 <KV
+                  labelWidth="76px"
                   rows={[
-                    { label: 'Status', value: item.importReview.status },
-                    { label: 'Review version', value: item.importReview.reviewVersion },
-                    { label: 'Artist', value: item.importReview.parsedArtist || '—' },
-                    { label: 'Title', value: item.importReview.parsedTitle || '—' },
-                    { label: 'Version', value: item.importReview.parsedVersion || '—' },
-                    { label: 'Year', value: item.importReview.parsedYear || '—' },
-                    { label: 'Processed', value: fmtDate(item.importReview.processedAt) },
-                    { label: 'Error', value: item.importReview.errorMessage || '—' }
+                    { label: 'Release', value: releaseId ? <span className="inline-flex items-center gap-1">{discogsRelease?.title ?? discogsClaim?.releaseTitle ?? releaseId}<SourceIconLink url={buildDiscogsReleaseUrl(releaseId)} label="Open Discogs release" /></span> : '-' },
                   ]}
                 />
-                <div className="mt-2">
-                  <JsonBlock value={item.importReview.reviewJson} />
-                </div>
-              </>
-            ) : (
-              <div className="text-xs text-zinc-500">No row in `import_review_cache`.</div>
-            )}
-          </ViewSection>
-
-          <ViewSection title="Audio Cache" padding="sm">
-            {item.fileAudioState ? (
-              <>
-                <KV
-                  rows={[
-                    { label: 'Status', value: item.fileAudioState.status },
-                    { label: 'Hash version', value: item.fileAudioState.hashVersion },
-                    { label: 'Audio hash', value: item.fileAudioState.audioHash || '—' },
-                    { label: 'Processed', value: fmtDate(item.fileAudioState.processedAt) },
-                    { label: 'Error', value: item.fileAudioState.errorMessage || '—' }
-                  ]}
-                />
-                <div className="mt-2">
-                  {item.audioAnalysisCache ? (
-                    <KV
-                      rows={[
-                        { label: 'Analysis version', value: item.audioAnalysisCache.analysisVersion },
-                        { label: 'Analysis processed', value: fmtDate(item.audioAnalysisCache.processedAt) },
-                        { label: 'Analysis error', value: item.audioAnalysisCache.errorMessage || '—' },
-                        { label: 'Duration (s)', value: item.parsedAudioAnalysis?.durationSeconds ?? '—' },
-                        { label: 'Bitrate (kbps)', value: item.parsedAudioAnalysis?.bitrateKbps ?? '—' },
-                        { label: 'Loudness LUFS', value: item.parsedAudioAnalysis?.integratedLufs ?? '—' }
-                      ]}
-                    />
-                  ) : (
-                    <div className="text-xs text-zinc-500">No row in `audio_analysis_cache`.</div>
-                  )}
-                </div>
-                <div className="mt-2">
-                  <JsonBlock value={item.audioAnalysisCache?.analysisJson} />
-                </div>
-              </>
-            ) : (
-              <div className="text-xs text-zinc-500">No row in `file_audio_state`.</div>
-            )}
-          </ViewSection>
-
-          <ViewSection title="Identification" padding="sm">
-            {item.identification ? (
-              <>
-                <KV
-                  rows={[
-                    { label: 'Status', value: item.identification.status },
-                    { label: 'Recording id', value: item.identification.recordingId ?? '—' },
-                    { label: 'Method', value: item.identification.assignmentMethod || '—' },
-                    { label: 'Confidence', value: item.identification.confidence ?? '—' },
-                    {
-                      label: 'Canonical',
-                      value:
-                        item.identification.recordingCanonical?.title || item.identification.recordingCanonical?.artist
-                          ? `${item.identification.recordingCanonical?.artist || '—'} · ${item.identification.recordingCanonical?.title || '—'}${item.identification.recordingCanonical?.version ? ` (${item.identification.recordingCanonical.version})` : ''}${item.identification.recordingCanonical?.year ? ` · ${item.identification.recordingCanonical.year}` : ''}`
-                          : '—'
-                    },
-                    { label: 'Parsed', value: `${item.identification.parsedArtist || '—'} · ${item.identification.parsedTitle || '—'}${item.identification.parsedVersion ? ` (${item.identification.parsedVersion})` : ''}` },
-                    { label: 'Tags', value: `${item.identification.tagArtist || '—'} · ${item.identification.tagTitle || '—'}${item.identification.tagVersion ? ` (${item.identification.tagVersion})` : ''}` },
-                    { label: 'Audio hash', value: item.identification.audioHash || '—' },
-                    { label: 'Verified', value: fmtDate(item.identification.verifiedAt) },
-                    { label: 'Processed', value: fmtDate(item.identification.processedAt) },
-                    { label: 'Error', value: item.identification.errorMessage || '—' }
-                  ]}
-                />
-                <div className="mt-2">
-                  <JsonBlock value={item.identification.explanationJson} />
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <ActionButton size="xs" tone="primary" disabled={busyCandidateId === 'create'} onClick={() => void handleReviewIdentification('create_recording')}>
-                    {busyCandidateId === 'create' ? 'Creating…' : 'Create Recording'}
-                  </ActionButton>
-                </div>
-                {item.identification.candidates.length > 0 ? (
-                  <div className="mt-3 space-y-2">
-                    {item.identification.candidates.map((candidate) => (
-                      <div key={candidate.id} className="rounded border border-zinc-800 bg-zinc-950/40 p-2 text-xs">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="min-w-0">
-                            <div className="text-zinc-100">
-                              {candidate.provider} · {candidate.entityType} · score {candidate.score}
-                            </div>
-                            <div className="truncate text-zinc-500">{candidate.externalKey}</div>
-                            <div className="text-zinc-300">
-                              {candidate.recordingCanonical?.artist || '—'} · {candidate.recordingCanonical?.title || '—'}
-                              {candidate.recordingCanonical?.version ? ` (${candidate.recordingCanonical.version})` : ''}
-                              {candidate.recordingCanonical?.year ? ` · ${candidate.recordingCanonical.year}` : ''}
-                            </div>
-                            <div className="text-zinc-500">Disposition: {candidate.disposition}</div>
-                          </div>
-                          <div className="flex gap-2">
-                            <ActionButton size="xs" tone="primary" disabled={busyCandidateId === candidate.id} onClick={() => void handleReviewIdentification('accept', candidate.id)}>
-                              {busyCandidateId === candidate.id ? 'Saving…' : 'Accept'}
-                            </ActionButton>
-                            <ActionButton size="xs" disabled={busyCandidateId === candidate.id} onClick={() => void handleReviewIdentification('reject', candidate.id)}>
-                              Reject
-                            </ActionButton>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                {discogsRelease ? (
+                  <DiscogsReleaseTracklist
+                    tracks={discogsRelease.tracklist}
+                    assignedPosition={officialTrack?.position ?? trackPosition}
+                    assignedTitle={officialTrack?.title ?? discogsClaim?.title ?? item.tags?.title ?? null}
+                  />
                 ) : null}
-              </>
-            ) : (
-              <div className="text-xs text-zinc-500">No row in `file_identification_state`.</div>
-            )}
-          </ViewSection>
-
-            </div>
-          </details>
+              </ViewSection>
+              <ViewSection title="Data Quality">
+                <KV
+                  labelWidth="76px"
+                  rows={[
+                    { label: 'Duration drift', value: drift(fileDuration, discogsDuration) },
+                    ...tagRepairRows.map((row) => ({
+                      label: row.label,
+                      value: <TagRepairValue row={row} busy={busyTagField === row.field} onRepair={(field) => void handleRepairTag(field)} />
+                    })),
+                  ]}
+                />
+              </ViewSection>
+          </div>
 
         </>
+      ) : null}
+      {item && showDiscogsAssign ? (
+        <DiscogsTrackAssignDialog
+          filename={item.filename}
+          initialQuery={discogsSearchQuery(item, summary)}
+          onClose={() => setShowDiscogsAssign(false)}
+          onAssigned={async () => { await refetch() }}
+        />
       ) : null}
     </div>
   )

@@ -9,6 +9,7 @@ import {
   formatError,
   getDownloadFolderPrefixes,
   normalizeFilename,
+  normalizeSearchText,
   recordingSourceUrlFromExternalKey,
   tokenizeSearchText,
   toListResult,
@@ -47,6 +48,7 @@ import type {
   UpgradeCase,
   UpgradeLocalCandidate
 } from '../shared/api.ts'
+import type { DiscogsTrackMatch } from '../shared/discogs-match.ts'
 import { compareQuality, fileQualityFromExt } from '../shared/quality.ts'
 import type {
   IdentificationDecision,
@@ -280,6 +282,10 @@ function normalizeJsonText(value: string | null | undefined): string | null {
   } catch {
     return null
   }
+}
+
+function buildDiscogsExternalKey(match: DiscogsTrackMatch): string {
+  return `discogs:release:${match.releaseId}:track:${normalizeSearchText(match.trackPosition ?? match.title) || 'unknown'}`
 }
 
 type PrefixWhereResult = {
@@ -3710,6 +3716,129 @@ export class CollectionService {
       await this.refreshIdentificationQueueCounts()
       this.emitStatus()
       return await this.getRecording(recordingId)
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+  }
+
+  public async assignDiscogsTrack(filenameInput: string, match: DiscogsTrackMatch): Promise<RecordingDetails | null> {
+    await this.ensureReady()
+    const filename = normalizeFilename(filenameInput)
+    const canonical = toCanonical(match.artist, match.title, match.version, match.year)
+    if (!filename || !canonical) return null
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      const normKey = buildCanonicalNormKey(canonical)
+      let recordingId = (
+        await client.query<{ id: number | bigint }>(
+          `
+            SELECT id
+            FROM recordings
+            WHERE canonical_norm_key = $1 AND review_state <> 'merged'
+            ORDER BY metadata_locked DESC, confidence DESC, id
+            LIMIT 1
+          `,
+          [normKey]
+        )
+      ).rows[0]?.id
+      if (!recordingId) {
+        recordingId = (
+          await client.query<{ id: number | bigint }>(
+            `
+              INSERT INTO recordings(
+                canonical_artist, canonical_title, canonical_version, canonical_year, canonical_norm_key,
+                confidence, review_state, metadata_locked, merged_into_recording_id, updated_at
+              ) VALUES ($1, $2, $3, $4, $5, 100, 'confirmed', TRUE, NULL, now())
+              RETURNING id
+            `,
+            [canonical.artist, canonical.title, canonical.version, canonical.year, normKey]
+          )
+        ).rows[0]?.id
+      }
+      if (!recordingId) throw new Error('Recording could not be created.')
+      const id = toNumber(recordingId)
+      const claimId = (
+        await client.query<{ id: number | bigint }>(
+          `
+            INSERT INTO recording_source_claims(
+              recording_id, provider, entity_type, external_key,
+              artist, title, version, release_title, track_position, year, duration_seconds,
+              confidence, raw_json, updated_at
+            ) VALUES ($1, 'discogs', 'release_track', $2, $3, $4, $5, $6, $7, $8, $9, 100, $10::jsonb, now())
+            ON CONFLICT(provider, entity_type, external_key) DO UPDATE SET
+              recording_id = EXCLUDED.recording_id,
+              artist = EXCLUDED.artist,
+              title = EXCLUDED.title,
+              version = EXCLUDED.version,
+              release_title = EXCLUDED.release_title,
+              track_position = EXCLUDED.track_position,
+              year = COALESCE(EXCLUDED.year, recording_source_claims.year),
+              duration_seconds = COALESCE(EXCLUDED.duration_seconds, recording_source_claims.duration_seconds),
+              confidence = GREATEST(recording_source_claims.confidence, EXCLUDED.confidence),
+              raw_json = EXCLUDED.raw_json,
+              updated_at = now()
+            RETURNING id
+          `,
+          [
+            id,
+            buildDiscogsExternalKey(match),
+            match.artist,
+            match.title,
+            match.version,
+            match.releaseTitle,
+            match.trackPosition,
+            match.year,
+            match.durationSeconds ?? null,
+            JSON.stringify(match)
+          ]
+        )
+      ).rows[0]?.id
+      const updatedFile = await client.query(
+        `
+          UPDATE file_identification_state
+          SET recording_id = $2, status = 'ready', assignment_method = 'manual', confidence = 100,
+              chosen_claim_id = $3, verified_at = now(), processed_at = now(), error_message = NULL
+          WHERE filename = $1
+          RETURNING filename
+        `,
+        [filename, id, claimId ? toNumber(claimId) : null]
+      )
+      if (updatedFile.rowCount !== 1) throw new Error('File identification state was not found.')
+      const assetRow = (
+        await client.query<{ audiohash: string | null; durationseconds: number | null }>(
+          `
+            SELECT file_identification_state.audio_hash AS audioHash, NULLIF(NULLIF(audio_analysis_cache.analysis_json, '')::jsonb->>'durationSeconds', '')::double precision AS durationSeconds
+            FROM file_identification_state
+            LEFT JOIN audio_analysis_cache
+              ON audio_analysis_cache.audio_hash = file_identification_state.audio_hash
+             AND audio_analysis_cache.analysis_version = $2
+            WHERE file_identification_state.filename = $1
+          `,
+          [filename, AUDIO_ANALYSIS_VERSION]
+        )
+      ).rows[0]
+      if (assetRow?.audiohash) {
+        await client.query(
+          `
+            INSERT INTO audio_assets(audio_hash, recording_id, duration_seconds, assigned_by, confidence, updated_at)
+            VALUES ($1, $2, $3, 'manual', 100, now())
+            ON CONFLICT(audio_hash) DO UPDATE SET
+              recording_id = EXCLUDED.recording_id,
+              duration_seconds = COALESCE(EXCLUDED.duration_seconds, audio_assets.duration_seconds),
+              assigned_by = 'manual',
+              confidence = 100,
+              updated_at = now()
+          `,
+          [assetRow.audiohash, id, assetRow.durationseconds]
+        )
+      }
+      await this.materializeRecordingDurations([id], client)
+      await client.query('COMMIT')
+      return await this.getRecording(id)
     } catch (error) {
       await client.query('ROLLBACK')
       throw error

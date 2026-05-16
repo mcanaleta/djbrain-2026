@@ -1,13 +1,16 @@
 import { basename, join } from 'node:path'
-import { unlink } from 'node:fs/promises'
+import { stat, unlink } from 'node:fs/promises'
 import type { Express } from 'express'
 import type { CollectionService } from '../../backend/collection-service.ts'
 import { FileAnalysisService } from '../../backend/file-analysis-service.ts'
 import { ImportService, parseSongFilename } from '../../backend/import-service.ts'
 import type { PostgresMediaStore } from '../../backend/postgres-media-store.ts'
 import type { AppSettings } from '../../backend/settings-store.ts'
+import type { AudioTags, TaggerService } from '../../backend/tagger-service.ts'
 import type { DiscogsTrackMatch } from '../../shared/discogs-match.ts'
 import type { FileIdentificationState, ImportTagPreview } from '../../shared/api.ts'
+import type { TagRepairField } from '../../shared/tag-repair.ts'
+import { parseTrackTitle } from '../../shared/track-title-parser.ts'
 import { asyncHandler, sendEmpty, sendJson } from '../http.ts'
 
 type CollectionRouteDeps = {
@@ -17,6 +20,7 @@ type CollectionRouteDeps = {
   buildImportReview: (filename: string, searchValue?: unknown, force?: boolean) => Promise<unknown>
   fileAnalysisService: FileAnalysisService
   importService: ImportService
+  taggerService: TaggerService
   syncImportReviewQueue: () => Promise<void>
   syncIdentificationQueue: () => Promise<void>
   resolveMusicRelativePath: (filename: string) => string
@@ -45,6 +49,7 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
     buildImportReview,
     fileAnalysisService,
     importService,
+    taggerService,
     syncImportReviewQueue,
     syncIdentificationQueue,
     resolveMusicRelativePath,
@@ -271,6 +276,82 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
           canonical: body?.canonical ?? null
         })
       )
+    })
+  )
+
+  app.post(
+    '/api/collection/recordings/assign-discogs-track',
+    asyncHandler(async (request, response) => {
+      const body = (request.body ?? null) as { filename?: string | null; match?: unknown } | null
+      const filename = typeof body?.filename === 'string' ? normalizeFilename(body.filename) : ''
+      const match = readDiscogsTrackMatch(body?.match)
+      if (!filename || !match) {
+        sendJson(response, 400, { message: 'filename and Discogs track match are required.' })
+        return
+      }
+      const result = await requireCollectionService().assignDiscogsTrack(filename, match)
+      if (syncMediaItem) await syncMediaItem(filename)
+      else await syncMediaCatalog?.()
+      sendJson(response, 200, result)
+    })
+  )
+
+  app.post(
+    '/api/collection/tags/repair',
+    asyncHandler(async (request, response) => {
+      const body = (request.body ?? null) as { filename?: string | null; fields?: string[] | null } | null
+      const fields = new Set((body?.fields ?? []).filter((field): field is TagRepairField => field === 'artist' || field === 'title' || field === 'year'))
+      const filename = typeof body?.filename === 'string' ? normalizeFilename(body.filename) : ''
+      if (!filename || fields.size === 0) {
+        sendJson(response, 400, { message: 'filename and fields are required.' })
+        return
+      }
+      const service = requireCollectionService()
+      const item = await service.getItem(filename)
+      const canonical = item?.recordingCanonical ?? item?.identification?.recordingCanonical ?? null
+      const absPath = resolveMusicRelativePath(filename)
+      if (!item || !canonical || !taggerService.supportsFile(absPath)) {
+        sendJson(response, 400, { message: 'A supported tagged file with an assigned record is required.' })
+        return
+      }
+      const current = taggerService.readTags(absPath) ?? ({
+        artist: item.tags?.artist ?? '',
+        title: item.tags?.title ?? '',
+        album: item.tags?.album ?? null,
+        year: item.tags?.year ?? null,
+        label: item.tags?.label ?? null,
+        catalogNumber: item.tags?.catalogNumber ?? null,
+        trackPosition: item.tags?.trackPosition ?? null,
+        discogsReleaseId: item.tags?.discogsReleaseId ?? null,
+        discogsTrackPosition: item.tags?.discogsTrackPosition ?? null
+      } satisfies AudioTags)
+      const next = {
+        ...current,
+        artist: fields.has('artist') && canonical.artist ? canonical.artist : current.artist,
+        title: fields.has('title') && canonical.title ? canonical.title : current.title,
+        year: fields.has('year') && canonical.year ? canonical.year : current.year
+      }
+      await taggerService.writeTags(absPath, next)
+      const snapshot = await stat(absPath)
+      const title = parseTrackTitle(next.title)
+      await service.saveFileTagState(filename, {
+        filesize: snapshot.size,
+        mtimeMs: snapshot.mtimeMs,
+        source: 'file_tag_state',
+        artist: next.artist || null,
+        title: title.title || null,
+        version: item.tags?.version ?? title.version,
+        album: next.album,
+        year: next.year,
+        label: next.label,
+        catalogNumber: next.catalogNumber,
+        trackPosition: next.trackPosition,
+        discogsReleaseId: next.discogsReleaseId,
+        discogsTrackPosition: next.discogsTrackPosition,
+        rawJson: JSON.stringify(next),
+        errorMessage: null
+      })
+      sendEmpty(response, 204)
     })
   )
 

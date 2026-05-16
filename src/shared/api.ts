@@ -4,6 +4,7 @@ import type { GrokSearchResponse } from './grok-search'
 import type { OnlineSearchResponse, OnlineSearchScope } from './online-search'
 import type { DatabaseRowDetails, DatabaseTableRows, DatabaseTableSummary } from './database-inspector'
 import type { RuntimeStatus } from './runtime-status'
+import type { TagRepairField } from './tag-repair'
 
 export type AppSettings = {
   musicFolderPath: string
@@ -489,6 +490,12 @@ export type ImportReview = {
   tagWriteSupported: boolean
 }
 
+export type DiscogsTrackSearchResult = DiscogsTrackMatch & {
+  externalUrl: string
+  youtubeVideoId: string | null
+  youtubeTitle: string | null
+}
+
 export type ImportComparison = {
   sourceFilename: string
   existingFilename: string
@@ -528,6 +535,7 @@ export type DJBrainApi = {
   }
   onlineSearch: {
     search: (query: string, scope?: OnlineSearchScope) => Promise<OnlineSearchResponse>
+    searchDiscogsTracks: (query: string) => Promise<DiscogsTrackSearchResult[]>
     getDiscogsEntity: {
       (type: 'release', id: number | string): Promise<DiscogsRelease>
       (type: 'artist', id: number | string): Promise<DiscogsArtist>
@@ -570,6 +578,8 @@ export type DJBrainApi = {
       create?: boolean
       canonical?: Partial<RecordingCanonical> | null
     }) => Promise<RecordingDetails | null>
+    assignDiscogsTrack: (filename: string, match: DiscogsTrackMatch) => Promise<RecordingDetails | null>
+    repairTags: (filename: string, fields: TagRepairField[]) => Promise<void>
     mergeRecordings: (sourceRecordingId: number, targetRecordingId: number) => Promise<RecordingDetails | null>
     commitImport: (input: ImportCommitInput) => Promise<ImportFileResult>
     importFile: (filename: string) => Promise<ImportFileResult>
