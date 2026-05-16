@@ -78,9 +78,9 @@ export function ImportRecordFilesTable({
     },
     { key: 'len', header: 'Len', cellClassName: 'w-[1%] whitespace-nowrap text-zinc-400', render: (row) => formatCompactDuration(row.duration) },
     { key: 'size', header: 'Size', cellClassName: 'w-[1%] whitespace-nowrap text-zinc-400', render: (row) => formatFileSize(row.filesize) },
-    ...AUDIO_QUALITY_MARKERS.map(([key, label]): DataTableColumn<ImportRecordFileRow> => ({
+    ...AUDIO_QUALITY_MARKERS.map(([key, label, description]): DataTableColumn<ImportRecordFileRow> => ({
       key,
-      header: label,
+      header: <span title={description} aria-label={`${label}: ${description}`} className="cursor-help border-b border-dotted border-zinc-700/70">{label}</span>,
       cellClassName: 'w-[1%] whitespace-nowrap',
       render: (row) => <AudioQualityMarkerCell marker={key} analysis={row.audioAnalysis ?? null} />
     })),

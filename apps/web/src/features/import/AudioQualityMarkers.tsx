@@ -2,18 +2,18 @@ import type { AudioAnalysis } from '@djbrain/shared/api'
 import { formatBits, formatBitrate, formatDb, formatHz, formatPercent } from '../../lib/music-file'
 
 export const AUDIO_QUALITY_MARKERS = [
-  ['format', 'Format'],
-  ['bitrate', 'Bitrate'],
-  ['rate', 'Rate'],
-  ['bits', 'Bits'],
-  ['maxfreq', 'Top'],
-  ['crest', 'Crest'],
-  ['air', 'Air'],
-  ['noise', 'Noise'],
-  ['cutoff', 'Cutoff'],
-  ['rumble', 'Rumble'],
-  ['hum', 'Hum'],
-  ['vinyl', 'Vinyl']
+  ['format', 'Format', 'Container and codec. Lossless formats score high as sources, but imports/replacements are still written as MP3 320 for Rekordbox/CDJ compatibility.'],
+  ['bitrate', 'Bitrate', 'Encoded bitrate in kbps. For lossy files, 320 kbps is the normal target; lower values often mean less detail or more compression artifacts.'],
+  ['rate', 'Rate', 'Sample rate in Hz/kHz. 44.1 kHz is CD quality; higher values can preserve more ultrasonic content but do not guarantee a better master.'],
+  ['bits', 'Bits', 'Bit depth when available. 16-bit is CD quality; 24-bit can be useful for masters/lossless sources, but many lossy files do not report real bit depth.'],
+  ['maxfreq', 'Top', 'Estimated highest useful frequency. Around 16 kHz often suggests 128 kbps/lower-quality lossy audio; 18-20 kHz is more typical of stronger MP3/AAC; 22 kHz usually means full 44.1 kHz bandwidth.'],
+  ['crest', 'Crest', 'Peak-to-average level gap in dB. Higher crest means more punch/transients and less brickwall limiting; very low crest means the file is probably over-compressed or clipped.'],
+  ['air', 'Air', 'RMS energy above 12 kHz in dB. Less negative values mean more high-end sparkle/open top; very negative values mean dull, rolled-off, low-pass, or weak high-frequency content.'],
+  ['noise', 'Noise', 'High-frequency dirt score from the intro. Higher values mean more hiss, codec fizz, vinyl crackle, or noisy top-end content. This is an issue marker: lower is better.'],
+  ['cutoff', 'Cutoff', 'How sharply the top end drops above 12 kHz compared with the upper mids. Higher values often flag low-pass filtering, bad transcodes, or bandwidth-limited rips. Lower is better.'],
+  ['rumble', 'Rumble', 'Sub-35 Hz unwanted low-end weight in the intro. Higher values suggest turntable rumble, handling noise, or bad low-frequency cleanup. Lower is better.'],
+  ['hum', 'Hum', '50/100 Hz mains-style contamination in the intro. Higher values suggest electrical hum or grounding noise. Lower is better.'],
+  ['vinyl', 'Vinyl', 'Heuristic vinyl-rip likelihood based on intro noise, rumble, hum, and high-end behavior. Higher means more analog/vinyl-like artifacts; it is not automatically bad, but it is a warning.']
 ] as const
 
 export type AudioQualityMarkerKey = (typeof AUDIO_QUALITY_MARKERS)[number][0]
