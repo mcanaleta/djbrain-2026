@@ -37,6 +37,7 @@ export default function ImportReviewPage(): React.JSX.Element {
   const [selectedFilename, setSelectedFilename] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [pendingDeleteFilename, setPendingDeleteFilename] = useState<string | null>(null)
+  const [pendingWantListDelete, setPendingWantListDelete] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [actionSuccess, setActionSuccess] = useState<string | null>(null)
   const [activeReview, setActiveReview] = useState<ActiveImportReview | null>(null)
@@ -83,6 +84,7 @@ export default function ImportReviewPage(): React.JSX.Element {
     setActionSuccess(null)
     setPendingCommit(null)
     setCommittedTargetFilename(null)
+    setPendingWantListDelete(false)
   }, [record?.key])
 
   const importHref = buildImportHref(query)
@@ -153,6 +155,30 @@ export default function ImportReviewPage(): React.JSX.Element {
     }
   }
 
+  const handleDeleteWantList = async (): Promise<void> => {
+    if (!record?.wantListIds.length) return
+    setActionError(null)
+    setActionSuccess(null)
+    if (!pendingWantListDelete) {
+      setPendingWantListDelete(true)
+      return
+    }
+    setBusyAction('wantlist')
+    try {
+      await Promise.all(record.wantListIds.map((id) => api.wantList.remove(id)))
+      setPendingWantListDelete(false)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['collection', 'downloads'] }),
+        queryClient.invalidateQueries({ queryKey: ['want-list'] })
+      ])
+      setActionSuccess('Associated wantlist deleted.')
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Failed to delete associated wantlist')
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
   const confirmPendingCommit = async (): Promise<void> => {
     if (!pendingCommit) return
     const key = `${pendingCommit.action}:${pendingCommit.row.filename}`
@@ -202,7 +228,16 @@ export default function ImportReviewPage(): React.JSX.Element {
         onCancelDelete={() => setPendingDeleteFilename(null)}
         onSelect={setSelectedFilename}
       />
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        {record.wantListIds.length ? (
+          <ActionButton size="xs" tone={pendingWantListDelete ? 'danger' : 'default'} disabled={busyAction === 'wantlist'} onClick={() => void handleDeleteWantList()}>
+            {busyAction === 'wantlist'
+              ? 'Deleting...'
+              : pendingWantListDelete
+                ? `Confirm Delete Wantlist${record.wantListIds.length > 1 ? 's' : ''}`
+                : `Delete Wantlist${record.wantListIds.length > 1 ? `s (${record.wantListIds.length})` : ''}`}
+          </ActionButton>
+        ) : null}
         <ActionButton size="xs" tone="primary" disabled={!record.recordingId} onClick={() => setShowDiscogsAssign(true)}>
           Assign Discogs
         </ActionButton>

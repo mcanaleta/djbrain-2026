@@ -49,6 +49,7 @@ export type CollectionItem = {
   importReleaseTitle?: string | null
   importTrackPosition?: string | null
   importExactExistingFilename?: string | null
+  importWantListId?: number | null
   importBetterThanExisting?: boolean | null
   importExistingQualityScore?: number | null
   importQualityScore?: number | null

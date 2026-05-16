@@ -48,6 +48,7 @@ type CollectionRow = {
   importReleaseTitle?: string | null
   importTrackPosition?: string | null
   importExactExistingFilename?: string | null
+  importWantListId?: number | null
   importBetterThanExisting?: boolean | null
   importExistingQualityScore?: number | null
   importQualityScore?: number | null
@@ -216,6 +217,7 @@ export function toListResult(rows: CollectionRow[]): CollectionListResult {
     importReleaseTitle: row.importReleaseTitle ?? null,
     importTrackPosition: row.importTrackPosition ?? null,
     importExactExistingFilename: row.importExactExistingFilename ?? null,
+    importWantListId: row.importWantListId ?? null,
     importBetterThanExisting: row.importBetterThanExisting ?? null,
     importExistingQualityScore: row.importExistingQualityScore ?? null,
     importQualityScore: row.importQualityScore ?? null

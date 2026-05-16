@@ -339,6 +339,7 @@ export type CollectionItem = {
   importReleaseTitle?: string | null
   importTrackPosition?: string | null
   importExactExistingFilename?: string | null
+  importWantListId?: number | null
   importBetterThanExisting?: boolean | null
   importExistingQualityScore?: number | null
   importQualityScore?: number | null
@@ -1153,6 +1154,7 @@ export class CollectionService {
         importyear: string | null
         importerror: string | null
         importreviewjson: string | null
+        downloadoriginwantlistid: number | bigint | null
         downloadoriginsourcecollectionfilename: string | null
       }>(
         `
@@ -1190,12 +1192,14 @@ export class CollectionService {
             import_review_cache.parsed_year AS importYear,
             import_review_cache.error_message AS importError,
             import_review_cache.review_json AS importReviewJson,
+            download_origin.wantListId AS downloadOriginWantListId,
             download_origin.originSourceCollectionFilename AS downloadOriginSourceCollectionFilename
           FROM collection_files
           LEFT JOIN file_identification_state ON file_identification_state.filename = collection_files.filename
           LEFT JOIN import_review_cache ON import_review_cache.filename = collection_files.filename
           LEFT JOIN LATERAL (
             SELECT
+              download_attempts.want_list_id AS wantListId,
               COALESCE(download_attempts.origin_recording_id, want_list.recording_id) AS originRecordingId,
               COALESCE(download_attempts.origin_source_collection_filename, want_list.source_collection_filename) AS originSourceCollectionFilename
             FROM download_attempts
@@ -1276,6 +1280,7 @@ export class CollectionService {
           importReleaseTitle: candidate?.match.releaseTitle ?? null,
           importTrackPosition: candidate?.match.trackPosition ?? null,
           importExactExistingFilename: existingFilename,
+          importWantListId: row.downloadoriginwantlistid == null ? null : toNumber(row.downloadoriginwantlistid),
           importBetterThanExisting:
             !sourceQuality || !existingQuality ? null : compareQuality(sourceQuality, existingQuality) === 'better',
           importExistingQualityScore: existingAnalysisQualityScore,

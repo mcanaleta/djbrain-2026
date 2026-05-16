@@ -11,6 +11,7 @@ export type ImportRow = CollectionItem & {
 export type ImportTracksTableRow = {
   id: number
   recordingId: number | null
+  wantListIds: number[]
   legacyIds: number[]
   key: string
   artist: string
@@ -150,6 +151,7 @@ export function groupImportRows(rows: ImportRow[]): ImportTracksTableRow[] {
       const files = uniqueImportRows(group).sort(compareImportRows)
       const bestFile = files[0]
       const recordingId = group.find((row) => row.recordingId != null)?.recordingId ?? null
+      const wantListIds = [...new Set(group.map((row) => row.importWantListId).filter((id): id is number => typeof id === 'number' && id > 0))]
       const id = recordingId ?? importRecordId(key)
       const usesRecording = recordingId != null
       const displayFile = usesRecording ? group.find((row) => row.recordingId === recordingId) ?? bestFile : bestFile
@@ -157,6 +159,7 @@ export function groupImportRows(rows: ImportRow[]): ImportTracksTableRow[] {
       return {
         id,
         recordingId,
+        wantListIds,
         legacyIds: [...new Set(group.flatMap((row) => [
           importRecordId(key),
           ...importLegacyGroupKeys(row).map(importRecordId),
