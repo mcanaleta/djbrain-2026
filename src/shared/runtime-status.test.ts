@@ -42,7 +42,7 @@ describe('takeoverCommand', () => {
   it('builds the explicit local takeover command for daemon roles', () => {
     assert.equal(
       takeoverCommand('sync', 'machook', 50),
-      'npm run sync -- --owner-id machook --priority 50 --takeover'
+      'pnpm run sync -- --owner-id machook --priority 50 --takeover'
     )
   })
 })

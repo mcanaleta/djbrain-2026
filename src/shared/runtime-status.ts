@@ -43,13 +43,13 @@ export type RuntimeStatus = {
 }
 
 const COMMANDS: Record<string, string> = {
-  downloader: 'npm run downloader',
-  sync: 'npm run sync',
-  admin: 'npm run admin'
+  downloader: 'pnpm run downloader',
+  sync: 'pnpm run sync',
+  admin: 'pnpm run admin'
 }
 
 export function takeoverCommand(role: string, ownerId = 'machook', priority = 50): string {
-  return `${COMMANDS[role] ?? `npm run ${role}`} -- --owner-id ${ownerId} --priority ${priority} --takeover`
+  return `${COMMANDS[role] ?? `pnpm run ${role}`} -- --owner-id ${ownerId} --priority ${priority} --takeover`
 }
 
 export function buildRuntimeProcessStatuses(

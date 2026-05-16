@@ -54,7 +54,7 @@ Every step allows manual intervention. You can inspect results, pick the best fi
 | Metadata | Discogs API, Serper (Google), Grok AI (xAI) |
 | Testing | Node.js built-in `node:test` + `node:assert/strict` |
 
-Node.js 24+, npm 11+.
+Node.js 24+, pnpm 11+.
 
 ---
 
@@ -450,7 +450,7 @@ Use the idempotent migration pattern (see [Migrations](#migrations) above). Plac
 Tests use the Node.js built-in test runner. No Jest, no Vitest.
 
 ```bash
-npm test
+pnpm test
 # runs: node --experimental-strip-types --test 'src/shared/*.test.ts'
 ```
 

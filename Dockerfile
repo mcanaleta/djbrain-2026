@@ -6,12 +6,12 @@ FROM node:24-slim AS builder
 WORKDIR /app
 
 # Install dependencies first (cache layer)
-COPY package.json package-lock.json ./
-RUN npm ci
+COPY package.json pnpm-lock.yaml ./
+RUN corepack enable && pnpm install --frozen-lockfile
 
 # Copy source and build
 COPY . .
-RUN npm run build
+RUN pnpm run build
 
 # --- Stage 2: Production image ---
 FROM node:24-slim
@@ -24,8 +24,8 @@ RUN apt-get update && \
 WORKDIR /app
 
 # Install production dependencies only
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+COPY package.json pnpm-lock.yaml ./
+RUN corepack enable && pnpm install --frozen-lockfile --prod
 
 # Copy server source (runs with --experimental-strip-types, no transpile needed)
 COPY src/ src/
