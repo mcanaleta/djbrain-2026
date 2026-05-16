@@ -7,6 +7,7 @@ import { ImportReviewDialog } from '../components/ImportReviewDialog'
 import { ActionButton } from '../components/view/ActionButton'
 import { Notice } from '../components/view/Notice'
 import { ImportActionConfirmDialog } from '../features/import/ImportActionConfirmDialog'
+import type { ImportRecordFileUtilityAction } from '../features/import/ImportRecordFileMenu'
 import { ImportRecordFilesTable } from '../features/import/ImportRecordFilesTable'
 import { DiscogsTrackAssignDialog } from '../features/collection-item/DiscogsTrackAssignDialog'
 import {
@@ -155,6 +156,26 @@ export default function ImportReviewPage(): React.JSX.Element {
     }
   }
 
+  const handleFileUtilityAction = async (action: ImportRecordFileUtilityAction, row: ImportRecordFileRow): Promise<void> => {
+    setSelectedFilename(row.filename)
+    setActionError(null)
+    setActionSuccess(null)
+    setBusyAction(`${action}:${row.filename}`)
+    try {
+      if (action === 'reanalyze') {
+        await api.collection.reanalyze(row.filename)
+        await refreshDownloads(row.kind === 'collection' ? row.filename : collectionTarget?.filename ?? null)
+        setActionSuccess('File reanalyzed.')
+      } else {
+        await (action === 'open' ? api.collection.openInPlayer(row.filename) : api.collection.showInFinder(row.filename))
+      }
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Unexpected file action error')
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
   const handleDeleteWantList = async (): Promise<void> => {
     if (!record?.wantListIds.length) return
     setActionError(null)
@@ -225,6 +246,7 @@ export default function ImportReviewPage(): React.JSX.Element {
         busyAction={busyAction}
         pendingDeleteFilename={pendingDeleteFilename}
         onAction={(action, row) => { void handleFileAction(action, row) }}
+        onUtilityAction={(action, row) => { void handleFileUtilityAction(action, row) }}
         onCancelDelete={() => setPendingDeleteFilename(null)}
         onSelect={setSelectedFilename}
       />

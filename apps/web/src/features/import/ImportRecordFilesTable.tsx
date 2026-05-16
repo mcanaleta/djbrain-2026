@@ -7,6 +7,7 @@ import { SectionKicker } from '../../components/view/SectionKicker'
 import { localFileUrl } from '../../context/PlayerContext'
 import { fileBasename, formatCompactDuration, formatFileSize, formatQualityScore } from '../../lib/music-file'
 import { AUDIO_QUALITY_MARKERS, AudioQualityMarkerCell } from './AudioQualityMarkers'
+import { ImportRecordFileMenu, type ImportRecordFileUtilityAction } from './ImportRecordFileMenu'
 import { buildImportRecordFileRows, getImportRecordDownloadActions, type ImportRecordDownloadAction, type ImportRecordFileRow } from './importRecordFiles'
 import type { ImportTracksTableRow } from './importRows'
 import { useImportRecordMixer } from './useImportRecordMixer'
@@ -23,6 +24,7 @@ export function ImportRecordFilesTable({
   busyAction,
   pendingDeleteFilename,
   onAction,
+  onUtilityAction,
   onCancelDelete,
   onSelect
 }: {
@@ -32,6 +34,7 @@ export function ImportRecordFilesTable({
   busyAction: string | null
   pendingDeleteFilename: string | null
   onAction: (action: ImportRecordDownloadAction, row: ImportRecordFileRow) => void
+  onUtilityAction: (action: ImportRecordFileUtilityAction, row: ImportRecordFileRow) => void
   onCancelDelete: () => void
   onSelect: (filename: string) => void
 }): React.JSX.Element {
@@ -99,7 +102,8 @@ export function ImportRecordFilesTable({
       header: 'Actions',
       cellClassName: 'w-[1%] whitespace-nowrap text-right',
       render: (row) => {
-        if (row.kind === 'collection') return <Pill tone="primary">target</Pill>
+        const menu = <ImportRecordFileMenu row={row} disabled={busyAction !== null} onAction={onUtilityAction} />
+        if (row.kind === 'collection') return <div className="flex justify-end gap-1"><Pill tone="primary">target</Pill>{menu}</div>
         const actions = getImportRecordDownloadActions(hasCollectionTarget)
         return (
           <div className="flex justify-end gap-1">
@@ -123,6 +127,7 @@ export function ImportRecordFilesTable({
                 </ActionButton>
               )
             })}
+            {menu}
             {pendingDeleteFilename === row.filename ? (
               <ActionButton size="xs" disabled={busyAction !== null} onClick={(event) => { event.stopPropagation(); onCancelDelete() }}>Cancel</ActionButton>
             ) : null}
