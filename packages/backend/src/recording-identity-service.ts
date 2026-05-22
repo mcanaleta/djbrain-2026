@@ -275,7 +275,7 @@ function pickSourceMatchCanonical(
   })
 }
 
-function parseImportReviewClaim(reviewJson: string | null | undefined): RecordingClaimInput | null {
+export function parseImportReviewClaim(reviewJson: string | null | undefined): RecordingClaimInput | null {
   if (!reviewJson) return null
   try {
     const review = JSON.parse(reviewJson) as ImportReview

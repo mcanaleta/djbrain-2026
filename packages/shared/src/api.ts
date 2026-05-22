@@ -34,6 +34,7 @@ export type CollectionItem = {
   identificationStatus?: IdentificationStatus | null
   identificationConfidence?: number | null
   assignmentMethod?: IdentificationAssignmentMethod | null
+  identificationVerifiedAt?: string | null
   recordingCanonical?: RecordingCanonical | null
   importStatus?: 'pending' | 'processing' | 'ready' | 'error' | null
   importArtist?: string | null
@@ -90,6 +91,7 @@ export type CollectionItemDetails = {
   identificationStatus: IdentificationStatus | null
   identificationConfidence: number | null
   assignmentMethod: IdentificationAssignmentMethod | null
+  identificationVerifiedAt: string | null
   recordingCanonical: RecordingCanonical | null
   tags: {
     source: string
@@ -163,6 +165,44 @@ export type IdentificationCandidate = {
   recordingCanonical: RecordingCanonical | null
 }
 
+export type IdentifyReference = {
+  key: string
+  provider: IdentificationCandidate['provider'] | 'youtube'
+  entityType: IdentificationCandidate['entityType'] | 'video'
+  externalKey: string
+  artist: string | null
+  title: string | null
+  version: string | null
+  releaseTitle: string | null
+  label: string | null
+  format: string | null
+  catalogNumber: string | null
+  country: string | null
+  trackPosition: string | null
+  year: string | null
+  durationSeconds: number | null
+  link: string | null
+  score: number | null
+  candidateId: number | null
+  assignable: boolean
+  comments?: string | null
+  tagSource?: string | null
+  discogsReleaseId?: number | null
+  discogsTrackPosition?: string | null
+}
+
+export type IdentifyRecordCandidate = {
+  key: string
+  canonical: RecordingCanonical
+  recordingId: number | null
+  references: IdentifyReference[]
+}
+
+export type IdentifyReviewData = {
+  searchHint: string
+  recordCandidates: IdentifyRecordCandidate[]
+}
+
 export type FileIdentificationState = {
   filename: string
   recordingId: number | null
@@ -184,6 +224,7 @@ export type FileIdentificationState = {
   processedAt: string | null
   errorMessage: string | null
   recordingCanonical: RecordingCanonical | null
+  reviewData?: IdentifyReviewData | null
   candidates: IdentificationCandidate[]
 }
 
@@ -216,10 +257,18 @@ export type RecordingDetails = RecordingSummary & {
     rawJson: string | null
   }>
   files: Array<{
+    id?: number
     filename: string
+    isDownload?: boolean
+    filesize?: number
+    duration?: number | null
+    bitrateKbps?: number | null
+    qualityScore?: number | null
+    audioAnalysis?: AudioAnalysis | null
     status: IdentificationStatus
     confidence: number | null
     assignmentMethod: IdentificationAssignmentMethod | null
+    verifiedAt?: string | null
   }>
 }
 
@@ -448,6 +497,7 @@ export type AudioAnalysis = {
   bitDepth: number | null
   bitrateKbps: number | null
   maxFrequencyHz?: number | null
+  topEndHz?: number | null
   durationSeconds: number | null
   fileSizeBytes: number
   integratedLufs: number | null
@@ -560,6 +610,8 @@ export type DJBrainApi = {
     get: (idOrFilename: number | string) => Promise<CollectionItemDetails | null>
     listDownloads: (query?: string) => Promise<CollectionListResult>
     reanalyze: (filename: string) => Promise<void>
+    transcodeToMp3320: (recordingId: number, filename: string) => Promise<void>
+    replaceRecordFile: (recordingId: number, sourceFilename: string, targetFilename: string) => Promise<void>
     syncNow: () => Promise<CollectionSyncStatus>
     getStatus: () => Promise<CollectionSyncStatus>
     onUpdated: (listener: (status: CollectionSyncStatus) => void) => () => void
@@ -575,6 +627,7 @@ export type DJBrainApi = {
     }) => Promise<FileIdentificationState | null>
     listRecordings: (query?: string) => Promise<RecordingSummary[]>
     getRecording: (id: number) => Promise<RecordingDetails | null>
+    updateRecording: (recordingId: number, canonical: Partial<RecordingCanonical>, sourceClaimId?: number | null) => Promise<RecordingDetails | null>
     assignRecording: (input: {
       recordingId?: number | null
       filenames: string[]

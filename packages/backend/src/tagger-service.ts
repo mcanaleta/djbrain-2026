@@ -7,10 +7,10 @@ import { extname } from 'node:path'
 export type AudioTags = {
   artist: string
   title: string
-  version: string | null
+  version?: string | null
   album: string | null
   year: string | null
-  comments: string | null
+  comments?: string | null
   label: string | null
   catalogNumber: string | null
   trackPosition: string | null
@@ -167,7 +167,7 @@ export class TaggerService {
       })
     }
 
-    if (tags.version !== null) {
+    if (tags.version != null) {
       userDefinedText.push({
         description: 'VERSION',
         value: tags.version

@@ -384,6 +384,7 @@ export class PostgresMediaStore {
       identificationStatus: null,
       identificationConfidence: null,
       assignmentMethod: null,
+      identificationVerifiedAt: null,
       recordingCanonical: null,
       tags: {
         source: 'media_tags',

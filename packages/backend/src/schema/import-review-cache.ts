@@ -1,5 +1,5 @@
 import type { Pool, PoolClient } from 'pg'
-import { IMPORT_REVIEW_VERSION } from '../../shared/analysis-version.ts'
+import { IMPORT_REVIEW_VERSION } from '@djbrain/shared/analysis-version'
 
 type Db = Pool | PoolClient
 

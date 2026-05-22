@@ -298,7 +298,7 @@ export class ImportService {
     bitrateHintKbps: number | null = null,
     options: ImportFileOptions = {}
   ): Promise<ImportResult> {
-    return this.importTaggedFile(settings, { ...buildTags(match), version: match.version }, match, localFilePath, bitrateHintKbps, options)
+    return this.importTaggedFile(settings, { ...buildTags(match), version: match.version, comments: null }, match, localFilePath, bitrateHintKbps, options)
   }
 
   private async importTaggedFile(

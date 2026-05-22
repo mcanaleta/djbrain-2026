@@ -3,7 +3,7 @@ import type {
   IdentifyReviewData,
   IdentificationAssignmentMethod,
   IdentificationStatus
-} from '../shared/api.ts'
+} from '@djbrain/shared/api'
 import type { RecordingCandidateSuggestion } from './recording-identity-service.ts'
 import { toNumber } from './collection-service-helpers.ts'
 

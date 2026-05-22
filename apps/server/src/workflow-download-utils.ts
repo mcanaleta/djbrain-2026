@@ -1,7 +1,7 @@
 import { relative } from 'node:path'
-import type { ImportService } from '../backend/import-service.ts'
-import { buildCanonicalNormKey, buildDiscogsExternalKey } from '../backend/recording-identity-service.ts'
-import type { AppSettings } from '../backend/settings-store.ts'
+import type { ImportService } from '@djbrain/backend/import-service'
+import { buildCanonicalNormKey, buildDiscogsExternalKey } from '@djbrain/backend/recording-identity-service'
+import type { AppSettings } from '@djbrain/backend/settings-store'
 import type {
   IdentifyReviewData,
   RecordingCanonical,
@@ -9,8 +9,8 @@ import type {
   UpgradeCandidate,
   UpgradeCase,
   UpgradeCaseStatus
-} from '../shared/api.ts'
-import { parseDurationString } from '../shared/track-matcher.ts'
+} from '@djbrain/shared/api'
+import { parseDurationString } from '@djbrain/shared/track-matcher'
 
 export function toMusicRelativePath(settings: AppSettings, absolutePath: string): string {
   return relative(settings.musicFolderPath, absolutePath).replace(/\\/g, '/')

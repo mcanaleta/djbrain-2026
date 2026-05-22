@@ -1,10 +1,10 @@
 import { basename } from 'node:path'
 import { unlink } from 'node:fs/promises'
-import type { CollectionService } from '../backend/collection-service.ts'
-import type { ImportService } from '../backend/import-service.ts'
-import type { AppSettings } from '../backend/settings-store.ts'
-import type { SlskdService } from '../backend/slskd-service.ts'
-import type { UpgradeCandidate, UpgradeCase, UpgradeLocalCandidate } from '../shared/api.ts'
+import type { CollectionService } from '@djbrain/backend/collection-service'
+import type { ImportService } from '@djbrain/backend/import-service'
+import type { AppSettings } from '@djbrain/backend/settings-store'
+import type { SlskdService } from '@djbrain/backend/slskd-service'
+import type { UpgradeCandidate, UpgradeCase, UpgradeLocalCandidate } from '@djbrain/shared/api'
 import { getDownloadFailureStatus, hasAcceptableUpgradeDuration, toMusicRelativePath } from './workflow-download-utils.ts'
 
 export async function continueUpgradeDownloadPipeline({

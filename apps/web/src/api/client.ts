@@ -4,6 +4,7 @@ import type {
   ImportComparison,
   ImportFileResult,
   ImportReview,
+  RecordingCanonical,
   RecordingDetails,
   RecordingSummary,
   DJBrainApi,
@@ -248,6 +249,24 @@ export const api: DJBrainApi = {
         headers: JSON_HEADERS,
         body: JSON.stringify({ filename })
       }),
+    async transcodeToMp3320(recordingId: number, filename: string) {
+      await request('/api/collection/transcode-mp3-320', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ recordingId, filename })
+      })
+      invalidateCollectionSnapshot()
+      void syncCollectionSnapshot()
+    },
+    async replaceRecordFile(recordingId: number, sourceFilename: string, targetFilename: string) {
+      await request('/api/collection/replace-record-file', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ recordingId, sourceFilename, targetFilename })
+      })
+      invalidateCollectionSnapshot()
+      void syncCollectionSnapshot()
+    },
     async syncNow() {
       const status = await request<CollectionSyncStatus>('/api/collection/sync', { method: 'POST' })
       emitCollectionStatus(status)
@@ -313,6 +332,16 @@ export const api: DJBrainApi = {
     listRecordings: (query?: string) =>
       request<RecordingSummary[]>(`/api/collection/recordings?query=${encodeURIComponent(query ?? '')}`),
     getRecording: (id: number) => request<RecordingDetails | null>(`/api/collection/recordings/${id}`),
+    async updateRecording(recordingId: number, canonical: Partial<RecordingCanonical>, sourceClaimId?: number | null) {
+      const result = await request<RecordingDetails | null>(`/api/collection/recordings/${encodeURIComponent(String(recordingId))}/update`, {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ canonical, sourceClaimId })
+      })
+      invalidateCollectionSnapshot()
+      void syncCollectionSnapshot()
+      return result
+    },
     async assignRecording(input) {
       const result = await request<RecordingDetails | null>('/api/collection/recordings/assign', {
         method: 'POST',

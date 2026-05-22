@@ -56,7 +56,7 @@ import type {
   RecordingMatchRow,
   SourceClaimMatch
 } from './recording-identity-service.ts'
-import { buildCanonicalNormKey } from './recording-identity-service.ts'
+import { buildCanonicalNormKey, parseImportReviewClaim } from './recording-identity-service.ts'
 import type { LocalSongFileState, SongsOnlySyncPlan } from './local-song-sync.ts'
 import { pickImportReviewLocalMatch } from '@djbrain/shared/import-review-local-match.ts'
 import { computeAnalysisQualityScore } from './audio-quality-score.ts'
@@ -993,6 +993,7 @@ export class CollectionService {
       identificationStatus: itemRow.identificationstatus ?? null,
       identificationConfidence: itemRow.identificationconfidence ?? null,
       assignmentMethod: itemRow.assignmentmethod ?? null,
+      identificationVerifiedAt: identification?.verifiedAt ?? null,
       recordingCanonical,
       tags: fileTagRow
         ? {
@@ -2319,6 +2320,61 @@ export class CollectionService {
     )
     await this.refreshImportQueueCounts()
     this.emitStatus()
+  }
+
+  public async promoteImportReviewIdentification(filename: string): Promise<boolean> {
+    await this.ensureReady()
+    const item = await this.getItem(filename)
+    const reviewJson = (
+      await this.pool.query<{ reviewjson: string | null }>(
+        `SELECT review_json AS reviewJson FROM import_review_cache WHERE filename = $1 AND status = 'ready'`,
+        [filename]
+      )
+    ).rows[0]?.reviewjson
+    const review = parseImportReview(reviewJson)
+    const claim = parseImportReviewClaim(reviewJson)
+    const candidate = review?.candidates[review.selectedCandidateIndex ?? 0] ?? review?.candidates[0] ?? null
+    if (!item?.isDownload || item.recordingId != null || !claim || !candidate) return false
+    const matchedSource = (await this.findSourceClaimMatches([claim.externalKey]))[0] ?? null
+    const canonical = { artist: claim.artist, title: claim.title, version: claim.version, year: claim.year }
+    await this.saveIdentificationDecision(filename, {
+      filesize: item.filesize,
+      mtimeMs: item.mtimeMs ?? item.importReview?.mtimeMs ?? item.fileAudioState?.mtimeMs ?? Date.now(),
+      status: 'ready',
+      assignmentMethod: 'source_claim',
+      confidence: claim.confidence,
+      recordingId: matchedSource?.recordingId ?? null,
+      createRecording: matchedSource ? null : { canonical, confidence: claim.confidence, reviewState: 'auto' },
+      audioHash: item.fileAudioState?.audioHash ?? item.identification?.audioHash ?? null,
+      parsedArtist: review?.parsed?.artist ?? null,
+      parsedTitle: review?.parsed?.title ?? null,
+      parsedVersion: review?.parsed?.version ?? null,
+      parsedYear: item.importReview?.parsedYear ?? null,
+      tagArtist: item.tags?.artist ?? null,
+      tagTitle: item.tags?.title ?? null,
+      tagVersion: item.tags?.version ?? null,
+      chosenClaimId: matchedSource?.claimId ?? null,
+      chosenExternalKey: claim.externalKey,
+      acceptedClaims: [claim],
+      candidates: [{
+        provider: claim.provider,
+        entityType: claim.entityType,
+        externalKey: claim.externalKey,
+        proposedRecordingId: matchedSource?.recordingId ?? null,
+        score: claim.confidence,
+        disposition: 'candidate',
+        payloadJson: claim.rawJson,
+        recordingCanonical: matchedSource?.canonical ?? canonical
+      }],
+      explanationJson: JSON.stringify({
+        reason: 'import_review_ready',
+        importTrackKey: review ? buildImportTrackKey(review) : null,
+        releaseId: candidate.match.releaseId,
+        trackPosition: candidate.match.trackPosition ?? null
+      }),
+      recordingCanonical: matchedSource?.canonical ?? canonical
+    })
+    return true
   }
 
   public async saveImportReviewError(

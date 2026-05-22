@@ -1,5 +1,5 @@
 import type { Pool, PoolClient } from 'pg'
-import type { RecordingCanonical } from '../shared/api.ts'
+import type { RecordingCanonical } from '@djbrain/shared/api'
 import type { RecordingClaimInput, RecordingMatchRow, SourceClaimMatch } from './recording-identity-service.ts'
 import { toNumber } from './collection-service-helpers.ts'
 
