@@ -2,8 +2,10 @@ import { basename, join } from 'node:path'
 import { stat, unlink } from 'node:fs/promises'
 import type { Express } from 'express'
 import type { CollectionService } from '@djbrain/backend/collection-service.ts'
+import { isDurationClose } from '@djbrain/backend/duration-match.ts'
 import { FileAnalysisService } from '@djbrain/backend/file-analysis-service.ts'
 import { ImportService, parseSongFilename } from '@djbrain/backend/import-service.ts'
+import { cleanPurchaseMetadata } from '@djbrain/backend/purchase-metadata.ts'
 import type { PostgresMediaStore } from '@djbrain/backend/postgres-media-store.ts'
 import type { AppSettings } from '@djbrain/backend/settings-store.ts'
 import type { AudioTags, TaggerService } from '@djbrain/backend/tagger-service.ts'
@@ -39,6 +41,48 @@ type CollectionRouteDeps = {
   getMediaStore?: () => PostgresMediaStore | null
   syncMediaCatalog?: () => Promise<void>
   syncMediaItem?: (filename: string) => Promise<void>
+}
+
+function isToOrganize(filename: string): boolean {
+  return filename.replace(/\\/g, '/').startsWith('to_organize/')
+}
+
+function localImportTags(parsed: { artist: string; title: string; version: string | null }, tags: ImportTagPreview | null): AudioTags & { version: string | null } {
+  const clean = cleanPurchaseMetadata({
+    artist: tags?.artist ?? parsed.artist,
+    title: tags?.title ?? parsed.title,
+    version: parsed.version,
+    year: tags?.year,
+    catalogNumber: tags?.catalogNumber,
+    trackPosition: tags?.trackPosition
+  })
+  return {
+    artist: clean.artist ?? parsed.artist,
+    title: clean.title ?? parsed.title,
+    version: clean.version,
+    album: tags?.album ?? null,
+    year: clean.year,
+    label: tags?.label ?? null,
+    catalogNumber: clean.catalogNumber,
+    trackPosition: clean.trackPosition,
+    discogsReleaseId: tags?.discogsReleaseId ?? null,
+    discogsTrackPosition: tags?.discogsTrackPosition ?? null
+  }
+}
+
+function canonicalImportTags(canonical: { artist: string | null; title: string | null; version: string | null; year: string | null }): AudioTags & { version: string | null } {
+  return {
+    artist: canonical.artist ?? '',
+    title: canonical.title ?? '',
+    version: canonical.version,
+    album: null,
+    year: canonical.year ?? String(new Date().getFullYear()),
+    label: null,
+    catalogNumber: null,
+    trackPosition: null,
+    discogsReleaseId: null,
+    discogsTrackPosition: null
+  }
 }
 
 export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps): void {
@@ -435,8 +479,11 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
         resolveMusicRelativePath(replaceFilename)
       }
 
-      const providedMatch = readDiscogsTrackMatch(body?.match)
       const tagOverrides = readImportTagPreview(body?.tags)
+      const explicitMatch = readDiscogsTrackMatch(body?.match)
+      const assignedMatch = explicitMatch || isToOrganize(filename) ? null : await service.readAssignedDiscogsTrackMatch(filename)
+      const sourceAnalysis = assignedMatch ? await fileAnalysisService.get(filename, absolutePath).catch(() => null) : null
+      const providedMatch = explicitMatch ?? (isDurationClose(assignedMatch?.durationSeconds, sourceAnalysis?.durationSeconds) ? assignedMatch : null)
       const result = providedMatch
         ? await importService.importFileWithKnownMatch(
             settings,
@@ -456,6 +503,9 @@ export function registerCollectionRoutes(app: Express, deps: CollectionRouteDeps
                 message: `Cannot parse filename: ${basename(absolutePath)}`
               } as const
             }
+            if (isToOrganize(filename)) return importService.importFileWithTags(settings, localImportTags(parsed, tagOverrides), absolutePath)
+            const canonical = (await service.getItem(filename))?.recordingCanonical
+            if (canonical?.artist && canonical.title) return importService.importFileWithTags(settings, canonicalImportTags(canonical), absolutePath)
             return importService.importFile(settings, parsed.artist, parsed.title, parsed.version, absolutePath)
           })()
       const importResolved = ['imported', 'imported_upgrade', 'skipped_existing', 'replaced'].includes(result.status)

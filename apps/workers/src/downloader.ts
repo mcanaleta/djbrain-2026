@@ -4,6 +4,7 @@ import { processLeaseRetryMs, readProcessWorkerOptions, type ProcessWorkerOption
 import { readSettings, type AppSettings } from '@djbrain/backend/settings-store.ts'
 import { SlskdService, type SlskdCandidate } from '@djbrain/backend/slskd-service.ts'
 import { buildDownloadRequests, buildExpectedDownloadFilename, downloadAttemptStatusFromSlskdState, wantListStatusAfterAttempt } from '@djbrain/backend/downloader-worker-planning.ts'
+import { parseDurationString } from '@djbrain/shared/track-matcher.ts'
 
 type Options = ProcessWorkerOptions
 
@@ -85,7 +86,7 @@ async function searchWant(
   try {
     const searchId = await slskd.startSearch(settings, query)
     await service.wantListUpdatePipeline(want.id, { searchId })
-    const candidates = slskd.extractCandidates(want.artist, want.title, want.version, await slskd.waitForResults(settings, searchId))
+    const candidates = slskd.extractCandidates(want.artist, want.title, want.version, await slskd.waitForResults(settings, searchId), want.length ? parseDurationString(want.length) : null)
     const attempts = await service.downloadAttemptListForWantList(want.id)
     const plans = buildDownloadRequests({
       wantListId: want.id,

@@ -234,6 +234,27 @@ function buildDiscogsExternalKey(match: DiscogsTrackMatch): string {
   return `discogs:release:${match.releaseId}:track:${normalizeSearchText(match.trackPosition ?? match.title) || 'unknown'}`
 }
 
+function parseDiscogsTrackMatch(value: unknown): DiscogsTrackMatch | null {
+  if (!value || typeof value !== 'object') return null
+  const match = value as Partial<DiscogsTrackMatch>
+  return typeof match.releaseId === 'number' && typeof match.artist === 'string' && typeof match.title === 'string'
+    ? {
+        releaseId: match.releaseId,
+        releaseTitle: match.releaseTitle ?? match.title,
+        format: match.format ?? null,
+        artist: match.artist,
+        title: match.title,
+        version: match.version ?? null,
+        trackPosition: match.trackPosition ?? null,
+        year: match.year ?? null,
+        label: match.label ?? null,
+        catalogNumber: match.catalogNumber ?? null,
+        durationSeconds: match.durationSeconds ?? null,
+        score: match.score ?? 100
+      }
+    : null
+}
+
 type PrefixWhereResult = {
   clause: string
   params: string[]
@@ -2347,6 +2368,35 @@ export class CollectionService {
     )
     await this.refreshImportQueueCounts()
     this.emitStatus()
+  }
+
+  public async readAssignedDiscogsTrackMatch(filenameInput: string): Promise<DiscogsTrackMatch | null> {
+    await this.ensureReady()
+    const filename = normalizeFilename(filenameInput)
+    const row = (await this.pool.query<{ rawjson: unknown }>(
+      `
+        SELECT claims.raw_json AS rawJson
+        FROM collection_files
+        LEFT JOIN file_identification_state ON file_identification_state.filename = collection_files.filename
+        LEFT JOIN LATERAL (
+          SELECT COALESCE(download_attempts.origin_recording_id, want_list.recording_id) AS recordingId
+          FROM download_attempts
+          LEFT JOIN want_list ON want_list.id = download_attempts.want_list_id
+          WHERE download_attempts.local_filename = collection_files.filename
+          ORDER BY download_attempts.completed_at DESC NULLS LAST, download_attempts.updated_at DESC, download_attempts.id DESC
+          LIMIT 1
+        ) download_origin ON TRUE
+        JOIN recording_source_claims claims
+          ON claims.recording_id = COALESCE(file_identification_state.recording_id, download_origin.recordingId)
+         AND claims.provider = 'discogs'
+         AND claims.entity_type = 'release_track'
+        WHERE collection_files.filename = $1
+        ORDER BY claims.confidence DESC, claims.id
+        LIMIT 1
+      `,
+      [filename]
+    )).rows[0]
+    return parseDiscogsTrackMatch(row?.rawjson)
   }
 
   public async listPendingImportReviewFilenames(): Promise<string[]> {

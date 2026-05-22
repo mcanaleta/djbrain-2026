@@ -4,6 +4,8 @@ import type { FileAnalysisService } from './file-analysis-service.ts'
 import { normalizeSearchText } from './collection-service-helpers.ts'
 import type { MusicBrainzService } from './musicbrainz-service.ts'
 import type { OnlineSearchService } from './online-search-service.ts'
+import { isDurationClose } from './duration-match.ts'
+import { cleanPurchaseMetadata } from './purchase-metadata.ts'
 import type { AppSettings } from './settings-store.ts'
 import type { AudioTags, TaggerService } from './tagger-service.ts'
 import type {
@@ -412,6 +414,10 @@ function buildExplanation(value: unknown): string {
   return JSON.stringify(value)
 }
 
+function isToOrganize(filename: string): boolean {
+  return filename.replace(/\\/g, '/').startsWith('to_organize/')
+}
+
 export class RecordingIdentityService {
   private readonly deps: RecordingIdentityServiceDeps
 
@@ -725,6 +731,38 @@ export class RecordingIdentityService {
       ].filter((value): value is RecordingClaimInput => Boolean(value))
     )
 
+    if (isToOrganize(filename)) {
+      const clean = cleanPurchaseMetadata({
+        artist: parsed.artist ?? tagCanonical?.artist ?? null,
+        title: parsed.title ?? tagCanonical?.title ?? null,
+        version: parsed.version ?? tagCanonical?.version ?? null,
+        year: null
+      })
+      const canonical = toCanonical(clean)
+      const acceptedClaims = claims.filter((claim) => claim.provider === 'filename' || claim.provider === 'tags').map((claim) => ({ ...claim, year: claim.year ?? clean.year }))
+      return {
+        status: 'ready',
+        assignmentMethod: 'heuristic',
+        confidence: 72,
+        recordingId: null,
+        createRecording: { canonical, confidence: 72, reviewState: 'auto' },
+        chosenClaimId: null,
+        chosenExternalKey: bestExternalKey(acceptedClaims),
+        acceptedClaims,
+        candidates: [],
+        explanationJson: buildExplanation({ reason: 'to_organize_local_purchase' }),
+        recordingCanonical: canonical,
+        audioHash: audioHash ?? null,
+        parsedArtist: parsed.artist,
+        parsedTitle: parsed.title,
+        parsedVersion: parsed.version,
+        parsedYear: clean.year,
+        tagArtist: tagCanonical?.artist ?? null,
+        tagTitle: tagCanonical?.title ?? null,
+        tagVersion: tagCanonical?.version ?? null
+      }
+    }
+
     const searchArtist = tagCanonical?.artist ?? parsed.artist ?? ''
     const searchTitle = tagCanonical?.title ?? parsed.title ?? ''
     const searchVersion = tagCanonical?.version ?? parsed.version ?? null
@@ -747,7 +785,7 @@ export class RecordingIdentityService {
           .catch(() => ({ candidates: [] as Array<{ releaseId: number; releaseTitle: string; artist: string; title: string; version: string | null; trackPosition?: string | null; year?: string | null; durationSeconds?: number | null; score: number }> })),
         this.deps.musicbrainzService.searchRecordings(searchArtist, searchTitle, searchVersion).catch(() => [])
       ])
-      for (const candidate of discogs.candidates.slice(0, 3)) {
+      for (const candidate of discogs.candidates.filter((candidate) => isDurationClose(candidate.durationSeconds, durationSeconds)).slice(0, 3)) {
         const normalized = normalizeClaimFields({
           artist: candidate.artist,
           title: candidate.title,
@@ -768,7 +806,7 @@ export class RecordingIdentityService {
           rawJson: JSON.stringify(candidate)
         })
       }
-      for (const candidate of musicbrainz.slice(0, 3)) {
+      for (const candidate of musicbrainz.filter((candidate) => isDurationClose(candidate.durationSeconds, durationSeconds)).slice(0, 3)) {
         const normalized = normalizeClaimFields({
           artist: candidate.artist,
           title: candidate.title,

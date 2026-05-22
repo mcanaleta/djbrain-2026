@@ -18,6 +18,7 @@ import {
   IMPORT_REVIEW_VERSION
 } from '@djbrain/shared/analysis-version.ts'
 import { parseImportFilename } from '@djbrain/shared/import-filename.ts'
+import { parseDurationString } from '@djbrain/shared/track-matcher.ts'
 import type {
   SlskdCandidate,
   UpgradeCandidate,
@@ -195,7 +196,7 @@ export function createWantListPipelines(deps: WantListPipelineDeps) {
       })
 
       const search = await slskdService.waitForResults(settings, searchId)
-      const candidates = slskdService.extractCandidates(artist, title, version, search)
+      const candidates = slskdService.extractCandidates(artist, title, version, search, item.length ? parseDurationString(item.length) : null)
       await service.wantListUpdatePipeline(item.id, {
         pipelineStatus: candidates.length > 0 ? 'results_ready' : 'no_results',
         searchResultCount: candidates.length,
@@ -836,7 +837,8 @@ export function createUpgradeActions(deps: UpgradePipelineDeps) {
           upgradeCase.searchArtist,
           upgradeCase.searchTitle,
           upgradeCase.searchVersion,
-          search
+          search,
+          upgradeCase.referenceDurationSeconds
         )
         .map((candidate) => buildUpgradeCandidate(candidate, upgradeCase.referenceDurationSeconds))
         .sort(compareUpgradeCandidates)

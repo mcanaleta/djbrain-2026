@@ -7,6 +7,7 @@ import type { TaggerService } from './tagger-service.ts'
 import type { OnlineSearchService } from './online-search-service.ts'
 import type { AppSettings } from './settings-store.ts'
 import { buildImportDestRelativePath } from './import-service.ts'
+import { isDurationClose } from './duration-match.ts'
 import type { DiscogsTrackMatch } from '@djbrain/shared/discogs-match.ts'
 import type { AudioAnalysis, ImportReview, ImportReviewSearch, ImportTagPreview } from '@djbrain/shared/api.ts'
 
@@ -100,6 +101,10 @@ function resolveImportReviewSearch(parsed: ParsedImport, value: unknown): Import
   }
 }
 
+function isToOrganize(filename: string): boolean {
+  return filename.replace(/\\/g, '/').startsWith('to_organize/')
+}
+
 export class ImportReviewService {
   private readonly deps: ImportReviewServiceDeps
 
@@ -108,17 +113,25 @@ export class ImportReviewService {
   }
 
   async build({ filename, absolutePath, parsed, searchValue, settings, sourceAnalysis }: BuildImportReviewInput): Promise<ImportReview> {
-    const search = resolveImportReviewSearch(parsed, searchValue)
-    const { match, candidates } = await this.deps.discogsMatchService.findTrack(
-      settings,
-      search.artist,
-      search.title,
-      search.version,
-      this.deps.onlineSearchService
-    )
+    const initialSearch = resolveImportReviewSearch(parsed, searchValue)
+    const item = !searchValue ? await this.deps.getCollectionService().getItem(filename).catch(() => null) : null
+    const canonical = item?.recordingCanonical
+    const search = canonical && !initialSearch.artist
+      ? {
+          artist: canonical.artist ?? initialSearch.artist,
+          title: canonical.title ?? initialSearch.title,
+          version: canonical.version ?? initialSearch.version
+        }
+      : initialSearch
+    const resolvedSourceAnalysis =
+      sourceAnalysis !== undefined ? sourceAnalysis : await this.deps.audioAnalysisService.analyze(absolutePath).catch(() => null)
+    const { match, candidates } = isToOrganize(filename) && !searchValue
+      ? { match: null, candidates: [] }
+      : await this.deps.discogsMatchService.findTrack(settings, search.artist, search.title, search.version, this.deps.onlineSearchService)
     const ext = extname(absolutePath).toLowerCase()
     const reviewCandidates = await Promise.all(
       dedupeMatches(match ? [match, ...candidates] : candidates)
+        .filter((candidate) => isDurationClose(candidate.durationSeconds, resolvedSourceAnalysis?.durationSeconds))
         .slice(0, 8)
         .map(async (candidate) => {
           const destinationRelativePath = buildImportDestRelativePath(settings.songsFolderPath, candidate, ext)
@@ -135,17 +148,12 @@ export class ImportReviewService {
       .items
       .filter((item) => item.filename !== filename && !this.deps.isDownloadFilename(item.filename) && isLikelySimilarTrack(item.filename, search))
       .slice(0, 12)
-    const [similarItemsWithDuration, resolvedSourceAnalysis] = await Promise.all([
-      Promise.all(
-        similarItems.map(async (item) => ({
-          ...item,
-          duration: await this.deps.getAudioDuration(await this.deps.resolveMusicRelativePath(item.filename))
-        }))
-      ),
-      sourceAnalysis !== undefined
-        ? Promise.resolve(sourceAnalysis)
-        : this.deps.audioAnalysisService.analyze(absolutePath).catch(() => null)
-    ])
+    const similarItemsWithDuration = await Promise.all(
+      similarItems.map(async (item) => ({
+        ...item,
+        duration: await this.deps.getAudioDuration(await this.deps.resolveMusicRelativePath(item.filename))
+      }))
+    )
 
     return {
       filename,

@@ -42,6 +42,7 @@ type ImportFileOptions = {
 }
 type AudioConverter = (sourcePath: string, targetPath: string) => Promise<void>
 type PreparedImportFile = { path: string; ext: string; bitrateHintKbps: number | null; converted: boolean }
+type ImportTags = AudioTags & { version: string | null }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -241,6 +242,17 @@ export class ImportService {
     return this.importMatchedFile(settings, match, localFilePath, bitrateHintKbps, options)
   }
 
+  async importFileWithTags(
+    settings: AppSettings,
+    tags: ImportTags,
+    localFilePath: string,
+    bitrateHintKbps: number | null = null,
+    options: ImportFileOptions = {}
+  ): Promise<ImportResult> {
+    if (!(await fileExists(localFilePath))) return { status: 'error', message: `File not found: ${localFilePath}` }
+    return this.importTaggedFile(settings, tags, matchFromTags(tags), localFilePath, bitrateHintKbps, options)
+  }
+
   /**
    * Try to find the local file for a completed slskd download.
    * Searches all configured download folders by the file's basename.
@@ -286,14 +298,24 @@ export class ImportService {
     bitrateHintKbps: number | null = null,
     options: ImportFileOptions = {}
   ): Promise<ImportResult> {
-    const year = match.year ?? 'unknown'
+    return this.importTaggedFile(settings, { ...buildTags(match), version: match.version }, match, localFilePath, bitrateHintKbps, options)
+  }
+
+  private async importTaggedFile(
+    settings: AppSettings,
+    tags: ImportTags,
+    match: DiscogsTrackMatch,
+    localFilePath: string,
+    bitrateHintKbps: number | null = null,
+    options: ImportFileOptions = {}
+  ): Promise<ImportResult> {
+    const year = tags.year ?? 'unknown'
     const prepared = await this.prepareImportFile(localFilePath, bitrateHintKbps)
     const ext = prepared.ext
-    const destFilename = buildDestFilename(match.artist, match.title, match.version, ext)
+    const destFilename = buildDestFilename(tags.artist, tags.title, tags.version, ext)
     const destDir = join(settings.musicFolderPath, settings.songsFolderPath, year)
     const destAbsPath = join(destDir, destFilename)
     const destRelativePath = join(settings.songsFolderPath, year, destFilename)
-    const tags = buildTags(match)
 
     await mkdir(destDir, { recursive: true })
 
@@ -367,6 +389,22 @@ export class ImportService {
 
   private async cleanupPreparedFile(prepared: PreparedImportFile): Promise<void> {
     if (prepared.converted) await removeFileIfExists(prepared.path)
+  }
+}
+
+function matchFromTags(tags: ImportTags): DiscogsTrackMatch {
+  return {
+    releaseId: tags.discogsReleaseId ?? 0,
+    releaseTitle: tags.album ?? '',
+    format: null,
+    artist: tags.artist,
+    title: tags.title,
+    version: tags.version,
+    trackPosition: tags.trackPosition,
+    year: tags.year,
+    label: tags.label,
+    catalogNumber: tags.catalogNumber,
+    score: 100
   }
 }
 

@@ -190,6 +190,10 @@ function findMatchingDownloadRecord(
   return null
 }
 
+function durationMatchesExpected(actual: number | null, expected: number | null): boolean {
+  return actual == null || expected == null || Math.abs(actual - expected) <= Math.max(20, expected * 0.1)
+}
+
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 export class SlskdService {
@@ -364,15 +368,18 @@ export class SlskdService {
     artist: string,
     title: string,
     version: string | null,
-    search: SlskdSearch
+    search: SlskdSearch,
+    expectedDurationSeconds: number | null = null
   ): SlskdCandidate[] {
     const candidates: SlskdCandidate[] = []
     for (const response of search.responses ?? []) {
       for (const file of response.files ?? []) {
-        candidates.push(this.scoreFile(artist, title, version, file, response))
+        const candidate = this.scoreFile(artist, title, version, file, response)
+        if (durationMatchesExpected(candidate.durationSeconds, expectedDurationSeconds)) candidates.push(candidate)
       }
       for (const file of response.lockedFiles ?? []) {
-        candidates.push(this.scoreFile(artist, title, version, { ...file, isLocked: true }, response))
+        const candidate = this.scoreFile(artist, title, version, { ...file, isLocked: true }, response)
+        if (durationMatchesExpected(candidate.durationSeconds, expectedDurationSeconds)) candidates.push(candidate)
       }
     }
     candidates.sort((a, b) => b.score - a.score)
