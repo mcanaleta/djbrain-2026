@@ -1,0 +1,48 @@
+{
+  "songsAudio": {
+    "entries": 6722,
+    "hazardRows": 5157,
+    "counts": {
+      "ampersand": 741,
+      "apostrophe": 640,
+      "parens": 3721,
+      "repeatedOrEdgeSpace": 20,
+      "brackets": 25,
+      "backtick": 3,
+      "semicolon": 2,
+      "dollar": 4,
+      "controlChar": 1
+    }
+  },
+  "allAudio": {
+    "entries": 9234,
+    "hazardRows": 7062,
+    "counts": {
+      "parens": 5144,
+      "apostrophe": 804,
+      "ampersand": 1017,
+      "repeatedOrEdgeSpace": 24,
+      "backtick": 4,
+      "brackets": 61,
+      "dollar": 5,
+      "semicolon": 2,
+      "controlChar": 1
+    }
+  },
+  "allEntries": {
+    "entries": 18634,
+    "hazardRows": 7671,
+    "counts": {
+      "parens": 5476,
+      "apostrophe": 891,
+      "ampersand": 1158,
+      "repeatedOrEdgeSpace": 33,
+      "backtick": 4,
+      "brackets": 94,
+      "dollar": 5,
+      "leadingDash": 5,
+      "controlChar": 3,
+      "semicolon": 2
+    }
+  }
+}

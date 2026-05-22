@@ -1,0 +1,26 @@
+{
+  "name": "@djbrain/backend",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "exports": {
+    "./*.ts": "./src/*.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test src/*.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ai-sdk/xai": "^3.0.64",
+    "@djbrain/shared": "workspace:*",
+    "ai": "^6.0.112",
+    "node-id3": "^0.2.9",
+    "pg": "^8.13.1",
+    "redis": "^5.11.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.1",
+    "@types/pg": "^8.20.0"
+  }
+}

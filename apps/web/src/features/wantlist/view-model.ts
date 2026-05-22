@@ -1,0 +1,113 @@
+import type { Dispatch, SetStateAction } from 'react'
+import type { SlskdCandidate, WantListAddInput, WantListItem } from '@djbrain/shared/api'
+import { getErrorMessage } from '../../lib/error-utils'
+
+export type WantListEditState = {
+  wantKind: WantListItem['wantKind']
+  artist: string
+  title: string
+  version: string
+  length: string
+  year: string
+  album: string
+  label: string
+  sourceCollectionFilename: string
+  targetDownloadCount: string
+  autoDownloadEnabled: boolean
+}
+
+export type WantListTextField = Exclude<keyof WantListEditState, 'wantKind' | 'autoDownloadEnabled'>
+export type WantListPipelineStatus = WantListItem['pipelineStatus']
+
+export const WANT_LIST_STATUS_LABEL: Record<WantListPipelineStatus, string> = {
+  idle: 'Pending',
+  queued: 'Queued',
+  searching: 'Searching...',
+  results_ready: 'Results ready',
+  no_results: 'No results',
+  downloading: 'Downloading...',
+  downloaded: 'Downloaded',
+  identifying: 'Identifying...',
+  needs_review: 'Needs review',
+  importing: 'Importing...',
+  imported: 'Imported',
+  import_error: 'Import error',
+  error: 'Error'
+}
+
+export const WANT_LIST_STATUS_CLASS: Record<WantListPipelineStatus, string> = {
+  idle: 'border-zinc-700 text-zinc-400',
+  queued: 'border-sky-700/60 text-sky-300',
+  searching: 'border-amber-700/60 text-amber-300',
+  results_ready: 'border-emerald-700/60 text-emerald-300',
+  no_results: 'border-zinc-700 text-zinc-500',
+  downloading: 'border-blue-700/60 text-blue-300',
+  downloaded: 'border-emerald-600/60 text-emerald-200',
+  identifying: 'border-amber-700/60 text-amber-300',
+  needs_review: 'border-amber-600/60 text-amber-200',
+  importing: 'border-blue-700/60 text-blue-300',
+  imported: 'border-emerald-600/60 text-emerald-300',
+  import_error: 'border-red-700/60 text-red-300',
+  error: 'border-red-700/60 text-red-300'
+}
+
+export function formatWantListError(error: unknown, fallback = 'Unexpected want-list error'): string {
+  return getErrorMessage(error, fallback)
+}
+
+export function buildSavedResearchQuery(item: WantListItem): string {
+  return [item.artist, item.title, item.version].filter(Boolean).join(' ')
+}
+
+export function toWantListEditState(item: WantListItem): WantListEditState {
+  return {
+    wantKind: item.wantKind,
+    artist: item.artist,
+    title: item.title,
+    version: item.version ?? '',
+    length: item.length ?? '',
+    year: item.year ?? '',
+    album: item.album ?? '',
+    label: item.label ?? '',
+    sourceCollectionFilename: item.sourceCollectionFilename ?? '',
+    targetDownloadCount: String(item.targetDownloadCount),
+    autoDownloadEnabled: item.autoDownloadEnabled
+  }
+}
+
+export function toWantListAddInput(state: WantListEditState): WantListAddInput {
+  const targetDownloadCount = Number(state.targetDownloadCount)
+  return {
+    wantKind: state.wantKind,
+    artist: state.artist,
+    title: state.title,
+    version: state.version.trim() || null,
+    length: state.length.trim() || null,
+    year: state.year.trim() || null,
+    album: state.album.trim() || null,
+    label: state.label.trim() || null,
+    sourceCollectionFilename: state.sourceCollectionFilename.trim() || null,
+    targetDownloadCount: Number.isFinite(targetDownloadCount) ? Math.trunc(targetDownloadCount) : null,
+    autoDownloadEnabled: state.autoDownloadEnabled
+  }
+}
+
+export function isWantListItemBusy(item: WantListItem): boolean {
+  return ['queued', 'searching', 'downloading', 'identifying', 'importing'].includes(item.pipelineStatus)
+}
+
+export function canResetWantListItem(item: WantListItem): boolean {
+  return ['downloaded', 'no_results', 'error'].includes(item.pipelineStatus)
+}
+
+export function getSoulseekActionKey(candidate: SlskdCandidate): string {
+  return `download:${candidate.username}:${candidate.filename}`
+}
+
+export function updateWantListEditState(
+  setter: Dispatch<SetStateAction<WantListEditState | null>>,
+  field: WantListTextField,
+  value: string
+): void {
+  setter((current) => (current ? { ...current, [field]: value } : current))
+}

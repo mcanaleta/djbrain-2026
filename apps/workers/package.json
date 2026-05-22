@@ -1,0 +1,23 @@
+{
+  "name": "@djbrain/workers",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "analyze:local": "node --env-file-if-exists=../../.env.local --experimental-strip-types src/analyze-local.ts",
+    "admin": "node --env-file-if-exists=../../.env.local --experimental-strip-types src/admin-worker.ts",
+    "downloader": "node --env-file-if-exists=../../.env.local --experimental-strip-types src/downloader.ts",
+    "sync": "node --env-file-if-exists=../../.env.local --experimental-strip-types src/sync-worker.ts",
+    "dev:admin": "node --env-file-if-exists=../../.env.local --experimental-strip-types src/admin-worker.ts",
+    "dev:downloader": "node --env-file-if-exists=../../.env.local --experimental-strip-types src/downloader.ts",
+    "dev:sync": "node --env-file-if-exists=../../.env.local --experimental-strip-types src/sync-worker.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@djbrain/backend": "workspace:*",
+    "@djbrain/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.1"
+  }
+}

@@ -13,12 +13,67 @@ services:
       - djbrain-data:/data
       # Mount your music library (read/write for imports & tagging)
       - ${DJBRAIN_HOST_MUSIC_PATH:-/home/marc/Dropbox/music}:/music
+      - ${DJBRAIN_HOST_RCLONE_CONFIG:-/home/marc/.config/rclone/rclone.conf}:/run/secrets/rclone.conf:ro
     env_file: .env.docker
     environment:
       DJBRAIN_DATA_DIR: /data
-      DJBRAIN_REDIS_URL: redis://redis:6379
+      DJBRAIN_DROPBOX_RCLONE_CONFIG: /run/secrets/rclone.conf
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  downloader:
+    build: .
+    command: ["node", "--experimental-strip-types", "apps/workers/src/downloader.ts"]
+    depends_on:
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    env_file: .env.docker
+    environment:
+      DJBRAIN_PROCESS_TIER: prod
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    profiles: ["downloader"]
+    restart: unless-stopped
+
+  sync-worker:
+    build: .
+    command: ["node", "--experimental-strip-types", "apps/workers/src/sync-worker.ts"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ${DJBRAIN_HOST_MUSIC_PATH:-/home/marc/Dropbox/music}:/music:ro
+      - ${DJBRAIN_HOST_RCLONE_CONFIG:-/home/marc/.config/rclone/rclone.conf}:/run/secrets/rclone.conf:ro
+    env_file: .env.docker
+    environment:
+      DJBRAIN_PROCESS_TIER: prod
+      DJBRAIN_DROPBOX_RCLONE_CONFIG: /run/secrets/rclone.conf
+    profiles: ["sync"]
+    restart: unless-stopped
+
+  admin-worker:
+    build: .
+    command: ["node", "--experimental-strip-types", "apps/workers/src/admin-worker.ts"]
+    depends_on:
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    volumes:
+      - djbrain-data:/data
+      - ${DJBRAIN_HOST_MUSIC_PATH:-/home/marc/Dropbox/music}:/music:ro
+      - ${DJBRAIN_HOST_RCLONE_CONFIG:-/home/marc/.config/rclone/rclone.conf}:/run/secrets/rclone.conf:ro
+    env_file: .env.docker
+    environment:
+      DJBRAIN_PROCESS_TIER: prod
+      DJBRAIN_DATA_DIR: /data
+      DJBRAIN_DROPBOX_RCLONE_CONFIG: /run/secrets/rclone.conf
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    profiles: ["admin"]
     restart: unless-stopped
 
   redis:
@@ -28,9 +83,9 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
-    env_file: .env.docker
     environment:
       POSTGRES_USER: djbrain
+      POSTGRES_PASSWORD: djbrain
       POSTGRES_DB: djbrain
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U djbrain -d djbrain"]

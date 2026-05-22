@@ -6,12 +6,17 @@ FROM node:24-slim AS builder
 WORKDIR /app
 
 # Install dependencies first (cache layer)
-COPY package.json package-lock.json ./
-RUN npm ci
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/server/package.json apps/server/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY apps/workers/package.json apps/workers/package.json
+COPY packages/backend/package.json packages/backend/package.json
+COPY packages/shared/package.json packages/shared/package.json
+RUN corepack enable && pnpm install --frozen-lockfile
 
 # Copy source and build
 COPY . .
-RUN npm run build
+RUN pnpm run build
 
 # --- Stage 2: Production image ---
 FROM node:24-slim
@@ -24,23 +29,26 @@ RUN apt-get update && \
 WORKDIR /app
 
 # Install production dependencies only
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/server/package.json apps/server/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY apps/workers/package.json apps/workers/package.json
+COPY packages/backend/package.json packages/backend/package.json
+COPY packages/shared/package.json packages/shared/package.json
+RUN corepack enable && pnpm install --frozen-lockfile --prod
 
-# Copy server source (runs with --experimental-strip-types, no transpile needed)
-COPY src/ src/
+# Copy runtime source (runs with --experimental-strip-types, no transpile needed)
+COPY apps/server/src/ apps/server/src/
+COPY apps/workers/src/ apps/workers/src/
+COPY packages/backend/src/ packages/backend/src/
+COPY packages/shared/src/ packages/shared/src/
 
 # Copy built frontend from builder stage
 COPY --from=builder /app/dist/ dist/
 
-# Data directory: SQLite DB, cache, logs
-# Mount a volume here for persistence
+# Data directory for local runtime state when a service opts into one.
 ENV DJBRAIN_DATA_DIR=/data
-
-# Music library: mount your music folder here
-# Configure via DJBRAIN_* env vars → musicFolderPath = /music
-VOLUME ["/data", "/music"]
 
 EXPOSE 5180
 
-CMD ["node", "--experimental-strip-types", "src/server/index.ts", "--port", "5180", "--static", "dist"]
+CMD ["node", "--experimental-strip-types", "apps/server/src/index.ts", "--port", "5180", "--static", "dist"]
